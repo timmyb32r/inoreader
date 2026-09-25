@@ -37,6 +37,8 @@ def main() -> int:
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
     if 'command: ["/usr/local/bin/inoreader"' in compose:
         failures.append("Compose command must not repeat the Dockerfile ENTRYPOINT")
+    if "target: ydb-key.json" not in compose:
+        failures.append("Compose must mount the YDB secret at the configured credential path")
     if "docker.sock" in compose:
         failures.append("production Compose must not mount docker.sock")
     if 'ports: ["9222"]' in compose or '9222:9222' in compose:
@@ -86,7 +88,7 @@ def main() -> int:
         if expected not in acceptance:
             failures.append(f"A24 Docker acceptance lacks {expected!r}")
     for table in ("articles", "rules", "content_manifests", "staged_content_chunks", "library_origins", "ingest_jobs"):
-        if f"CREATE TABLE {table}" not in fixture:
+        if not re.search(rf"CREATE TABLE(?: IF NOT EXISTS)? {table}\b", fixture):
             failures.append(f"A24 fixture lacks {table!r}")
     if "@sha256:" not in local_compose or ":latest" in local_compose:
         failures.append("local YDB Compose image must be digest-pinned")

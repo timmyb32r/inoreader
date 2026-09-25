@@ -1,4 +1,23 @@
 services:
+  proxy:
+    image: caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    network_mode: host
+    environment:
+      EXTERNAL_HOST: ${EXTERNAL_HOST:?set EXTERNAL_HOST to the public DNS name}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    cap_add: ["NET_BIND_SERVICE"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
   app:
     build: .
     command: ["--config", "/etc/inoreader/config.yaml", "serve"]
@@ -7,7 +26,8 @@ services:
     volumes:
       - ./config.yaml:/etc/inoreader/config.yaml:ro
     secrets:
-      - ydb-key
+      - source: ydb-key
+        target: ydb-key.json
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -64,6 +84,10 @@ services:
 secrets:
   ydb-key:
     file: ./secrets/ydb-key.json
+
+volumes:
+  caddy-data:
+  caddy-config:
 
 networks:
   public-egress:

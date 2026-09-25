@@ -29,7 +29,12 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{sync::Semaphore, task::JoinHandle};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+    sync::Semaphore,
+    task::JoinHandle,
+};
 use url::Url;
 
 #[derive(Debug)]
@@ -97,6 +102,14 @@ pub struct BrowserVisualSnapshot {
     pub groups: Vec<VisualCandidateGroup>,
 }
 impl CdpBrowserCollector {
+    async fn websocket_endpoint(&self) -> Result<String, FetchError> {
+        tokio::time::timeout(
+            self.navigation_timeout,
+            discover_websocket_endpoint(&self.endpoint),
+        )
+        .await
+        .map_err(|_| FetchError::Rejected("browser_degraded".into()))?
+    }
     pub fn configured(
         endpoint: String,
         http: Arc<dyn BrowserHttpClient>,
@@ -128,11 +141,9 @@ impl CdpBrowserCollector {
         Ok(value)
     }
     pub async fn health_check(&self) -> Result<(), FetchError> {
-        let connection = tokio::time::timeout(
-            self.navigation_timeout,
-            Browser::connect(self.endpoint.clone()),
-        )
-        .await;
+        let endpoint = self.websocket_endpoint().await?;
+        let connection =
+            tokio::time::timeout(self.navigation_timeout, Browser::connect(endpoint)).await;
         let (browser, mut handler) = match connection {
             Ok(Ok(value)) => value,
             failure => {
@@ -160,12 +171,8 @@ impl CdpBrowserCollector {
         }
     }
     async fn connect(&self) -> Result<(Browser, chromiumoxide::Handler), FetchError> {
-        match tokio::time::timeout(
-            self.navigation_timeout,
-            Browser::connect(self.endpoint.clone()),
-        )
-        .await
-        {
+        let endpoint = self.websocket_endpoint().await?;
+        match tokio::time::timeout(self.navigation_timeout, Browser::connect(endpoint)).await {
             Ok(Ok(value)) => {
                 self.available.store(true, Ordering::Relaxed);
                 Ok(value)
@@ -358,6 +365,102 @@ impl CdpBrowserCollector {
             .map_err(|_| FetchError::Rejected("browser_interception_enable_failed".into()))?;
         Ok(())
     }
+}
+
+pub(crate) async fn discover_websocket_endpoint(endpoint: &str) -> Result<String, FetchError> {
+    let configured = Url::parse(endpoint)
+        .map_err(|_| FetchError::Rejected("invalid_browser_endpoint".into()))?;
+    if matches!(configured.scheme(), "ws" | "wss") {
+        return Ok(configured.into());
+    }
+    if configured.scheme() != "http" || configured.path() != "/" {
+        return Err(FetchError::Rejected("invalid_browser_endpoint".into()));
+    }
+    let host = configured
+        .host_str()
+        .ok_or_else(|| FetchError::Rejected("invalid_browser_endpoint".into()))?;
+    let port = configured
+        .port_or_known_default()
+        .ok_or_else(|| FetchError::Rejected("invalid_browser_endpoint".into()))?;
+    let mut stream = TcpStream::connect((host, port))
+        .await
+        .map_err(|_| FetchError::Rejected("browser_degraded".into()))?;
+    let browser_ip = stream
+        .peer_addr()
+        .map_err(|_| FetchError::Rejected("browser_degraded".into()))?
+        .ip()
+        .to_string();
+    stream
+        .write_all(
+            format!(
+                "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .map_err(|_| FetchError::Rejected("browser_degraded".into()))?;
+    let mut response = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let (split, body_length) = loop {
+        let read = stream
+            .read(&mut buffer)
+            .await
+            .map_err(|_| FetchError::Rejected("browser_degraded".into()))?;
+        if read == 0 {
+            return Err(FetchError::Rejected("invalid_browser_discovery".into()));
+        }
+        response.extend_from_slice(&buffer[..read]);
+        if response.len() > 64 * 1024 {
+            return Err(FetchError::Rejected("invalid_browser_discovery".into()));
+        }
+        let Some(split) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = std::str::from_utf8(&response[..split])
+            .map_err(|_| FetchError::Rejected("invalid_browser_discovery".into()))?;
+        let body_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())?
+            })
+            .ok_or_else(|| FetchError::Rejected("invalid_browser_discovery".into()))?;
+        if response.len() >= split + 4 + body_length {
+            break (split, body_length);
+        }
+    };
+    let headers = std::str::from_utf8(&response[..split])
+        .map_err(|_| FetchError::Rejected("invalid_browser_discovery".into()))?;
+    if !headers
+        .lines()
+        .next()
+        .is_some_and(|line| line.contains(" 200 "))
+    {
+        return Err(FetchError::Rejected("browser_degraded".into()));
+    }
+    let body = &response[split + 4..split + 4 + body_length];
+    let advertised = serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("webSocketDebuggerUrl")?
+                .as_str()
+                .map(str::to_owned)
+        })
+        .ok_or_else(|| FetchError::Rejected("invalid_browser_discovery".into()))?;
+    let mut websocket = Url::parse(&advertised)
+        .map_err(|_| FetchError::Rejected("invalid_browser_discovery".into()))?;
+    if websocket.scheme() != "ws" || !websocket.path().starts_with("/devtools/browser/") {
+        return Err(FetchError::Rejected("invalid_browser_discovery".into()));
+    }
+    websocket
+        .set_host(Some(&browser_ip))
+        .map_err(|_| FetchError::Rejected("invalid_browser_discovery".into()))?;
+    websocket
+        .set_port(Some(port))
+        .map_err(|_| FetchError::Rejected("invalid_browser_discovery".into()))?;
+    Ok(websocket.into())
 }
 
 #[async_trait]

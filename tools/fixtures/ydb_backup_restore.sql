@@ -1,11 +1,11 @@
-CREATE TABLE workspaces (id Utf8 NOT NULL, revision Uint64 NOT NULL, document String NOT NULL, PRIMARY KEY (id));
-CREATE TABLE subscriptions (id Utf8 NOT NULL, revision Uint64 NOT NULL, document String NOT NULL, PRIMARY KEY (id));
-CREATE TABLE articles (id Utf8 NOT NULL, revision Uint64 NOT NULL, document String NOT NULL, PRIMARY KEY (id));
-CREATE TABLE rules (id Utf8 NOT NULL, revision Uint64 NOT NULL, document String NOT NULL, PRIMARY KEY (id));
-CREATE TABLE content_manifests (id Utf8 NOT NULL, revision Uint64 NOT NULL, document String NOT NULL, PRIMARY KEY (id));
-CREATE TABLE staged_content_chunks (record_id Utf8 NOT NULL, refresh_id Utf8 NOT NULL, representation Utf8 NOT NULL, ordinal Uint32 NOT NULL, bytes String NOT NULL, PRIMARY KEY (record_id, refresh_id, representation, ordinal));
-CREATE TABLE library_origins (workspace_id Utf8 NOT NULL, article_id Utf8 NOT NULL, subscription_id Utf8 NOT NULL, source_record_id Utf8 NOT NULL, PRIMARY KEY (workspace_id, article_id, subscription_id, source_record_id));
-CREATE TABLE ingest_jobs (id Utf8 NOT NULL, status Utf8 NOT NULL, run_at_ms Int64 NOT NULL, first_attempt_ms Int64 NOT NULL, origin_key Utf8 NOT NULL, attempt Uint32 NOT NULL, lease_token Utf8, lease_deadline_ms Int64, item String NOT NULL, revision Uint64 NOT NULL, diagnostic Utf8, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS workspaces (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS subscriptions (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS articles (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS rules (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS content_manifests (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id));
+CREATE TABLE IF NOT EXISTS staged_content_chunks (record_id Utf8 NOT NULL, refresh_id Utf8 NOT NULL, representation Utf8 NOT NULL, ordinal Uint32 NOT NULL, bytes Utf8 NOT NULL, PRIMARY KEY (record_id, refresh_id, representation, ordinal));
+CREATE TABLE IF NOT EXISTS library_origins (workspace_id Utf8 NOT NULL, article_id Utf8 NOT NULL, subscription_id Utf8 NOT NULL, source_record_id Utf8 NOT NULL, PRIMARY KEY (workspace_id, article_id, subscription_id, source_record_id));
+CREATE TABLE IF NOT EXISTS ingest_jobs (id Utf8 NOT NULL, status Utf8 NOT NULL, run_at_ms Int64 NOT NULL, first_attempt_ms Int64 NOT NULL, origin_key Utf8 NOT NULL, attempt Uint32 NOT NULL, lease_token Utf8, lease_deadline_ms Int64, item Utf8 NOT NULL, revision Uint64 NOT NULL, diagnostic Utf8, PRIMARY KEY (id));
 
 UPSERT INTO workspaces (id, revision, document) VALUES ('workspace-a', 7u, '{"name":"Archive","state":"active"}');
 UPSERT INTO subscriptions (id, revision, document) VALUES ('subscription-a', 4u, '{"workspace":"workspace-a","state":"paused","reason":"maintenance"}');

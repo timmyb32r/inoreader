@@ -36,7 +36,10 @@ new password hash.
 records for external requests. `external_request_metrics` is mandatory in v1
 and must remain `true`; completion logging remains enabled independently.
 
-TLS terminates at the operator's reverse proxy. The proxy must preserve the
+TLS terminates at the Caddy reverse proxy in `compose.yaml`. Set
+`EXTERNAL_HOST` in `.env` to the same DNS name as `server.external_origin`.
+Caddy obtains and renews its certificate; ports 80 and 443 must be reachable
+from the Internet. The proxy must preserve the
 configured external origin and must not expose Chromium or YDB ports.
 
 `compose.local.yaml` starts only the real local YDB implementation for an

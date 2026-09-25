@@ -394,16 +394,24 @@ fn schema_contains_durable_uniqueness_rate_limit_and_rule_provenance_tables() {
         "library_origins",
     ] {
         assert!(
-            schema.contains(&format!("CREATE TABLE {table} ")),
+            schema.contains(&format!("CREATE TABLE IF NOT EXISTS {table} ")),
             "missing {table}"
         );
     }
+    assert!(SCHEMA_DDL
+        .iter()
+        .all(|statement| statement.starts_with("CREATE TABLE IF NOT EXISTS ")));
     assert!(schema.contains("PRIMARY KEY (workspace_id, article_id, rule_id, rule_version)"));
     assert!(schema.contains("first_attempt_ms Int64 NOT NULL"));
     assert!(schema.contains("origin_key Utf8 NOT NULL"));
     assert!(
         schema.contains("INDEX leased_by_origin GLOBAL ON (status, origin_key, lease_deadline_ms)")
     );
+    assert!(schema.contains("document Utf8 NOT NULL"));
+    assert!(!schema.contains("document String"));
+    assert!(!schema.contains("item String"));
+    assert!(!schema.contains("dedup_key String"));
+    assert!(!schema.contains("bytes String"));
 }
 
 #[test]
