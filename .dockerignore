@@ -1,0 +1,14 @@
+.git
+.github
+.inoreader-state
+.env
+config.yaml
+secrets
+target
+web/dist
+web/node_modules
+playwright-report
+test-results
+**/__pycache__
+**/*.pyc
+.DS_Store

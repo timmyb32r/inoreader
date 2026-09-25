@@ -25,6 +25,24 @@ docker compose run --rm app --config /etc/inoreader/config.yaml prepare-schema
 docker compose up -d
 ```
 
+## Incremental container builds
+
+The production Dockerfile keeps Cargo registry, git, target, rustup, and npm
+caches in named BuildKit cache mounts. A source edit invalidates the relevant
+image layer but reuses compiled dependencies and unchanged workspace crates.
+Run the normal command; no host Rust toolchain or bind-mounted build directory
+is required:
+
+```sh
+docker compose build app
+docker compose up -d --force-recreate app
+```
+
+Do not use `docker builder prune` during routine deployment because it deletes
+these caches and makes the next build cold. `.dockerignore` keeps local build
+artifacts, repository history, runtime configuration, and credentials out of
+the build context.
+
 The YDB `request_timeout_seconds`, `max_concurrency`, and `retry_attempts`
 settings configure the official SDK's retry deadline, query-session pool, and
 retry budget. All three must be positive before a connection is attempted.

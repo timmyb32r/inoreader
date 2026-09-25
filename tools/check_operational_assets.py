@@ -63,7 +63,7 @@ def main() -> int:
                 failures.append(f"Chromium service lacks {hardening}")
 
     final_stage = dockerfile.rsplit("FROM ", 1)[-1]
-    if "COPY --from=rust /src/target/release/inoreader /usr/local/bin/inoreader" not in final_stage:
+    if "COPY --from=rust /tmp/inoreader /usr/local/bin/inoreader" not in final_stage:
         failures.append("final image does not copy the one inoreader app binary")
     if any(value in final_stage for value in ("node_modules", "/src/web", "rustc", "cargo ")):
         failures.append("final image unexpectedly contains build-time UI/Rust inputs")
