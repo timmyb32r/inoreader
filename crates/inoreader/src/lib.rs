@@ -61,7 +61,7 @@ pub struct Http {
     pub redirect_hops: u32,
     pub max_body_bytes: usize,
     pub max_decompressed_bytes: usize,
-    pub allow_plain_http: bool,
+    pub allowed_plain_http_hosts: Vec<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -376,6 +376,17 @@ impl Config {
         }
         if self.http.max_decompressed_bytes < self.http.max_body_bytes {
             return Err(ConfigError::Invalid("http.max_decompressed_bytes"));
+        }
+        let mut plain_http_hosts = std::collections::HashSet::new();
+        for host in &self.http.allowed_plain_http_hosts {
+            let parsed = url::Url::parse(&format!("http://{host}/"))
+                .map_err(|_| ConfigError::Invalid("http.allowed_plain_http_hosts"))?;
+            if parsed.host_str() != Some(host.as_str())
+                || parsed.port().is_some()
+                || !plain_http_hosts.insert(host)
+            {
+                return Err(ConfigError::Invalid("http.allowed_plain_http_hosts"));
+            }
         }
         let cdp = url::Url::parse(&self.browser.cdp_endpoint)
             .map_err(|_| ConfigError::Invalid("browser.cdp_endpoint"))?;

@@ -17,6 +17,28 @@ fn policy() -> OutboundPolicy {
 }
 
 #[test]
+fn plain_http_allowlist_is_exact_per_host() {
+    let policy = OutboundPolicy::for_plain_http_hosts(
+        ["feeds.example.test".to_owned()],
+        OutboundLimits {
+            connect_timeout: Duration::from_secs(1),
+            request_deadline: Duration::from_secs(2),
+            max_redirect_hops: 2,
+            max_response_body_bytes: 4,
+        },
+    );
+    assert!(policy
+        .validate_url(&Url::parse("http://feeds.example.test/a.xml").unwrap())
+        .is_ok());
+    assert!(policy
+        .validate_url(&Url::parse("http://example.test/a.xml").unwrap())
+        .is_err());
+    assert!(policy
+        .validate_url(&Url::parse("https://example.test/a.xml").unwrap())
+        .is_ok());
+}
+
+#[test]
 fn rejects_private_metadata_and_encoded_addresses() {
     for ip in [
         IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),

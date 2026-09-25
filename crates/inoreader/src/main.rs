@@ -308,7 +308,10 @@ async fn serve(
             .max_body_bytes
             .min(config.http.max_decompressed_bytes),
     })?;
-    let outbound_policy = OutboundPolicy::new(config.http.allow_plain_http, limits);
+    let outbound_policy = OutboundPolicy::for_plain_http_hosts(
+        config.http.allowed_plain_http_hosts.iter().cloned(),
+        limits,
+    );
     let observer = RequestObserver {
         format: config.observability.log_format,
     };

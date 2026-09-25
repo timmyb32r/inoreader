@@ -28,7 +28,7 @@ http:
   redirect_hops: 5
   max_body_bytes: 16777216
   max_decompressed_bytes: 67108864
-  allow_plain_http: false
+  allowed_plain_http_hosts: []
 scheduler:
   polling_interval_seconds: 1800
   lease_seconds: 120

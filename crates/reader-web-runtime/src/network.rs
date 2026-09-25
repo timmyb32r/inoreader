@@ -13,6 +13,7 @@ use crate::OutboundLimits;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutboundPolicy {
     allow_plain_http: bool,
+    allowed_plain_http_hosts: HashSet<String>,
     limits: OutboundLimits,
 }
 
@@ -20,6 +21,18 @@ impl OutboundPolicy {
     pub fn new(allow_plain_http: bool, limits: OutboundLimits) -> Self {
         Self {
             allow_plain_http,
+            allowed_plain_http_hosts: HashSet::new(),
+            limits,
+        }
+    }
+
+    pub fn for_plain_http_hosts(
+        hosts: impl IntoIterator<Item = String>,
+        limits: OutboundLimits,
+    ) -> Self {
+        Self {
+            allow_plain_http: false,
+            allowed_plain_http_hosts: hosts.into_iter().collect(),
             limits,
         }
     }
@@ -31,7 +44,11 @@ impl OutboundPolicy {
     pub fn validate_url(&self, url: &Url) -> Result<(), OutboundError> {
         match url.scheme() {
             "https" => {}
-            "http" if self.allow_plain_http => {}
+            "http"
+                if self.allow_plain_http
+                    || url
+                        .host_str()
+                        .is_some_and(|host| self.allowed_plain_http_hosts.contains(host)) => {}
             "http" => return Err(OutboundError::PlainHttpRequiresExplicitPolicy),
             scheme => return Err(OutboundError::UnsupportedScheme(scheme.to_owned())),
         }
