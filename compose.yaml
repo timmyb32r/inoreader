@@ -1,7 +1,7 @@
 services:
   app:
     build: .
-    command: ["/usr/local/bin/inoreader", "--config", "/etc/inoreader/config.yaml", "serve"]
+    command: ["--config", "/etc/inoreader/config.yaml", "serve"]
     environment:
       YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS: /run/secrets/ydb-key.json
     volumes:

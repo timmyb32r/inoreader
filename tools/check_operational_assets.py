@@ -35,6 +35,8 @@ def main() -> int:
         if expected not in dockerfile:
             failures.append(f"Dockerfile does not contain {expected!r}")
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
+    if 'command: ["/usr/local/bin/inoreader"' in compose:
+        failures.append("Compose command must not repeat the Dockerfile ENTRYPOINT")
     if "docker.sock" in compose:
         failures.append("production Compose must not mount docker.sock")
     if 'ports: ["9222"]' in compose or '9222:9222' in compose:
