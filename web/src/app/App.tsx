@@ -32,6 +32,8 @@ export function App({ client }: { client: ApiClient }) {
   const [notice, setNotice] = useState("");
   const [loadError, setLoadError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [account, setAccount] = useState({ displayName: "", initials: "" });
   const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
   const [refreshingSubscription, setRefreshingSubscription] = useState(false);
@@ -46,6 +48,7 @@ export function App({ client }: { client: ApiClient }) {
   const selectedRef = useRef<Article>();
   const mutationGeneration = useRef(new Map<string, number>());
   const mutationQueue = useRef(new Map<string, Promise<void>>());
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const workspace = workspaces.find((item) => item.id === workspaceId)?.name ?? "Workspace";
   const selectedSubscription = subscriptions.find((item) => item.id === selectedSubscriptionId) ?? null;
   useEffect(() => { articlesRef.current = articles; }, [articles]);
@@ -53,10 +56,18 @@ export function App({ client }: { client: ApiClient }) {
   useEffect(() => {
     let active = true;
     if (signedIn !== null) return () => { active = false; };
-    client.bootstrap().then((data) => { if (!active) return; articlesRef.current=data.articles; setSignedIn(true); setLoadError(""); setWorkspaces(data.workspaces); setWorkspaceId(data.activeWorkspaceId); setSubscriptions(data.subscriptions); setArticles(data.articles); setSelectedId(data.articles[0]?.id ?? ""); setNewCount(data.newArticleCount); setArchived(data.workspaces.find((item) => item.id === data.activeWorkspaceId)?.archived ?? false); }).catch((error: Error) => { if (!active) return; if (error instanceof ApiError && error.status === 401) setSignedIn(false); else setLoadError(error.message); });
+    client.bootstrap().then((data) => { if (!active) return; articlesRef.current=data.articles; setSignedIn(true); setLoadError(""); setAccount(data.account); setWorkspaces(data.workspaces); setWorkspaceId(data.activeWorkspaceId); setSubscriptions(data.subscriptions); setArticles(data.articles); setSelectedId(data.articles[0]?.id ?? ""); setNewCount(data.newArticleCount); setArchived(data.workspaces.find((item) => item.id === data.activeWorkspaceId)?.archived ?? false); }).catch((error: Error) => { if (!active) return; if (error instanceof ApiError && error.status === 401) setSignedIn(false); else setLoadError(error.message); });
     return () => { active = false; if (noticeTimer.current) window.clearTimeout(noticeTimer.current); };
   }, [client, signedIn]);
   useEffect(() => { const unauthorized = () => setSignedIn(false); window.addEventListener("reader:unauthorized", unauthorized); return () => window.removeEventListener("reader:unauthorized", unauthorized); }, []);
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOutside = (event: PointerEvent) => { if (!accountMenuRef.current?.contains(event.target as Node)) setAccountMenuOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setAccountMenuOpen(false); };
+    window.addEventListener("pointerdown", closeOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => { window.removeEventListener("pointerdown", closeOutside); window.removeEventListener("keydown", closeOnEscape); };
+  }, [accountMenuOpen]);
 
   const filtered = useMemo(() => articles.filter((a) => {
     if (selectedSubscriptionId && !a.subscriptionIds?.includes(selectedSubscriptionId)) return false;
@@ -136,7 +147,10 @@ export function App({ client }: { client: ApiClient }) {
       <div class="topbar__spacer" />
       <button class="search-stub" disabled aria-describedby="search-description"><Icon name="search"/><span>Search</span><kbd>Coming later</kbd></button><span id="search-description" class="sr-only">Search is not available in this version.</span>
       <button class="icon-button" aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><Icon name={theme === "light" ? "moon" : "sun"}/></button>
-      <button class="avatar" aria-label="Sign out" aria-busy={signingOut} disabled={signingOut} onClick={() => { if (signingOut) return; setSigningOut(true); client.signOut().then(() => setSignedIn(false)).catch((error: Error) => announce(error.message)).finally(() => setSigningOut(false)); }}>{signingOut ? <span class="spinner"/> : "TB"}</button>
+      <div class="account-menu" ref={accountMenuRef}>
+        <button class="avatar" aria-label="Account menu" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen((open) => !open)}>{account.initials}</button>
+        {accountMenuOpen && <div class="account-popover" role="menu"><div class="account-popover__identity"><strong>{account.displayName}</strong><span>Administrator</span></div><button role="menuitem" aria-busy={signingOut} disabled={signingOut} onClick={() => { if (signingOut) return; setSigningOut(true); client.signOut().then(() => setSignedIn(false)).catch((error: Error) => announce(error.message)).finally(() => setSigningOut(false)); }}>{signingOut ? <><span class="spinner"/> Signing out…</> : "Sign out"}</button></div>}
+      </div>
     </header>
     <main class="reader-grid">
       <aside class={`sidebar panel-mobile-${mobilePanel === "nav" ? "show" : "hide"}`} aria-label="Reader navigation">

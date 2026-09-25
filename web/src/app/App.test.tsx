@@ -19,6 +19,23 @@ describe("reader application", () => {
     expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
   });
 
+  it("opens an account menu before an explicit sign out", async () => {
+    const user = userEvent.setup();
+    const client = mockClient();
+    const signOut = vi.fn(async () => undefined);
+    client.signOut = signOut;
+    render(<App client={client}/>);
+
+    const accountMenu = await screen.findByRole("button", { name: "Account menu" });
+    await user.click(accountMenu);
+    expect(signOut).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu")).toBeVisible();
+    expect(screen.getByText("Test")).toBeVisible();
+
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
   it("opens an article and marks it read without changing saved state", async () => {
     const user = userEvent.setup(); renderApp();
     const row = (await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 })).closest("article")!;
