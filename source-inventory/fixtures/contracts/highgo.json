@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_id": "highgo",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "highgo",
+    "name": "HighGo — 瀚高新闻资讯",
+    "url": "https://www.highgo.com/about/news",
+    "adapter": "highgo",
+    "max_pages": 5
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 20,
+      "first_title": null,
+      "first_url": null,
+      "warning": "",
+      "evidence_file": "highgo-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

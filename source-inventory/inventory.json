@@ -1,0 +1,1216 @@
+{
+  "schema_version": 1,
+  "expected_source_count": 42,
+  "origin": {
+    "kind": "personal_feed_config",
+    "path_hint": "personal_feed/config.yaml",
+    "note": "All source mappings are preserved verbatim after YAML decoding; ordering matches the source file."
+  },
+  "sources": [
+    {
+      "id": "airbyte",
+      "configuration": {
+        "id": "airbyte",
+        "name": "Airbyte",
+        "url": "https://airbyte.com/blog",
+        "link_selector": ".blog_list-wrapper .library-blog_card-link[href]",
+        "card_selector": ".library-blog_item",
+        "url_pattern": "^https://airbyte\\.com/blog/[^/?]+/?$",
+        "next_selector": "a.w-pagination-next",
+        "max_pages": 2,
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 24,
+          "first_title": "Linear, Gong, and YouTube Data are officially certified on Airbyte",
+          "first_url": "https://airbyte.com/blog/linear-gong-youtube-data-certified-connectors",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "astronomer",
+      "configuration": {
+        "id": "astronomer",
+        "name": "Astronomer",
+        "url": "https://www.astronomer.io/blog/",
+        "link_selector": "article.post-card h2 a[href]",
+        "card_selector": "article.post-card",
+        "url_pattern": "^https://www\\.astronomer\\.io/blog/[^/?]+/?$",
+        "max_pages": 1,
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 348,
+          "first_title": "What's New in Otto: Your Airflow Expert Now Available with Any Agent",
+          "first_url": "https://www.astronomer.io/blog/whats-new-in-otto-your-airflow-expert-now-available-with-any-agent",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "openlineage",
+      "configuration": {
+        "id": "openlineage",
+        "name": "OpenLineage",
+        "url": "https://openlineage.io/blog/",
+        "feed_url": "https://openlineage.io/blog/feed.json",
+        "link_selector": "article header h2 a[href]",
+        "card_selector": "article",
+        "next_selector": "a.pagination-nav__link--next",
+        "max_pages": 2,
+        "browser_fallback": true
+      },
+      "adapter_kind": "standard_feed",
+      "historical_observations": [
+        {
+          "count": 20,
+          "first_title": "Toward More Precise Lineage: Introducing Explicit Lineage Facets",
+          "first_url": "https://openlineage.io/blog/explicit-lineage",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "meltano",
+      "configuration": {
+        "id": "meltano",
+        "name": "Meltano",
+        "url": "https://meltano.com/blog",
+        "link_selector": "article.blog-list-item .blog-list-item-text > a[href]",
+        "card_selector": "article.blog-list-item",
+        "date_selector": ".blog-list-item-date, .blog-author-date .bold",
+        "url_pattern": "^https://meltano\\.com/blog/[^/?]+/?$",
+        "browser": true,
+        "browser_fallback": true,
+        "wait_selector": "article.blog-list-item",
+        "load_more_selector": "#load-more-button",
+        "load_more_clicks": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 20,
+          "first_title": "Stop Waiting on MSSQL Loads: target-mssql Now Speaks Arrow",
+          "first_url": "https://meltano.com/blog/stop-waiting-on-mssql-loads-target-mssql-now-speaks-arrow",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "onehouse",
+      "configuration": {
+        "id": "onehouse",
+        "name": "Onehouse",
+        "url": "https://www.onehouse.ai/blog",
+        "link_selector": "header a[aria-label=\"title link\"][href^=\"/blog/\"], article[data-blog-card] a.group[href^=\"/blog/\"]",
+        "card_selector": "article[data-blog-card], header",
+        "url_pattern": "^https://www\\.onehouse\\.ai/blog/[^/?]+/?$",
+        "max_pages": 1,
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 148,
+          "first_title": "Announcing AI training data pipelines on Onehouse: feeding open data to open models",
+          "first_url": "https://www.onehouse.ai/blog/announcing-ai-training-data-pipelines-on-onehouse",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "slingdata",
+      "configuration": {
+        "id": "slingdata",
+        "name": "SlingData Articles",
+        "url": "https://slingdata.io/articles/",
+        "feed_url": "https://slingdata.io/rss.xml",
+        "link_selector": "main article a.group[href^=\"/articles/\"]",
+        "card_selector": "article",
+        "url_pattern": "^https://slingdata\\.io/articles/[^/?]+/?$",
+        "max_pages": 1,
+        "browser_fallback": true
+      },
+      "adapter_kind": "standard_feed",
+      "historical_observations": [
+        {
+          "count": 74,
+          "first_title": "CDC with Sling: When Log-Based Works and When Query-Based Is Enough",
+          "first_url": "https://slingdata.io/articles/sling-cdc-when-to-use",
+          "warning": "",
+          "evidence_file": "additional-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "cdata",
+      "configuration": {
+        "id": "cdata",
+        "name": "CData",
+        "url": "https://www.cdata.com/blog/",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 17,
+          "first_title": "Read more",
+          "first_url": "https://www.cdata.com/blog/connect-ai-for-chatgpt",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 17,
+          "first_title": "Read more",
+          "first_url": "https://www.cdata.com/blog/connect-ai-for-chatgpt",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        },
+        {
+          "count": 17,
+          "first_title": "Read more",
+          "first_url": "https://www.cdata.com/blog/connect-ai-for-chatgpt",
+          "warning": "",
+          "evidence_file": "discovery-retries.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "alibaba",
+      "configuration": {
+        "id": "alibaba",
+        "name": "Alibaba Cloud",
+        "url": "https://www.alibabacloud.com/blog",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+_[0-9]+$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 32,
+          "first_title": "DeepSeek-V4.1-Flash Is Now on Alibaba Cloud Token Plan: How to Get Started from $6 a Month",
+          "first_url": "https://www.alibabacloud.com/blog/deepseek-v4-1-flash-is-now-on-alibaba-cloud-token-plan-how-to-get-started-from-%246-a-month_603550",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 32,
+          "first_title": "DeepSeek-V4.1-Flash Is Now on Alibaba Cloud Token Plan: How to Get Started from $6 a Month",
+          "first_url": "https://www.alibabacloud.com/blog/deepseek-v4-1-flash-is-now-on-alibaba-cloud-token-plan-how-to-get-started-from-%246-a-month_603550",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "ibm",
+      "configuration": {
+        "id": "ibm",
+        "name": "IBM Think Insights",
+        "url": "https://www.ibm.com/think/insights",
+        "link_selector": "[href*=\"/think/insights/\"]",
+        "url_pattern": "/think/insights/[^/?]+$",
+        "browser_fallback": true,
+        "listing_url": "https://www.ibm.com/content/adobe-cms/us/en/think/insights/jcr:content/root/table_of_contents/horizontal_media_gro.horizontal-media-group-results.html?pageNum=1&itemsPerPage=24"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 24,
+          "first_title": "5 practical ways to scale AI that actually deliver business value",
+          "first_url": "https://www.ibm.com/think/insights/ways-to-scale-ai-that-deliver-business-value",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 24,
+          "first_title": "5 practical ways to scale AI that actually deliver business value",
+          "first_url": "https://www.ibm.com/think/insights/ways-to-scale-ai-that-deliver-business-value",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "informatica",
+      "configuration": {
+        "id": "informatica",
+        "name": "Informatica",
+        "url": "https://www.informatica.com/blogs.html",
+        "link_selector": "a.blog-infa-tile",
+        "url_pattern": "/blogs/[^/]+\\.html$",
+        "browser_fallback": true,
+        "browser": true,
+        "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27",
+        "wait_selector": "a.CoveoResultLink",
+        "load_more_selector": ".coveo-pager-next span[role=button]",
+        "load_more_clicks": 2
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 27,
+          "first_title": "Power every agent with AI-ready data",
+          "first_url": "https://www.informatica.com/blogs/power-every-agent-with-ai-ready-data.html",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 27,
+          "first_title": "Power every agent with AI-ready data",
+          "first_url": "https://www.informatica.com/blogs/power-every-agent-with-ai-ready-data.html",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "tencent",
+      "configuration": {
+        "id": "tencent",
+        "name": "Tencent Cloud Developer",
+        "url": "https://cloud.tencent.com/developer",
+        "link_selector": "a.cdc-article-panel-response2__title",
+        "url_pattern": "/developer/article/[0-9]+$",
+        "browser_fallback": true,
+        "browser": true,
+        "scroll_steps": 3
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 11,
+          "first_title": "AI 落地的四层架构：真正卡住你的，从来不是模型",
+          "first_url": "https://cloud.tencent.com/developer/article/2745419",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 11,
+          "first_title": "AI 落地的四层架构：真正卡住你的，从来不是模型",
+          "first_url": "https://cloud.tencent.com/developer/article/2745419",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "cloudera",
+      "configuration": {
+        "id": "cloudera",
+        "name": "Cloudera",
+        "url": "https://www.cloudera.com/blog.html",
+        "link_selector": "article h2 a, article h3 a, .article-title a",
+        "url_pattern": "/blog/[^/]+/[^/]+\\.html$",
+        "browser_fallback": true,
+        "adapter": "cloudera",
+        "listing_url": "https://www.cloudera.com/blog/all-blogs.category-posts.json"
+      },
+      "adapter_kind": "cloudera",
+      "historical_observations": [
+        {
+          "count": 591,
+          "first_title": "Inside JADC2: How Data Connectivity Is Reshaping Defense Operations",
+          "first_url": "https://www.cloudera.com/blog/business/inside-jadc2-how-data-connectivity-is-reshaping-defense-operations.html",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 591,
+          "first_title": "Inside JADC2: How Data Connectivity Is Reshaping Defense Operations",
+          "first_url": "https://www.cloudera.com/blog/business/inside-jadc2-how-data-connectivity-is-reshaping-defense-operations.html",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "precisely",
+      "configuration": {
+        "id": "precisely",
+        "name": "Precisely",
+        "url": "https://www.precisely.com/blog/",
+        "link_selector": "a.loop-item--post",
+        "url_pattern": "/blog/[^/]+/[^/]+/?$",
+        "browser_fallback": true,
+        "browser": true,
+        "wait_selector": "a.loop-item--post",
+        "load_more_selector": "a.facetwp-page.next",
+        "load_more_clicks": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 15,
+          "first_title": "A New Chapter of Growth at Precisely",
+          "first_url": "https://www.precisely.com/blog/cat-careers/a-new-chapter-of-growth-at-precisely",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 27,
+          "first_title": "A New Chapter of Growth at Precisely",
+          "first_url": "https://www.precisely.com/blog/cat-careers/a-new-chapter-of-growth-at-precisely",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "weld",
+      "configuration": {
+        "id": "weld",
+        "name": "Weld",
+        "url": "https://weld.app/blog",
+        "link_selector": "h2 a[href], h3 a[href]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "browser": true,
+        "wait_selector": "main h2 a[href*=\"/blog/\"]",
+        "load_more_selector": "button.mx-auto",
+        "load_more_clicks": 5
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 25,
+          "first_title": "Top 15 Best ETL Tools in 2026",
+          "first_url": "https://weld.app/blog/best-etl-tools",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 25,
+          "first_title": "Top 15 Best ETL Tools in 2026",
+          "first_url": "https://weld.app/blog/best-etl-tools",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "integrate",
+      "configuration": {
+        "id": "integrate",
+        "name": "Integrate.io",
+        "url": "https://www.integrate.io/blog/",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "next_selector": "a.next, a[rel=next]"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 35,
+          "first_title": "Best Fractional Real Estate Investing Platforms in 2026",
+          "first_url": "https://www.integrate.io/blog/best-fractional-real-estate-investing-platforms",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 35,
+          "first_title": "Best Fractional Real Estate Investing Platforms in 2026",
+          "first_url": "https://www.integrate.io/blog/best-fractional-real-estate-investing-platforms",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "rivery",
+      "configuration": {
+        "id": "rivery",
+        "name": "Rivery",
+        "url": "https://rivery.io/blog/",
+        "link_selector": "a.tease__link, a.blog-tease__link",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "next_selector": "a.next, a[rel=next]",
+        "extra_listing_urls": [
+          "https://rivery.io/blog/page/2/"
+        ]
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 32,
+          "first_title": "Why Boomi’s Acquisition of Rivery Is a Game-Changer for Enterprise Integration and Innovation Itamar Ben Hemo <img alt='' src='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=200&#038;d=mm&#038;r=g' srcset='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=400&#038;d=mm&#038;r=g 2x' class='avatar avatar-200 photo' height='200' width='200' decoding='async'/>5 min read <img width=\"625\" height=\"312\" src=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png\" class=\"attachment-archive-thumbnail-stories size-archive-thumbnail-stories\" alt=\"\" decoding=\"async\" srcset=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png 625w, https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-400x200.png 400w\" sizes=\"(max-width: 625px) 100vw, 625px\" />",
+          "first_url": "https://rivery.io/blog/boomi-acquires-rivery",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 32,
+          "first_title": "Why Boomi’s Acquisition of Rivery Is a Game-Changer for Enterprise Integration and Innovation Itamar Ben Hemo <img alt='' src='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=200&#038;d=mm&#038;r=g' srcset='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=400&#038;d=mm&#038;r=g 2x' class='avatar avatar-200 photo' height='200' width='200' decoding='async'/>5 min read <img width=\"625\" height=\"312\" src=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png\" class=\"attachment-archive-thumbnail-stories size-archive-thumbnail-stories\" alt=\"\" decoding=\"async\" srcset=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png 625w, https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-400x200.png 400w\" sizes=\"(max-width: 625px) 100vw, 625px\" />",
+          "first_url": "https://rivery.io/blog/boomi-acquires-rivery",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "dbconvert",
+      "configuration": {
+        "id": "dbconvert",
+        "name": "DBConvert",
+        "url": "https://dbconvert.com/blog/",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 0,
+          "warning": "",
+          "error": "browser received access challenge for https://dbconvert.com/blog/",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 0,
+          "warning": "",
+          "error": "browser received access challenge for https://dbconvert.com/blog/",
+          "evidence_file": "discovery-check.jsonl"
+        },
+        {
+          "count": 0,
+          "warning": "",
+          "error": "page load error net::ERR_CONNECTION_CLOSED",
+          "evidence_file": "discovery-retries.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "databricks",
+      "configuration": {
+        "id": "databricks",
+        "name": "Databricks",
+        "url": "https://www.databricks.com/blog",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 0,
+          "warning": "",
+          "error": "browser received access challenge for https://www.databricks.com/blog",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 0,
+          "warning": "",
+          "error": "browser received access challenge for https://www.databricks.com/blog",
+          "evidence_file": "discovery-check.jsonl"
+        },
+        {
+          "count": 0,
+          "warning": "",
+          "error": "browser received access challenge for https://www.databricks.com/blog",
+          "evidence_file": "discovery-retries.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "claude",
+      "configuration": {
+        "id": "claude",
+        "name": "Claude",
+        "url": "https://claude.com/blog",
+        "link_selector": "a.clickable_link[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "card_selector": ".w-dyn-item",
+        "next_selector": "a.w-pagination-next"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 51,
+          "first_title": "Claude Cowork and chat are now one Claude",
+          "first_url": "https://claude.com/blog/cowork-is-now-claude",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 0,
+          "warning": "",
+          "error": "page load error net::ERR_NAME_NOT_RESOLVED",
+          "evidence_file": "discovery-check.jsonl"
+        },
+        {
+          "count": 51,
+          "first_title": "Claude Cowork and chat are now one Claude",
+          "first_url": "https://claude.com/blog/cowork-is-now-claude",
+          "warning": "",
+          "evidence_file": "discovery-retries.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "ververica",
+      "configuration": {
+        "id": "ververica",
+        "name": "Ververica",
+        "url": "https://www.ververica.com/blog",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "next_selector": "a[aria-label=\"Next page\"]"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 45,
+          "first_title": "Real-Time Isn't A Feature You Bolt On. It's The Whole Solution",
+          "first_url": "https://www.ververica.com/blog/real-time-isnt-a-feature-you-bolt-on-its-the-whole-solution",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 45,
+          "first_title": "Real-Time Isn't A Feature You Bolt On. It's The Whole Solution",
+          "first_url": "https://www.ververica.com/blog/real-time-isnt-a-feature-you-bolt-on-its-the-whole-solution",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "tapdata",
+      "configuration": {
+        "id": "tapdata",
+        "name": "TapData",
+        "url": "https://tapdata.io/blog/",
+        "link_selector": "a.blog_article_item-content",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 158,
+          "first_title": "Beyond Fivetran: Why Modern Data Teams Are Choosing TapData as the Leading Fivetran Alternative",
+          "first_url": "https://tapdata.io/blog/fivetran-alternative-tapdata",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 158,
+          "first_title": "Beyond Fivetran: Why Modern Data Teams Are Choosing TapData as the Leading Fivetran Alternative",
+          "first_url": "https://tapdata.io/blog/fivetran-alternative-tapdata",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "cockroachlabs",
+      "configuration": {
+        "id": "cockroachlabs",
+        "name": "Cockroach Labs",
+        "url": "https://www.cockroachlabs.com/blog/",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "next_selector": "a[aria-label=\"Next Page\"]"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 32,
+          "first_title": "Cockroach Continuum: the Agentic Database Cloud",
+          "first_url": "https://www.cockroachlabs.com/blog/continuum-announcement",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 32,
+          "first_title": "Cockroach Continuum: the Agentic Database Cloud",
+          "first_url": "https://www.cockroachlabs.com/blog/continuum-announcement",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "vk-data-ml",
+      "configuration": {
+        "id": "vk-data-ml",
+        "name": "VK Cloud — Data & ML",
+        "url": "https://cloud.vk.ru/blog/hubs/data-ml/",
+        "link_selector": "[class*=\"ArticleCard_\"] a[href]",
+        "url_pattern": "^https://cloud.vk.ru/blog/[^/?]+/$",
+        "browser_fallback": true,
+        "card_selector": "[class*=\"ArticleCard_card\"]"
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 172,
+          "first_title": "Что такое токенизация и почему языковые модели считают текст не так, как человек",
+          "first_url": "https://cloud.vk.ru/blog/chto-takoe-tokenizatsiya-i-pochemu-yazykovye-modeli-schitayut-tekst-ne-tak-kak-c",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 172,
+          "first_title": "Что такое токенизация и почему языковые модели считают текст не так, как человек",
+          "first_url": "https://cloud.vk.ru/blog/chto-takoe-tokenizatsiya-i-pochemu-yazykovye-modeli-schitayut-tekst-ne-tak-kak-c",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "uber",
+      "configuration": {
+        "id": "uber",
+        "name": "Uber Engineering",
+        "url": "https://www.uber.com/us/en/blog/engineering/",
+        "link_selector": "a.css-gCCMpk",
+        "url_pattern": "/us/en/blog/[^/?]+/$",
+        "browser_fallback": true,
+        "extra_listing_urls": [
+          "https://www.uber.com/us/en/blog/engineering/page/2/"
+        ]
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 24,
+          "first_title": "How Uber Protects Against Retry Storms",
+          "first_url": "https://www.uber.com/us/en/blog/protecting-against-retry-storms",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 24,
+          "first_title": "How Uber Protects Against Retry Storms",
+          "first_url": "https://www.uber.com/us/en/blog/protecting-against-retry-storms",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "ian-macomber",
+      "configuration": {
+        "id": "ian-macomber",
+        "name": "Ian Macomber",
+        "url": "https://www.iandmacomber.com/",
+        "link_selector": "a[href*=\"/blog/\"]:not([href$=\"/about\"])",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 2,
+          "first_title": "The Shape and Feel of the Post-AI Data Stack Aug 2026",
+          "first_url": "https://www.iandmacomber.com/blog/post-ai-data-stack",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 2,
+          "first_title": "The Shape and Feel of the Post-AI Data Stack Aug 2026",
+          "first_url": "https://www.iandmacomber.com/blog/post-ai-data-stack",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "risingwave",
+      "configuration": {
+        "id": "risingwave",
+        "name": "RisingWave",
+        "url": "https://risingwave.com/blog/",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "browser": true,
+        "wait_selector": "button[class*=\"w-1/2\"]",
+        "load_more_selector": "button[class*=\"w-1/2\"]",
+        "load_more_clicks": 2
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 40,
+          "first_title": "Read More ->",
+          "first_url": "https://risingwave.com/blog/risingwave-3-0-the-real-time-context-layer-for-interactive-ai",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 40,
+          "first_title": "Read More ->",
+          "first_url": "https://risingwave.com/blog/risingwave-3-0-the-real-time-context-layer-for-interactive-ai",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "streamkap",
+      "configuration": {
+        "id": "streamkap",
+        "name": "Streamkap",
+        "url": "https://streamkap.com/blog",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 62,
+          "first_title": "CDC Cost Optimization for Streaming Destinations: Transparent Credit Math and Trade-Offs",
+          "first_url": "https://streamkap.com/blog/cdc-cost-optimization-streaming-destinations",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 62,
+          "first_title": "CDC Cost Optimization for Streaming Destinations: Transparent Credit Math and Trade-Offs",
+          "first_url": "https://streamkap.com/blog/cdc-cost-optimization-streaming-destinations",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "yandex-research",
+      "configuration": {
+        "id": "yandex-research",
+        "name": "Yandex Research",
+        "url": "https://research.yandex.com/blog",
+        "link_selector": "a[href*=\"/blog/\"]",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "browser": true,
+        "wait_selector": "[class*=\"PostItem_\"]",
+        "load_more_selector": "article button",
+        "load_more_clicks": 4
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 45,
+          "first_title": "The KV cache as an agent runtime",
+          "first_url": "https://research.yandex.com/blog/the-kv-cache-as-an-agent-runtime",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 45,
+          "first_title": "The KV cache as an agent runtime",
+          "first_url": "https://research.yandex.com/blog/the-kv-cache-as-an-agent-runtime",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "mws",
+      "configuration": {
+        "id": "mws",
+        "name": "MWS",
+        "url": "https://mws.ru/blog/",
+        "link_selector": "a.news-card-item",
+        "url_pattern": "/blog/[^/?]+/?$",
+        "browser_fallback": true,
+        "extra_listing_urls": [
+          "https://mws.ru/blog/?page=2"
+        ]
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 30,
+          "first_title": "Container Registry — что это, зачем нужен и как использовать готовый реестр контейнеров",
+          "first_url": "https://mws.ru/blog/container-registry-chto-eto-zachem-nuzhen-i-kak-ispolzovat-gotovyj-reestr-kontejnerov",
+          "warning": "",
+          "evidence_file": "article-check.jsonl"
+        },
+        {
+          "count": 30,
+          "first_title": "Container Registry — что это, зачем нужен и как использовать готовый реестр контейнеров",
+          "first_url": "https://mws.ru/blog/container-registry-chto-eto-zachem-nuzhen-i-kak-ispolzovat-gotovyj-reestr-kontejnerov",
+          "warning": "",
+          "evidence_file": "discovery-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "tapdata-cn",
+      "configuration": {
+        "id": "tapdata-cn",
+        "name": "TapData 中文博客",
+        "url": "https://tapdata.net/blog.html",
+        "link_selector": "a.news_list_item_inner",
+        "card_selector": ".news_list_item_line",
+        "date_selector": ".news_list_item_date, .news_detail_date",
+        "url_pattern": "^https://tapdata\\.net/(blog/)?[^/?]+\\.html$",
+        "max_pages": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 40,
+          "first_title": "2025，当 TapData 实时数据平台，在您的土壤里长出根系",
+          "first_url": "https://tapdata.net/write-to-users-2026.html",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "taosdata",
+      "configuration": {
+        "id": "taosdata",
+        "name": "TDengine 涛思数据博客",
+        "url": "https://www.taosdata.com/blog",
+        "link_selector": "main .gb-query-loop-item > a.gb-container-2d94c046",
+        "card_selector": ".gb-query-loop-item",
+        "title_selector": ".gb-headline-adfcb47c, main h1",
+        "url_pattern": "^https://www\\.taosdata\\.com/[^?#]+\\.html$",
+        "next_selector": ".gb-query-loop-pagination a.gb-button-1e099794",
+        "max_pages": 2
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 0,
+          "warning": "",
+          "error": "Get \"https://www.taosdata.com/blog\": net/http: TLS handshake timeout",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "timecho",
+      "configuration": {
+        "id": "timecho",
+        "name": "Timecho 技术解析",
+        "url": "https://www.timecho.com/tags/introduction",
+        "link_selector": ".main-post-list-container a.post-container-wrapper",
+        "card_selector": ".post-container-wrapper",
+        "title_selector": ".post-detail-title, .page-content-title",
+        "date_selector": ".post-detail-date",
+        "url_pattern": "^https://www\\.timecho\\.com/archives/[^/?]+$",
+        "extra_listing_urls": [
+          "https://www.timecho.com/tags/introduction/page/2"
+        ],
+        "max_pages": 2
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 20,
+          "first_title": "效能优化：IoTDB 性能调优的底层逻辑与实战路径",
+          "first_url": "https://www.timecho.com/archives/1789528207035",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "digoal",
+      "configuration": {
+        "id": "digoal",
+        "name": "Digoal PostgreSQL Blog",
+        "url": "https://github.com/digoal/blog",
+        "adapter": "digoal",
+        "listing_url": "https://raw.githubusercontent.com/digoal/blog/master/README.md"
+      },
+      "adapter_kind": "digoal",
+      "historical_observations": [
+        {
+          "count": 100,
+          "first_title": "《PG 30 周年直播, 第八期 收官之作》",
+          "first_url": "https://github.com/digoal/blog/blob/master/202609/20260916_01.md",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "selectdb",
+      "configuration": {
+        "id": "selectdb",
+        "name": "SelectDB",
+        "url": "https://www.selectdb.com/blogs",
+        "link_selector": "a.blog-card",
+        "card_selector": "a.blog-card",
+        "title_selector": ".blog-card-title",
+        "date_selector": ".blog-card-meta-date",
+        "url_pattern": "^https://www.selectdb.com/blog/[0-9]+$",
+        "next_selector": ".pagination a.page-btn:last-child",
+        "max_pages": 2
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 24,
+          "first_title": "某头部保险公司基于 SelectDB 的统一 OLAP 架构实践",
+          "first_url": "https://www.selectdb.com/blog/1758",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "mirrorship",
+      "configuration": {
+        "id": "mirrorship",
+        "name": "Mirrorship",
+        "url": "https://www.mirrorship.cn/zh-CN/blog",
+        "adapter": "mirrorship"
+      },
+      "adapter_kind": "mirrorship",
+      "historical_observations": [
+        {
+          "count": 80,
+          "first_title": "Semantic View 技术解析（二）：业务口径如何进入数据库执行路径",
+          "first_url": "https://www.mirrorship.cn/zh-CN/blog/d/semantic-view-tech-2-business-caliber",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "pingkai",
+      "configuration": {
+        "id": "pingkai",
+        "name": "Pingkai / TiDB Community",
+        "url": "https://pingkai.cn/tidbcommunity/blog",
+        "listing_url": "https://pingkai.cn/tidbcommunity/blog?latest=true",
+        "adapter": "pingkai",
+        "content_selector": "article"
+      },
+      "adapter_kind": "pingkai",
+      "historical_observations": [
+        {
+          "count": 20,
+          "first_title": "TiDB 唐刘：AI 编程缺失的抽象层",
+          "first_url": "https://pingkai.cn/tidbcommunity/blog/69c5c968",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "aliyun-profile",
+      "configuration": {
+        "id": "aliyun-profile",
+        "name": "Aliyun — 灵杰开发者",
+        "url": "https://developer.aliyun.com/profile/gfbp4bwpctdbo",
+        "link_selector": ".dynamic-title a[href^=\"/article/\"]",
+        "browser_fallback": true,
+        "wait_selector": ".dynamic-title a[href]",
+        "card_selector": ".news-item-a",
+        "date_selector": ".article-time",
+        "url_pattern": "^https://developer\\.aliyun\\.com/article/[0-9]+$",
+        "max_pages": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 44,
+          "first_title": "技术揭秘：阿里云 Elasticsearch 云原生向量引擎如何登顶 VectorDBBench",
+          "first_url": "https://developer.aliyun.com/article/1758773",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "whaleops",
+      "configuration": {
+        "id": "whaleops",
+        "name": "WhaleOps — 白鲸开源",
+        "url": "https://www.whaleops.com/846829-846839.html",
+        "link_selector": "a.newTitle.pc[href]",
+        "card_selector": "li.modSet",
+        "date_selector": ".nDate",
+        "url_pattern": "^https://www\\.whaleops\\.com/846839-846849_[0-9]+\\.html$",
+        "max_pages": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "count": 25,
+          "first_title": "Apache DolphinScheduler Meetup 8.25视频回放与PPT资料",
+          "first_url": "https://www.whaleops.com/846839-846849_4365333.html",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "modb-news",
+      "configuration": {
+        "id": "modb-news",
+        "name": "墨天轮 — 最新资讯",
+        "url": "https://www.modb.pro/dbNews",
+        "adapter": "modb-news"
+      },
+      "adapter_kind": "modb-news",
+      "historical_observations": [
+        {
+          "count": 30,
+          "first_title": "宁波银行2026年基础软件正版化采购结果公示：GoldenDB与OceanBase数据库软件中标",
+          "first_url": "https://www.modb.pro/db/2100803773564280832",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "infoq-bigdata",
+      "configuration": {
+        "id": "infoq-bigdata",
+        "name": "InfoQ 中国 — 大数据",
+        "url": "https://www.infoq.cn/topic/bigdata",
+        "adapter": "infoq-bigdata"
+      },
+      "adapter_kind": "infoq-bigdata",
+      "historical_observations": [
+        {
+          "count": 30,
+          "first_title": "Netflix 采用开源 Flink Autoscaler，支撑超 3 万个流式作业",
+          "first_url": "https://www.infoq.cn/article/8JZ9IdSIxo18dcz6pZG6",
+          "warning": "",
+          "evidence_file": "chinese-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "highgo",
+      "configuration": {
+        "id": "highgo",
+        "name": "HighGo — 瀚高新闻资讯",
+        "url": "https://www.highgo.com/about/news",
+        "adapter": "highgo",
+        "max_pages": 5
+      },
+      "adapter_kind": "highgo",
+      "historical_observations": [
+        {
+          "count": 20,
+          "evidence_file": "highgo-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    },
+    {
+      "id": "laserdata",
+      "configuration": {
+        "id": "laserdata",
+        "name": "LaserData Blog",
+        "url": "https://laserdata.com/blog",
+        "link_selector": "main a[href^=\"/blog/\"]",
+        "card_selector": "a[href^=\"/blog/\"]",
+        "date_selector": "time",
+        "content_selector": ".ld-prose",
+        "url_pattern": "^https://laserdata\\.com/blog/[^/?]+$",
+        "max_pages": 1
+      },
+      "adapter_kind": "generic_html",
+      "historical_observations": [
+        {
+          "warning": "only 6 discoverable articles (requested 20)",
+          "evidence_file": "laserdata-source-check.jsonl"
+        }
+      ],
+      "fixture_coverage": "historical_observation_only"
+    }
+  ],
+  "pdf_inventory": {
+    "expected_rows": 214,
+    "status": "partial_visual_review",
+    "rows": [
+      {
+        "row_number": 49,
+        "name": "Data Engineering",
+        "url": "https://www.reddit.com/r/dataengineering/.rss",
+        "review_status": "reviewed",
+        "evidence": "visual inspection of original PDF pages 2-3 at 600 DPI"
+      },
+      {
+        "row_number": 104,
+        "name": "LinkedIn Engineering",
+        "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjYTlrKh4XuEcFQHAqdCVhg",
+        "review_status": "reviewed",
+        "evidence": "visual inspection of original PDF pages 4-5 at 600 DPI"
+      },
+      {
+        "row_number": 158,
+        "name": "SelectDB",
+        "url": "http://china-radio-international.duckdns.org:8080/selectdb.xml",
+        "review_status": "reviewed",
+        "evidence": "visual inspection of original PDF pages 6-7 at 600 DPI"
+      }
+    ],
+    "candidate_file": "source-inventory/pdf-ocr-candidates.json",
+    "note": "All 214 logical UI rows are accounted for by deterministic toggle geometry. Three cross-page rows with missing or unusable OCR were visually inspected against the original PDF at 600 DPI; remaining rows retain explicit OCR uncertainty until reviewed."
+  }
+}

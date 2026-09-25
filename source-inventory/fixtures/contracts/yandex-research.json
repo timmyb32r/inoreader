@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source_id": "yandex-research",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "yandex-research",
+    "name": "Yandex Research",
+    "url": "https://research.yandex.com/blog",
+    "link_selector": "a[href*=\"/blog/\"]",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "browser": true,
+    "wait_selector": "[class*=\"PostItem_\"]",
+    "load_more_selector": "article button",
+    "load_more_clicks": 4
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 45,
+      "first_title": "The KV cache as an agent runtime",
+      "first_url": "https://research.yandex.com/blog/the-kv-cache-as-an-agent-runtime",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 45,
+      "first_title": "The KV cache as an agent runtime",
+      "first_url": "https://research.yandex.com/blog/the-kv-cache-as-an-agent-runtime",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

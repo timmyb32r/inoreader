@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "source_id": "informatica",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "informatica",
+    "name": "Informatica",
+    "url": "https://www.informatica.com/blogs.html",
+    "link_selector": "a.blog-infa-tile",
+    "url_pattern": "/blogs/[^/]+\\.html$",
+    "browser_fallback": true,
+    "browser": true,
+    "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27",
+    "wait_selector": "a.CoveoResultLink",
+    "load_more_selector": ".coveo-pager-next span[role=button]",
+    "load_more_clicks": 2
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 27,
+      "first_title": "Power every agent with AI-ready data",
+      "first_url": "https://www.informatica.com/blogs/power-every-agent-with-ai-ready-data.html",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 27,
+      "first_title": "Power every agent with AI-ready data",
+      "first_url": "https://www.informatica.com/blogs/power-every-agent-with-ai-ready-data.html",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_id": "openlineage",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "openlineage",
+    "name": "OpenLineage",
+    "url": "https://openlineage.io/blog/",
+    "feed_url": "https://openlineage.io/blog/feed.json",
+    "link_selector": "article header h2 a[href]",
+    "card_selector": "article",
+    "next_selector": "a.pagination-nav__link--next",
+    "max_pages": 2,
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 20,
+      "first_title": "Toward More Precise Lineage: Introducing Explicit Lineage Facets",
+      "first_url": "https://openlineage.io/blog/explicit-lineage",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

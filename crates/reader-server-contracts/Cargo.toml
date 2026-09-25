@@ -1,0 +1,11 @@
+[package]
+name = "reader-server-contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+chrono.workspace = true
+reader-core = { path = "../reader-core" }
+serde.workspace = true
+uuid.workspace = true
+

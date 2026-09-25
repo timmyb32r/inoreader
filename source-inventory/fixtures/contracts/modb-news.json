@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "modb-news",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "modb-news",
+    "name": "墨天轮 — 最新资讯",
+    "url": "https://www.modb.pro/dbNews",
+    "adapter": "modb-news"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 30,
+      "first_title": "宁波银行2026年基础软件正版化采购结果公示：GoldenDB与OceanBase数据库软件中标",
+      "first_url": "https://www.modb.pro/db/2100803773564280832",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

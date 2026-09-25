@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "infoq-bigdata",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "infoq-bigdata",
+    "name": "InfoQ 中国 — 大数据",
+    "url": "https://www.infoq.cn/topic/bigdata",
+    "adapter": "infoq-bigdata"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 30,
+      "first_title": "Netflix 采用开源 Flink Autoscaler，支撑超 3 万个流式作业",
+      "first_url": "https://www.infoq.cn/article/8JZ9IdSIxo18dcz6pZG6",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

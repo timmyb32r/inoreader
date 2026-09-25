@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "source_id": "tapdata",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "tapdata",
+    "name": "TapData",
+    "url": "https://tapdata.io/blog/",
+    "link_selector": "a.blog_article_item-content",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 158,
+      "first_title": "Beyond Fivetran: Why Modern Data Teams Are Choosing TapData as the Leading Fivetran Alternative",
+      "first_url": "https://tapdata.io/blog/fivetran-alternative-tapdata",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 158,
+      "first_title": "Beyond Fivetran: Why Modern Data Teams Are Choosing TapData as the Leading Fivetran Alternative",
+      "first_url": "https://tapdata.io/blog/fivetran-alternative-tapdata",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

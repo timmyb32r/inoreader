@@ -1,0 +1,15 @@
+[package]
+name = "inoreader-chromium-acceptance"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+http = "1"
+reader-core = { path = "../../crates/reader-core" }
+reader-ingest = { path = "../../crates/reader-ingest" }
+reader-web-runtime = { path = "../../crates/reader-web-runtime" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+url = "2"
+

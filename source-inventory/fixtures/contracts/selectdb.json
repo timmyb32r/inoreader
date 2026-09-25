@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "source_id": "selectdb",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "selectdb",
+    "name": "SelectDB",
+    "url": "https://www.selectdb.com/blogs",
+    "link_selector": "a.blog-card",
+    "card_selector": "a.blog-card",
+    "title_selector": ".blog-card-title",
+    "date_selector": ".blog-card-meta-date",
+    "url_pattern": "^https://www.selectdb.com/blog/[0-9]+$",
+    "next_selector": ".pagination a.page-btn:last-child",
+    "max_pages": 2
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 24,
+      "first_title": "某头部保险公司基于 SelectDB 的统一 OLAP 架构实践",
+      "first_url": "https://www.selectdb.com/blog/1758",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

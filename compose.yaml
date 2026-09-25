@@ -1,0 +1,71 @@
+services:
+  app:
+    build: .
+    command: ["/usr/local/bin/inoreader", "--config", "/etc/inoreader/config.yaml", "serve"]
+    environment:
+      YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS: /run/secrets/ydb-key.json
+    volumes:
+      - ./config.yaml:/etc/inoreader/config.yaml:ro
+    secrets:
+      - ydb-key
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      chromium:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/live"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+    networks:
+      - public-egress
+      - browser-control
+  chromium:
+    image: chromedp/headless-shell@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
+    command: ["--remote-allow-origins=*"]
+    expose: ["9222"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9222/json/version"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /home/chrome:size=64m,mode=0700
+    shm_size: 256mb
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+    # Chromium has no route to the public internet. Every HTTP(S) request is
+    # intercepted over CDP and fulfilled by the app's validated outbound client.
+    # The context-level black-hole proxy remains a second fail-closed barrier.
+    networks:
+      - browser-control
+secrets:
+  ydb-key:
+    file: ./secrets/ydb-key.json
+
+networks:
+  public-egress:
+    name: inoreader-public-egress
+  browser-control:
+    name: inoreader-browser-control
+    internal: true

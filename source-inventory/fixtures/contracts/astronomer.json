@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source_id": "astronomer",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "astronomer",
+    "name": "Astronomer",
+    "url": "https://www.astronomer.io/blog/",
+    "link_selector": "article.post-card h2 a[href]",
+    "card_selector": "article.post-card",
+    "url_pattern": "^https://www\\.astronomer\\.io/blog/[^/?]+/?$",
+    "max_pages": 1,
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 348,
+      "first_title": "What's New in Otto: Your Airflow Expert Now Available with Any Agent",
+      "first_url": "https://www.astronomer.io/blog/whats-new-in-otto-your-airflow-expert-now-available-with-any-agent",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "source_id": "alibaba",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "alibaba",
+    "name": "Alibaba Cloud",
+    "url": "https://www.alibabacloud.com/blog",
+    "link_selector": "a[href*=\"/blog/\"]",
+    "url_pattern": "/blog/[^/?]+_[0-9]+$",
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 32,
+      "first_title": "DeepSeek-V4.1-Flash Is Now on Alibaba Cloud Token Plan: How to Get Started from $6 a Month",
+      "first_url": "https://www.alibabacloud.com/blog/deepseek-v4-1-flash-is-now-on-alibaba-cloud-token-plan-how-to-get-started-from-%246-a-month_603550",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 32,
+      "first_title": "DeepSeek-V4.1-Flash Is Now on Alibaba Cloud Token Plan: How to Get Started from $6 a Month",
+      "first_url": "https://www.alibabacloud.com/blog/deepseek-v4-1-flash-is-now-on-alibaba-cloud-token-plan-how-to-get-started-from-%246-a-month_603550",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

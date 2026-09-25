@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source_id": "whaleops",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "whaleops",
+    "name": "WhaleOps — 白鲸开源",
+    "url": "https://www.whaleops.com/846829-846839.html",
+    "link_selector": "a.newTitle.pc[href]",
+    "card_selector": "li.modSet",
+    "date_selector": ".nDate",
+    "url_pattern": "^https://www\\.whaleops\\.com/846839-846849_[0-9]+\\.html$",
+    "max_pages": 1
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 25,
+      "first_title": "Apache DolphinScheduler Meetup 8.25视频回放与PPT资料",
+      "first_url": "https://www.whaleops.com/846839-846849_4365333.html",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,14 @@
+[package]
+name = "reader-collectors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+chrono.workspace = true
+feed-rs.workspace = true
+reader-core = { path = "../reader-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url.workspace = true
+

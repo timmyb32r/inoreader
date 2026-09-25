@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_id": "taosdata",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "taosdata",
+    "name": "TDengine 涛思数据博客",
+    "url": "https://www.taosdata.com/blog",
+    "link_selector": "main .gb-query-loop-item > a.gb-container-2d94c046",
+    "card_selector": ".gb-query-loop-item",
+    "title_selector": ".gb-headline-adfcb47c, main h1",
+    "url_pattern": "^https://www\\.taosdata\\.com/[^?#]+\\.html$",
+    "next_selector": ".gb-query-loop-pagination a.gb-button-1e099794",
+    "max_pages": 2
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 0,
+      "first_title": null,
+      "first_url": null,
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

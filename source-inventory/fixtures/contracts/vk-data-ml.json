@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "source_id": "vk-data-ml",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "vk-data-ml",
+    "name": "VK Cloud — Data & ML",
+    "url": "https://cloud.vk.ru/blog/hubs/data-ml/",
+    "link_selector": "[class*=\"ArticleCard_\"] a[href]",
+    "url_pattern": "^https://cloud.vk.ru/blog/[^/?]+/$",
+    "browser_fallback": true,
+    "card_selector": "[class*=\"ArticleCard_card\"]"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 172,
+      "first_title": "Что такое токенизация и почему языковые модели считают текст не так, как человек",
+      "first_url": "https://cloud.vk.ru/blog/chto-takoe-tokenizatsiya-i-pochemu-yazykovye-modeli-schitayut-tekst-ne-tak-kak-c",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 172,
+      "first_title": "Что такое токенизация и почему языковые модели считают текст не так, как человек",
+      "first_url": "https://cloud.vk.ru/blog/chto-takoe-tokenizatsiya-i-pochemu-yazykovye-modeli-schitayut-tekst-ne-tak-kak-c",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inoreader.local/schemas/seed-manifest-v1.json",
+  "title": "Inoreader seed manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "owner_account_id", "workspace_id", "items"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "owner_account_id": { "type": "string", "format": "uuid" },
+    "workspace_id": { "type": "string", "format": "uuid" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_inventory_id", "idempotency_key", "selected", "status", "configuration"],
+        "properties": {
+          "source_inventory_id": { "type": "string", "minLength": 1 },
+          "idempotency_key": { "type": "string", "pattern": "^personal_feed:[^:]+$" },
+          "selected": { "type": "boolean" },
+          "status": { "enum": ["reviewed", "unresolved", "disabled"] },
+          "configuration": { "type": "object" },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+[package]
+name = "inoreader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+axum.workspace = true
+async-trait.workspace = true
+base64 = "0.22"
+clap.workspace = true
+reader-server-contracts = { path = "../reader-server-contracts" }
+reader-application = { path = "../reader-application" }
+reader-server-ui = { path = "../reader-server-ui" }
+reader-server = { path = "../reader-server" }
+reader-storage-ydb = { path = "../reader-storage-ydb" }
+reader-core = { path = "../reader-core" }
+reader-collectors = { path = "../reader-collectors" }
+reader-ingest = { path = "../reader-ingest" }
+reader-web-runtime = { path = "../reader-web-runtime" }
+chrono.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+serde_json.workspace = true
+rpassword.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+toml.workspace = true
+url.workspace = true

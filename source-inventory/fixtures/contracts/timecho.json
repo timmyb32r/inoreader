@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "source_id": "timecho",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "timecho",
+    "name": "Timecho 技术解析",
+    "url": "https://www.timecho.com/tags/introduction",
+    "link_selector": ".main-post-list-container a.post-container-wrapper",
+    "card_selector": ".post-container-wrapper",
+    "title_selector": ".post-detail-title, .page-content-title",
+    "date_selector": ".post-detail-date",
+    "url_pattern": "^https://www\\.timecho\\.com/archives/[^/?]+$",
+    "extra_listing_urls": [
+      "https://www.timecho.com/tags/introduction/page/2"
+    ],
+    "max_pages": 2
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 20,
+      "first_title": "效能优化：IoTDB 性能调优的底层逻辑与实战路径",
+      "first_url": "https://www.timecho.com/archives/1789528207035",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

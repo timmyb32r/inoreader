@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_id": "mirrorship",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "mirrorship",
+    "name": "Mirrorship",
+    "url": "https://www.mirrorship.cn/zh-CN/blog",
+    "adapter": "mirrorship"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 80,
+      "first_title": "Semantic View 技术解析（二）：业务口径如何进入数据库执行路径",
+      "first_url": "https://www.mirrorship.cn/zh-CN/blog/d/semantic-view-tech-2-business-caliber",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

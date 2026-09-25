@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "source_id": "ibm",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "ibm",
+    "name": "IBM Think Insights",
+    "url": "https://www.ibm.com/think/insights",
+    "link_selector": "[href*=\"/think/insights/\"]",
+    "url_pattern": "/think/insights/[^/?]+$",
+    "browser_fallback": true,
+    "listing_url": "https://www.ibm.com/content/adobe-cms/us/en/think/insights/jcr:content/root/table_of_contents/horizontal_media_gro.horizontal-media-group-results.html?pageNum=1&itemsPerPage=24"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 24,
+      "first_title": "5 practical ways to scale AI that actually deliver business value",
+      "first_url": "https://www.ibm.com/think/insights/ways-to-scale-ai-that-deliver-business-value",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 24,
+      "first_title": "5 practical ways to scale AI that actually deliver business value",
+      "first_url": "https://www.ibm.com/think/insights/ways-to-scale-ai-that-deliver-business-value",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

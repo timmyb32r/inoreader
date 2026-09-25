@@ -1,0 +1,21 @@
+[package]
+name = "reader-storage-ydb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+async-trait.workspace = true
+reader-application = { path = "../reader-application" }
+reader-core = { path = "../reader-core" }
+reader-ingest = { path = "../reader-ingest" }
+chrono.workspace = true
+murmur3.workspace = true
+url.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ydb.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source_id": "rivery",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "rivery",
+    "name": "Rivery",
+    "url": "https://rivery.io/blog/",
+    "link_selector": "a.tease__link, a.blog-tease__link",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "next_selector": "a.next, a[rel=next]",
+    "extra_listing_urls": [
+      "https://rivery.io/blog/page/2/"
+    ]
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 32,
+      "first_title": "Why Boomi’s Acquisition of Rivery Is a Game-Changer for Enterprise Integration and Innovation Itamar Ben Hemo <img alt='' src='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=200&#038;d=mm&#038;r=g' srcset='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=400&#038;d=mm&#038;r=g 2x' class='avatar avatar-200 photo' height='200' width='200' decoding='async'/>5 min read <img width=\"625\" height=\"312\" src=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png\" class=\"attachment-archive-thumbnail-stories size-archive-thumbnail-stories\" alt=\"\" decoding=\"async\" srcset=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png 625w, https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-400x200.png 400w\" sizes=\"(max-width: 625px) 100vw, 625px\" />",
+      "first_url": "https://rivery.io/blog/boomi-acquires-rivery",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 32,
+      "first_title": "Why Boomi’s Acquisition of Rivery Is a Game-Changer for Enterprise Integration and Innovation Itamar Ben Hemo <img alt='' src='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=200&#038;d=mm&#038;r=g' srcset='https://secure.gravatar.com/avatar/fa8d9c60b3d0657e74922e95254d3ef2?s=400&#038;d=mm&#038;r=g 2x' class='avatar avatar-200 photo' height='200' width='200' decoding='async'/>5 min read <img width=\"625\" height=\"312\" src=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png\" class=\"attachment-archive-thumbnail-stories size-archive-thumbnail-stories\" alt=\"\" decoding=\"async\" srcset=\"https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-625x312.png 625w, https://rivery.io/wp-content/uploads/2024/12/Frame-1321315106-6-400x200.png 400w\" sizes=\"(max-width: 625px) 100vw, 625px\" />",
+      "first_url": "https://rivery.io/blog/boomi-acquires-rivery",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

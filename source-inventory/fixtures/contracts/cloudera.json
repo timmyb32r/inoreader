@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_id": "cloudera",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "cloudera",
+    "name": "Cloudera",
+    "url": "https://www.cloudera.com/blog.html",
+    "link_selector": "article h2 a, article h3 a, .article-title a",
+    "url_pattern": "/blog/[^/]+/[^/]+\\.html$",
+    "browser_fallback": true,
+    "adapter": "cloudera",
+    "listing_url": "https://www.cloudera.com/blog/all-blogs.category-posts.json"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 591,
+      "first_title": "Inside JADC2: How Data Connectivity Is Reshaping Defense Operations",
+      "first_url": "https://www.cloudera.com/blog/business/inside-jadc2-how-data-connectivity-is-reshaping-defense-operations.html",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 591,
+      "first_title": "Inside JADC2: How Data Connectivity Is Reshaping Defense Operations",
+      "first_url": "https://www.cloudera.com/blog/business/inside-jadc2-how-data-connectivity-is-reshaping-defense-operations.html",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

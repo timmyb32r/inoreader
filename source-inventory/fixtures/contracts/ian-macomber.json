@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "source_id": "ian-macomber",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "ian-macomber",
+    "name": "Ian Macomber",
+    "url": "https://www.iandmacomber.com/",
+    "link_selector": "a[href*=\"/blog/\"]:not([href$=\"/about\"])",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 2,
+      "first_title": "The Shape and Feel of the Post-AI Data Stack Aug 2026",
+      "first_url": "https://www.iandmacomber.com/blog/post-ai-data-stack",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 2,
+      "first_title": "The Shape and Feel of the Post-AI Data Stack Aug 2026",
+      "first_url": "https://www.iandmacomber.com/blog/post-ai-data-stack",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

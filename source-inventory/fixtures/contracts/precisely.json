@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source_id": "precisely",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "precisely",
+    "name": "Precisely",
+    "url": "https://www.precisely.com/blog/",
+    "link_selector": "a.loop-item--post",
+    "url_pattern": "/blog/[^/]+/[^/]+/?$",
+    "browser_fallback": true,
+    "browser": true,
+    "wait_selector": "a.loop-item--post",
+    "load_more_selector": "a.facetwp-page.next",
+    "load_more_clicks": 1
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 15,
+      "first_title": "A New Chapter of Growth at Precisely",
+      "first_url": "https://www.precisely.com/blog/cat-careers/a-new-chapter-of-growth-at-precisely",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 27,
+      "first_title": "A New Chapter of Growth at Precisely",
+      "first_url": "https://www.precisely.com/blog/cat-careers/a-new-chapter-of-growth-at-precisely",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

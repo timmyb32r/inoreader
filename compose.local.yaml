@@ -1,0 +1,28 @@
+# Local integration overlay. Production uses the external YDB Serverless endpoint
+# from config.yaml and must not include this file.
+services:
+  ydb:
+    image: ydbplatform/local-ydb@sha256:55fdd320ee0064b9e8c628cb766d481f9be6a2c021ec8235ea8d2280fc937aaf
+    environment:
+      YDB_USE_IN_MEMORY_PDISKS: "true"
+      YDB_DEFAULT_LOG_LEVEL: NOTICE
+      GRPC_TLS_PORT: "2135"
+      GRPC_PORT: "2136"
+      MON_PORT: "8765"
+    ports:
+      - "127.0.0.1:2136:2136"
+      - "127.0.0.1:8765:8765"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/2136'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ydb-local-data:/ydb_data
+    networks:
+      - public-egress
+
+volumes:
+  ydb-local-data:

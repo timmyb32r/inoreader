@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_id": "slingdata",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "slingdata",
+    "name": "SlingData Articles",
+    "url": "https://slingdata.io/articles/",
+    "feed_url": "https://slingdata.io/rss.xml",
+    "link_selector": "main article a.group[href^=\"/articles/\"]",
+    "card_selector": "article",
+    "url_pattern": "^https://slingdata\\.io/articles/[^/?]+/?$",
+    "max_pages": 1,
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 74,
+      "first_title": "CDC with Sling: When Log-Based Works and When Query-Based Is Enough",
+      "first_url": "https://slingdata.io/articles/sling-cdc-when-to-use",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

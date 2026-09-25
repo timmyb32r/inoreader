@@ -1,0 +1,17 @@
+[package]
+name = "reader-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+axum.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+url.workspace = true
+reader-application = { path = "../reader-application" }
+reader-core = { path = "../reader-core" }
+reader-server-contracts = { path = "../reader-server-contracts" }
+roxmltree.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true

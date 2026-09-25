@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source_id": "onehouse",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "onehouse",
+    "name": "Onehouse",
+    "url": "https://www.onehouse.ai/blog",
+    "link_selector": "header a[aria-label=\"title link\"][href^=\"/blog/\"], article[data-blog-card] a.group[href^=\"/blog/\"]",
+    "card_selector": "article[data-blog-card], header",
+    "url_pattern": "^https://www\\.onehouse\\.ai/blog/[^/?]+/?$",
+    "max_pages": 1,
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 148,
+      "first_title": "Announcing AI training data pipelines on Onehouse: feeding open data to open models",
+      "first_url": "https://www.onehouse.ai/blog/announcing-ai-training-data-pipelines-on-onehouse",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "source_id": "cockroachlabs",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "cockroachlabs",
+    "name": "Cockroach Labs",
+    "url": "https://www.cockroachlabs.com/blog/",
+    "link_selector": "a[href*=\"/blog/\"]",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "next_selector": "a[aria-label=\"Next Page\"]"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 32,
+      "first_title": "Cockroach Continuum: the Agentic Database Cloud",
+      "first_url": "https://www.cockroachlabs.com/blog/continuum-announcement",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 32,
+      "first_title": "Cockroach Continuum: the Agentic Database Cloud",
+      "first_url": "https://www.cockroachlabs.com/blog/continuum-announcement",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

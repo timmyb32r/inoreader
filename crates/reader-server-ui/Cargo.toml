@@ -1,0 +1,10 @@
+[package]
+name = "reader-server-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+http.workspace = true
+

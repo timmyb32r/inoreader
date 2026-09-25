@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "source_id": "meltano",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "meltano",
+    "name": "Meltano",
+    "url": "https://meltano.com/blog",
+    "link_selector": "article.blog-list-item .blog-list-item-text > a[href]",
+    "card_selector": "article.blog-list-item",
+    "date_selector": ".blog-list-item-date, .blog-author-date .bold",
+    "url_pattern": "^https://meltano\\.com/blog/[^/?]+/?$",
+    "browser": true,
+    "browser_fallback": true,
+    "wait_selector": "article.blog-list-item",
+    "load_more_selector": "#load-more-button",
+    "load_more_clicks": 1
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 20,
+      "first_title": "Stop Waiting on MSSQL Loads: target-mssql Now Speaks Arrow",
+      "first_url": "https://meltano.com/blog/stop-waiting-on-mssql-loads-target-mssql-now-speaks-arrow",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

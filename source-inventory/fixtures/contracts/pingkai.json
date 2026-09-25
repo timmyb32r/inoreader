@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source_id": "pingkai",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "pingkai",
+    "name": "Pingkai / TiDB Community",
+    "url": "https://pingkai.cn/tidbcommunity/blog",
+    "listing_url": "https://pingkai.cn/tidbcommunity/blog?latest=true",
+    "adapter": "pingkai",
+    "content_selector": "article"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 20,
+      "first_title": "TiDB 唐刘：AI 编程缺失的抽象层",
+      "first_url": "https://pingkai.cn/tidbcommunity/blog/69c5c968",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "source_id": "integrate",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "integrate",
+    "name": "Integrate.io",
+    "url": "https://www.integrate.io/blog/",
+    "link_selector": "a[href*=\"/blog/\"]",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "next_selector": "a.next, a[rel=next]"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 35,
+      "first_title": "Best Fractional Real Estate Investing Platforms in 2026",
+      "first_url": "https://www.integrate.io/blog/best-fractional-real-estate-investing-platforms",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 35,
+      "first_title": "Best Fractional Real Estate Investing Platforms in 2026",
+      "first_url": "https://www.integrate.io/blog/best-fractional-real-estate-investing-platforms",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

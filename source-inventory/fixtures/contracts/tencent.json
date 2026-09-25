@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "source_id": "tencent",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "tencent",
+    "name": "Tencent Cloud Developer",
+    "url": "https://cloud.tencent.com/developer",
+    "link_selector": "a.cdc-article-panel-response2__title",
+    "url_pattern": "/developer/article/[0-9]+$",
+    "browser_fallback": true,
+    "browser": true,
+    "scroll_steps": 3
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 11,
+      "first_title": "AI 落地的四层架构：真正卡住你的，从来不是模型",
+      "first_url": "https://cloud.tencent.com/developer/article/2745419",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 11,
+      "first_title": "AI 落地的四层架构：真正卡住你的，从来不是模型",
+      "first_url": "https://cloud.tencent.com/developer/article/2745419",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

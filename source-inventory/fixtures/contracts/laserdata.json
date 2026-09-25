@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_id": "laserdata",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "laserdata",
+    "name": "LaserData Blog",
+    "url": "https://laserdata.com/blog",
+    "link_selector": "main a[href^=\"/blog/\"]",
+    "card_selector": "a[href^=\"/blog/\"]",
+    "date_selector": "time",
+    "content_selector": ".ld-prose",
+    "url_pattern": "^https://laserdata\\.com/blog/[^/?]+$",
+    "max_pages": 1
+  },
+  "historical_expectations": [
+    {
+      "observed_count": null,
+      "first_title": null,
+      "first_url": null,
+      "warning": "only 6 discoverable articles (requested 20)",
+      "evidence_file": "laserdata-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

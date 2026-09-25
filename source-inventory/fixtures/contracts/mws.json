@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "source_id": "mws",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "mws",
+    "name": "MWS",
+    "url": "https://mws.ru/blog/",
+    "link_selector": "a.news-card-item",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "extra_listing_urls": [
+      "https://mws.ru/blog/?page=2"
+    ]
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 30,
+      "first_title": "Container Registry — что это, зачем нужен и как использовать готовый реестр контейнеров",
+      "first_url": "https://mws.ru/blog/container-registry-chto-eto-zachem-nuzhen-i-kak-ispolzovat-gotovyj-reestr-kontejnerov",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 30,
+      "first_title": "Container Registry — что это, зачем нужен и как использовать готовый реестр контейнеров",
+      "first_url": "https://mws.ru/blog/container-registry-chto-eto-zachem-nuzhen-i-kak-ispolzovat-gotovyj-reestr-kontejnerov",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

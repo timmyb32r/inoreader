@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source_id": "risingwave",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "risingwave",
+    "name": "RisingWave",
+    "url": "https://risingwave.com/blog/",
+    "link_selector": "a[href*=\"/blog/\"]",
+    "url_pattern": "/blog/[^/?]+/?$",
+    "browser_fallback": true,
+    "browser": true,
+    "wait_selector": "button[class*=\"w-1/2\"]",
+    "load_more_selector": "button[class*=\"w-1/2\"]",
+    "load_more_clicks": 2
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 40,
+      "first_title": "Read More ->",
+      "first_url": "https://risingwave.com/blog/risingwave-3-0-the-real-time-context-layer-for-interactive-ai",
+      "warning": "",
+      "evidence_file": "article-check.jsonl"
+    },
+    {
+      "observed_count": 40,
+      "first_title": "Read More ->",
+      "first_url": "https://risingwave.com/blog/risingwave-3-0-the-real-time-context-layer-for-interactive-ai",
+      "warning": "",
+      "evidence_file": "discovery-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,12 @@
+**/target/
+/web/node_modules/
+/playwright-report/
+/test-results/
+/.inoreader-state/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+/config.yaml
+/secrets/
+/seed-manifest*.json

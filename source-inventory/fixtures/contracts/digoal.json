@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source_id": "digoal",
+  "provenance": "ported_legacy_inline_fixture_and_historical_observation",
+  "configuration": {
+    "id": "digoal",
+    "name": "Digoal PostgreSQL Blog",
+    "url": "https://github.com/digoal/blog",
+    "adapter": "digoal",
+    "listing_url": "https://raw.githubusercontent.com/digoal/blog/master/README.md"
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 100,
+      "first_title": "《PG 30 周年直播, 第八期 收官之作》",
+      "first_url": "https://github.com/digoal/blog/blob/master/202609/20260916_01.md",
+      "warning": "",
+      "evidence_file": "chinese-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_id": "airbyte",
+  "provenance": "preserved_historical_observation",
+  "configuration": {
+    "id": "airbyte",
+    "name": "Airbyte",
+    "url": "https://airbyte.com/blog",
+    "link_selector": ".blog_list-wrapper .library-blog_card-link[href]",
+    "card_selector": ".library-blog_item",
+    "url_pattern": "^https://airbyte\\.com/blog/[^/?]+/?$",
+    "next_selector": "a.w-pagination-next",
+    "max_pages": 2,
+    "browser_fallback": true
+  },
+  "historical_expectations": [
+    {
+      "observed_count": 24,
+      "first_title": "Linear, Gong, and YouTube Data are officially certified on Airbyte",
+      "first_url": "https://airbyte.com/blog/linear-gong-youtube-data-certified-connectors",
+      "warning": "",
+      "evidence_file": "additional-source-check.jsonl"
+    }
+  ],
+  "assertion_scope": [
+    "configuration_deserializes",
+    "runtime_adapter_maps",
+    "historical_observation_is_preserved"
+  ],
+  "limitations": [
+    "not_a_raw_http_response",
+    "not_evidence_of_current_live_output",
+    "not_independently_reviewed",
+    "tests_not_run_by_policy"
+  ]
+}
