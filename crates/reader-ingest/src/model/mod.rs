@@ -595,6 +595,7 @@ pub struct PollCommit {
     pub final_url: Url,
     pub validators: CacheValidators,
     pub incomplete: bool,
+    pub duration_ms: u64,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PollAction {

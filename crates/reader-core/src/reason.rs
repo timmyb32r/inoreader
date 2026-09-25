@@ -26,6 +26,8 @@ pub enum StateValidationError {
     InvalidReason(#[from] ReasonError),
     #[error("current state event is inconsistent with aggregate history")]
     StatusHistoryMismatch,
+    #[error("exact source URL does not parse to the operational source URL")]
+    SourceUrlMismatch,
 }
 
 impl ReasonPolicy {

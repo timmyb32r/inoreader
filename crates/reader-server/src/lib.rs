@@ -120,7 +120,29 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         )
         .route(
             "/api/subscriptions/{id}",
-            patch(rename_subscription::<R>).delete(unsubscribe::<R>),
+            get(get_subscription::<R>)
+                .patch(rename_subscription::<R>)
+                .delete(unsubscribe::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/note",
+            put(save_subscription_note::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/activity",
+            get(subscription_activity::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/extraction",
+            get(subscription_extraction::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/source-url/preview",
+            post(preview_subscription_source_url::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/source-url",
+            put(commit_subscription_source_url::<R>),
         )
         .route("/api/feeds/discover", post(discover_feed::<R>))
         .route("/api/web-feeds/recipes", post(web_feed_recipe::<R>))
@@ -456,19 +478,29 @@ async fn add_subscription<R: ReaderRepository + 'static>(
         .subscriptions_by_workspace(workspace)
         .await?
         .into_iter()
-        .find(|subscription| subscription.source_url() == &url)
+        .find(|subscription| subscription.source_url_exact() == body.url)
     {
         return Err(ApiFailure::ExistingSubscription(matches!(
             existing.status(),
             reader_core::SubscriptionStatus::Archived
         )));
     }
-    let title = body.title.unwrap_or_else(|| body.url.clone());
+    let discovered = s
+        .discovery
+        .discover(url.clone())
+        .await
+        .map_err(ApiFailure::Discovery)?;
+    let title = trusted_discovery_title(body.title.as_deref(), discovered.title);
     valid_name(&title)?;
-    let value = Subscription::new(SubscriptionId::new(), workspace, url, title);
+    let value =
+        Subscription::new_with_exact_url(SubscriptionId::new(), workspace, url, body.url, title)
+            .map_err(|_| ApiFailure::Validation("source URL does not match parsed URL"))?;
     s.repository.save_subscription(None, value.clone()).await?;
     let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
     Ok(Json(subscription_view(&value, &stats)))
+}
+fn trusted_discovery_title(_client_title: Option<&str>, discovered_title: String) -> String {
+    discovered_title
 }
 async fn list_subscriptions<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
@@ -491,7 +523,9 @@ async fn rename_subscription<R: ReaderRepository + 'static>(
 ) -> Result<Json<SubscriptionView>, ApiFailure> {
     csrf(&s, &headers)?;
     let actor = auth(&s, &headers).await?;
-    valid_name(&body.name)?;
+    if !body.name.is_empty() {
+        valid_name(&body.name)?;
+    }
     let mut value = owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
     let revision = value.revision();
     value.rename(body.name);
@@ -500,6 +534,199 @@ async fn rename_subscription<R: ReaderRepository + 'static>(
         .await?;
     let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
     Ok(Json(subscription_view(&value, &stats)))
+}
+async fn get_subscription<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SubscriptionView>, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let value = owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
+    Ok(Json(subscription_view(&value, &stats)))
+}
+async fn save_subscription_note<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<SaveSubscriptionNoteRequest>,
+) -> Result<Json<SubscriptionView>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let actor = auth(&s, &headers).await?;
+    let mut value = owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let revision = value.revision();
+    value.set_personal_note(body.note);
+    s.repository
+        .save_subscription(Some(revision), value.clone())
+        .await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
+    Ok(Json(subscription_view(&value, &stats)))
+}
+async fn subscription_activity<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<SubscriptionActivityView>>, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let subscription =
+        owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let since = Utc::now() - chrono::Duration::days(30);
+    let events = s
+        .repository
+        .subscription_activity(actor.account.id, subscription.id(), since)
+        .await?;
+    Ok(Json(
+        events
+            .into_iter()
+            .map(|event| SubscriptionActivityView {
+                id: event.id,
+                occurred_at: event.occurred_at,
+                successful: event.successful,
+                duration_ms: event.duration_ms,
+                discovered_items: event.discovered_items,
+                diagnostic: event.diagnostic,
+            })
+            .collect(),
+    ))
+}
+async fn subscription_extraction<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SubscriptionExtractionView>, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let subscription =
+        owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &subscription).await?;
+    let (feed_urls, recipe_version, recipe_summary) = if stats.editable_web_feed {
+        let (version, document) = s.repository.web_feed_recipe(subscription.id()).await?;
+        let draft: WebFeedRecipeDraft =
+            serde_json::from_str(&document).map_err(|_| ApiFailure::Internal)?;
+        (
+            Vec::new(),
+            Some(version),
+            Some(web_feed_recipe_summary(&draft)),
+        )
+    } else if stats.source_type == "feed" {
+        (vec![subscription.source_url_exact().to_owned()], None, None)
+    } else {
+        (Vec::new(), None, Some("Built-in adapter".to_owned()))
+    };
+    Ok(Json(SubscriptionExtractionView {
+        source_type: stats.source_type,
+        feed_urls,
+        recipe_version,
+        recipe_summary,
+        last_preview: None,
+    }))
+}
+fn web_feed_recipe_summary(draft: &WebFeedRecipeDraft) -> String {
+    format!(
+        "Cards: {}; title: {}; content: {}",
+        draft.card_selector.as_deref().unwrap_or(&draft.selector),
+        draft.title_selector.as_deref().unwrap_or("not configured"),
+        draft
+            .content_selector
+            .as_deref()
+            .unwrap_or("not configured")
+    )
+}
+fn ensure_source_url_change_allowed(
+    stats: &reader_application::SubscriptionStats,
+) -> Result<(), ApiFailure> {
+    if stats.editable_web_feed {
+        Err(ApiFailure::Validation(
+            "web feed source URL must be changed through its extraction recipe",
+        ))
+    } else {
+        Ok(())
+    }
+}
+async fn preview_subscription_source_url<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<PreviewSourceUrlRequest>,
+) -> Result<Json<SourceUrlPreviewResponse>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let actor = auth(&s, &headers).await?;
+    let subscription =
+        owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &subscription).await?;
+    ensure_source_url_change_allowed(&stats)?;
+    let url = Url::parse(&body.url).map_err(|_| ApiFailure::Validation("invalid feed URL"))?;
+    let preview = s
+        .discovery
+        .discover(url.clone())
+        .await
+        .map_err(ApiFailure::Discovery)?;
+    let token = Uuid::new_v4();
+    let expires_at = Utc::now() + chrono::Duration::minutes(10);
+    s.repository
+        .save_source_url_preview(reader_application::SourceUrlPreviewRecord {
+            id: token,
+            subscription_id: subscription.id(),
+            url: body.url.clone(),
+            source_title: preview.title.clone(),
+            expires_at,
+            revision: 0,
+        })
+        .await?;
+    Ok(Json(SourceUrlPreviewResponse {
+        token,
+        url: body.url,
+        title: preview.title,
+        expires_at,
+    }))
+}
+async fn commit_subscription_source_url<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<CommitSourceUrlRequest>,
+) -> Result<Json<SubscriptionView>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let actor = auth(&s, &headers).await?;
+    let mut subscription =
+        owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &subscription).await?;
+    ensure_source_url_change_allowed(&stats)?;
+    let preview = s.repository.source_url_preview(body.preview_token).await?;
+    if preview.subscription_id != subscription.id() {
+        return Err(ApiFailure::Repository(RepositoryError::NotFound));
+    }
+    if preview.expires_at <= Utc::now() {
+        return Err(ApiFailure::Validation("source URL preview expired"));
+    }
+    let url = Url::parse(&preview.url)
+        .map_err(|_| ApiFailure::Validation("stored source URL preview is invalid"))?;
+    if s.repository
+        .subscriptions_by_workspace(subscription.workspace_id())
+        .await?
+        .iter()
+        .any(|candidate| {
+            candidate.id() != subscription.id() && candidate.source_url_exact() == preview.url
+        })
+    {
+        return Err(ApiFailure::ExistingSubscription(false));
+    }
+    let verified = s
+        .discovery
+        .discover(url.clone())
+        .await
+        .map_err(ApiFailure::Discovery)?;
+    if verified.title != preview.source_title {
+        return Err(ApiFailure::Validation("source changed since preview"));
+    }
+    let revision = subscription.revision();
+    subscription
+        .replace_source(url, preview.url, preview.source_title)
+        .map_err(|_| ApiFailure::Validation("source URL preview is inconsistent"))?;
+    s.repository
+        .replace_subscription_source(revision, subscription.clone())
+        .await?;
+    let stats = subscription_stats_for(s.repository.as_ref(), &subscription).await?;
+    Ok(Json(subscription_view(&subscription, &stats)))
 }
 async fn unsubscribe<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
@@ -548,7 +775,14 @@ async fn web_feed_recipe<R: ReaderRepository + 'static>(
         return Ok(Json(preview).into_response());
     }
     let url = Url::parse(&body.url).map_err(|_| ApiFailure::Validation("invalid web feed URL"))?;
-    let value = Subscription::new(SubscriptionId::new(), workspace, url, preview.title);
+    let value = Subscription::new_with_exact_url(
+        SubscriptionId::new(),
+        workspace,
+        url,
+        body.url.clone(),
+        preview.title,
+    )
+    .map_err(|_| ApiFailure::Validation("web feed URL does not match parsed URL"))?;
     let recipe_json = serde_json::to_string(&body)
         .map_err(|_| ApiFailure::Validation("invalid web feed recipe"))?;
     s.repository
@@ -1106,10 +1340,15 @@ async fn owned_workspace<R: ReaderRepository>(
     owner: AccountId,
 ) -> Result<Workspace, ApiFailure> {
     let value = s.repository.workspace(id).await?;
-    if value.owner() != owner {
-        return Err(ApiFailure::Forbidden);
-    }
+    require_owner(value.owner(), owner)?;
     Ok(value)
+}
+fn require_owner(actual: AccountId, expected: AccountId) -> Result<(), ApiFailure> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(ApiFailure::Repository(RepositoryError::NotFound))
+    }
 }
 async fn owned_subscription<R: ReaderRepository>(
     s: &AppState<R>,
@@ -1288,9 +1527,29 @@ fn subscription_view(
     SubscriptionView {
         id: value.id().as_uuid(),
         name: value.title().to_owned(),
+        source_title: value.source_title().to_owned(),
+        custom_name: value.custom_name().map(str::to_owned),
+        personal_note: value.personal_note().to_owned(),
+        source_url: value.source_url_exact().to_owned(),
+        source_type: stats.source_type.clone(),
+        created_at: value.created_at(),
         count: stats.article_count,
+        unread_count: stats.unread_count,
         status: status.to_owned(),
         last_update: stats.last_success_at,
+        last_error_at: stats.last_error_at,
+        consecutive_failures: stats.consecutive_failures,
+        needs_attention: stats.consecutive_failures >= 3 || stats.incomplete,
+        attention_reason: if stats.consecutive_failures >= 3 {
+            stats
+                .error
+                .clone()
+                .or_else(|| Some("Three consecutive refresh failures".to_owned()))
+        } else if stats.incomplete {
+            Some("Source refresh is incomplete and requires continuation".to_owned())
+        } else {
+            None
+        },
         incomplete: stats.incomplete,
         continuation: stats.continuation.clone(),
         error: stats.error.clone(),

@@ -45,6 +45,10 @@ pub(crate) struct SourceHealth {
     pub(crate) last_success_ms: Option<i64>,
     pub(crate) incomplete: bool,
     pub(crate) error: Option<String>,
+    #[serde(default)]
+    pub(crate) last_error_ms: Option<i64>,
+    #[serde(default)]
+    pub(crate) consecutive_failures: u32,
 }
 impl<'a, 'b: 'a> IntoIterator for &'a &'b mut RecordBatch {
     type Item = &'a PolledRecord;
@@ -74,6 +78,98 @@ pub(crate) fn manifest_is_current_or_newer(
             && current.fetched_at >= candidate.fetched_at)
 }
 
+async fn record_subscription_activity(
+    tx: &mut Transaction,
+    source: SourceId,
+    successful: bool,
+    duration_ms: Option<u64>,
+    discovered_items: Option<usize>,
+    diagnostic: Option<String>,
+    occurred_at: DateTime<Utc>,
+) -> Result<(), ydb::YdbOrCustomerError> {
+    let cutoff = (occurred_at - chrono::Duration::days(30)).timestamp_millis();
+    loop {
+        let expired = tx
+            .query_result_set("SELECT subscription_id,occurred_at_ms,id FROM subscription_activity VIEW expired_activity WHERE occurred_at_ms < $cutoff LIMIT 100")
+            .param("$cutoff", cutoff)
+            .await?;
+        let mut deleted = 0usize;
+        for mut expired in expired {
+            deleted += 1;
+            let subscription: String = expired
+                .remove_field_by_name("subscription_id")?
+                .try_into()?;
+            let occurred: i64 = expired.remove_field_by_name("occurred_at_ms")?.try_into()?;
+            let id: String = expired.remove_field_by_name("id")?.try_into()?;
+            tx.exec("DELETE FROM subscription_activity WHERE subscription_id=$subscription AND occurred_at_ms=$occurred AND id=$id")
+                .param("$subscription", subscription)
+                .param("$occurred", occurred)
+                .param("$id", id)
+                .await?;
+        }
+        if crate::activity_retention_complete(deleted) {
+            break;
+        }
+    }
+    let occurred_at_ms = occurred_at.timestamp_millis();
+    for mut row in tx
+        .query_result_set(
+            "SELECT subscription_id FROM subscription_sources WHERE source_id=$source",
+        )
+        .param("$source", source.as_uuid().to_string())
+        .await?
+    {
+        let subscription: String = row.remove_field_by_name("subscription_id")?.try_into()?;
+        let mut subscription_row = tx
+            .query_row("SELECT document FROM subscriptions WHERE id=$id")
+            .param("$id", subscription.clone())
+            .await?;
+        let subscription_document: String = subscription_row
+            .remove_field_by_name("document")?
+            .try_into()?;
+        let subscription_value: Subscription =
+            serde_json::from_str(&subscription_document).map_err(customer)?;
+        if !matches!(subscription_value.status(), SubscriptionStatus::Active) {
+            continue;
+        }
+        let mut workspace_row = tx
+            .query_row("SELECT document FROM workspaces WHERE id=$id")
+            .param(
+                "$id",
+                subscription_value.workspace_id().as_uuid().to_string(),
+            )
+            .await?;
+        let workspace_document: String =
+            workspace_row.remove_field_by_name("document")?.try_into()?;
+        let workspace: Workspace = serde_json::from_str(&workspace_document).map_err(customer)?;
+        if !workspace.accepts_delivery() {
+            continue;
+        }
+        let event = reader_application::SubscriptionActivity {
+            id: uuid::Uuid::new_v4(),
+            subscription_id: SubscriptionId::from_uuid(
+                uuid::Uuid::parse_str(&subscription).map_err(customer)?,
+            ),
+            occurred_at,
+            successful,
+            duration_ms,
+            discovered_items,
+            diagnostic: diagnostic.clone(),
+        };
+        tx.exec("UPSERT INTO subscription_activity (subscription_id,occurred_at_ms,id,document) VALUES ($subscription,$occurred,$id,$document)")
+            .param("$subscription", subscription.clone())
+            .param("$occurred", occurred_at_ms)
+            .param("$id", event.id.to_string())
+            .param("$document", serde_json::to_string(&event).map_err(customer)?)
+            .await?;
+        tx.exec("DELETE FROM subscription_activity WHERE subscription_id=$subscription AND occurred_at_ms < $cutoff")
+            .param("$subscription", subscription)
+            .param("$cutoff", cutoff)
+            .await?;
+    }
+    Ok(())
+}
+
 impl YdbIngestStore {
     async fn lease_update(
         &self,
@@ -90,7 +186,7 @@ impl YdbIngestStore {
         let diagnostic = diagnostic.map(str::to_owned);
         let changed=self.transport.client.query_client().retry_tx(ydb::closure!([id,token,status,diagnostic],async |tx:&mut Transaction|{
    let row=tx.query_row("SELECT lease_token,revision,item FROM ingest_jobs WHERE id=$id AND status='leased'").param("$id",id.clone()).optional().await?;let Some(mut row)=row else{return Ok::<_,ydb::YdbOrCustomerError>(false)};let current:Option<String>=row.remove_field_by_name("lease_token")?.try_into()?;let revision:u64=row.remove_field_by_name("revision")?.try_into()?;let item:String=row.remove_field_by_name("item")?.try_into()?;if current.as_deref()!=Some(token.as_str()){return Ok(false)}
-   tx.exec("UPDATE ingest_jobs SET status=$status,lease_deadline_ms=$deadline,run_at_ms=COALESCE($run_at,run_at_ms),diagnostic=$diagnostic,attempt=CASE WHEN $status='ready' THEN attempt+1 ELSE attempt END,revision=$next WHERE id=$id AND revision=$revision").param("$status",status.clone()).param("$deadline",deadline).param("$run_at",run_at).param("$diagnostic",diagnostic.clone()).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;if let Some(diagnostic)=diagnostic.clone(){let item:WorkItem=serde_json::from_str(&item).map_err(customer)?;if let WorkItem::PollSource{source_id}|WorkItem::RefreshSource{source_id}|WorkItem::CollectWebFeed{source_id}=item{let key=source_id.as_uuid().to_string();let current=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",key.clone()).optional().await?;let mut health=current.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.unwrap_or(SourceHealth{last_success_ms:None,incomplete:false,error:None});health.error=Some(diagnostic);tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",key).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;}}Ok(true)
+   tx.exec("UPDATE ingest_jobs SET status=$status,lease_deadline_ms=$deadline,run_at_ms=COALESCE($run_at,run_at_ms),diagnostic=$diagnostic,attempt=CASE WHEN $status='ready' THEN attempt+1 ELSE attempt END,revision=$next WHERE id=$id AND revision=$revision").param("$status",status.clone()).param("$deadline",deadline).param("$run_at",run_at).param("$diagnostic",diagnostic.clone()).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;if let Some(diagnostic)=diagnostic.clone(){let item:WorkItem=serde_json::from_str(&item).map_err(customer)?;if let WorkItem::PollSource{source_id}|WorkItem::RefreshSource{source_id}|WorkItem::CollectWebFeed{source_id}=item{let key=source_id.as_uuid().to_string();let current=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",key.clone()).optional().await?;let mut health=current.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.unwrap_or(SourceHealth{last_success_ms:None,incomplete:false,error:None,last_error_ms:None,consecutive_failures:0});health.error=Some(diagnostic.clone());health.last_error_ms=Some(Utc::now().timestamp_millis());health.consecutive_failures=health.consecutive_failures.saturating_add(1);tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",key).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;record_subscription_activity(tx,source_id,false,None,None,Some(diagnostic),Utc::now()).await?;}}Ok(true)
   })).await.map_err(storage)?;
         if changed {
             Ok(())
@@ -108,6 +204,8 @@ impl YdbIngestStore {
         let incomplete = commit.incomplete;
         let source_id = commit.source_id;
         let observed_at_ms = commit.fetched_at.timestamp_millis();
+        let duration_ms = commit.duration_ms;
+        let discovered_items = commit.records.len();
         let records = commit.records;
         let validators = encode(&SourcePollState {
             validators: commit.validators,
@@ -125,7 +223,7 @@ impl YdbIngestStore {
     if matches!(record.action,PollAction::Deliver|PollAction::Regroup){let item=WorkItem::FanOut{source_id:record.source_id(),record_id:record.id(),after_subscription:None};enqueue_work(tx,record_job("fanout",record.id(),record.revision()).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}
     if let Some(url)=record.key().location.fetch_url(){let item=WorkItem::ExtractFullText{record_id:record.id(),source_revision:record.revision(),url:url.clone(),manual:false};enqueue_work(tx,record_job("fulltext",record.id(),record.revision()).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}
    }
-   tx.exec("UPSERT INTO content_refresh_state (id,revision,document) VALUES ($id,0,$document)").param("$id",state_key.clone()).param("$document",validators.clone()).await?;let health=SourceHealth{last_success_ms:Some(observed_at_ms),incomplete,error:None};tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",source_id.as_uuid().to_string()).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;if incomplete{let item=WorkItem::RefreshSource{source_id};enqueue_work(tx,source_job(source_id,9).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}Ok::<(),ydb::YdbOrCustomerError>(())
+   tx.exec("UPSERT INTO content_refresh_state (id,revision,document) VALUES ($id,0,$document)").param("$id",state_key.clone()).param("$document",validators.clone()).await?;let health_key=source_id.as_uuid().to_string();let prior=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",health_key.clone()).optional().await?;let last_error_ms=prior.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.and_then(|health|health.last_error_ms);let health=SourceHealth{last_success_ms:Some(observed_at_ms),incomplete,error:None,last_error_ms,consecutive_failures:0};tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",source_id.as_uuid().to_string()).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;record_subscription_activity(tx,source_id,true,Some(duration_ms),Some(discovered_items),None,Utc::now()).await?;if incomplete{let item=WorkItem::RefreshSource{source_id};enqueue_work(tx,source_job(source_id,9).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}Ok::<(),ydb::YdbOrCustomerError>(())
   })).await.map_err(storage)
     }
     async fn record_source_success_tx(
@@ -134,6 +232,7 @@ impl YdbIngestStore {
         source: SourceId,
         at: DateTime<Utc>,
         incomplete: bool,
+        duration_ms: u64,
     ) -> Result<(), StoreError> {
         let job = lease.job_id.as_uuid().to_string();
         let token = lease.token.as_uuid().to_string();
@@ -142,10 +241,25 @@ impl YdbIngestStore {
             .query_client()
             .retry_tx(ydb::closure!([job, token], async |tx: &mut Transaction| {
                 assert_lease(tx, &job, &token).await?;
+                let key = source.as_uuid().to_string();
+                let prior = tx
+                    .query_row("SELECT document FROM source_health WHERE source_id=$id")
+                    .param("$id", key.clone())
+                    .optional()
+                    .await?;
+                let last_error_ms = prior
+                    .map(|mut row| -> Result<SourceHealth, ydb::YdbOrCustomerError> {
+                        let raw: String = row.remove_field_by_name("document")?.try_into()?;
+                        serde_json::from_str(&raw).map_err(customer)
+                    })
+                    .transpose()?
+                    .and_then(|health| health.last_error_ms);
                 let health = SourceHealth {
                     last_success_ms: Some(at.timestamp_millis()),
                     incomplete,
                     error: None,
+                    last_error_ms,
+                    consecutive_failures: 0,
                 };
                 tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)")
                     .param("$id", source.as_uuid().to_string())
@@ -153,6 +267,8 @@ impl YdbIngestStore {
                         "$document",
                         serde_json::to_string(&health).map_err(customer)?,
                     )
+                    .await?;
+                record_subscription_activity(tx, source, true, Some(duration_ms), None, None, at)
                     .await?;
                 Ok::<(), ydb::YdbOrCustomerError>(())
             }))
@@ -502,8 +618,9 @@ impl IngestStore for YdbIngestStore {
         source: SourceId,
         at: DateTime<Utc>,
         incomplete: bool,
+        duration_ms: u64,
     ) -> Result<(), StoreError> {
-        self.record_source_success_tx(lease, source, at, incomplete)
+        self.record_source_success_tx(lease, source, at, incomplete, duration_ms)
             .await
     }
     async fn record(&self, id: SourceRecordId) -> Result<SourceRecord, StoreError> {

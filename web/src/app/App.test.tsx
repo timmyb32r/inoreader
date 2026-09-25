@@ -65,6 +65,33 @@ describe("reader application", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 
+  it("guards internal and browser navigation while a personal note is dirty", async () => {
+    history.replaceState({}, "", "/subscriptions/sub");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const user = userEvent.setup();
+    const subscription={id:"sub",name:"This Week in Rust",sourceTitle:"This Week in Rust",sourceUrl:"https://example.com/feed",sourceType:"feed" as const,personalNote:"",count:3,unreadCount:2,status:"active" as const};
+    const client=mockClient({"/api/subscriptions/sub":subscription});const signOut=vi.spyOn(client,"signOut");
+    const view=render(<App client={client}/>);
+    await user.type(await screen.findByRole("textbox",{name:"Personal note"}),"keep me");
+    await user.click(screen.getByRole("button",{name:"← Back to subscriptions"}));
+    expect(window.location.pathname).toBe("/subscriptions/sub");
+    history.pushState({},"","/");window.dispatchEvent(new PopStateEvent("popstate"));
+    expect(window.location.pathname).toBe("/subscriptions/sub");
+    await user.click(screen.getByRole("button",{name:"Account menu"}));await user.click(screen.getByRole("menuitem",{name:"Sign out"}));
+    expect(signOut).not.toHaveBeenCalled();expect(confirm).toHaveBeenCalledTimes(3);
+    view.unmount();confirm.mockRestore();history.replaceState({},"","/");
+  });
+
+  it("uses a generic accessible name for every subscription options menu",async()=>{renderApp();expect(await screen.findAllByRole("button",{name:"More options"})).not.toHaveLength(0);expect(screen.queryByRole("button",{name:"Subscription actions"})).not.toBeInTheDocument()});
+
+  it("preserves the discovered source title when adding a subscription", async () => {
+    const calls:{path:string;body?:Record<string,unknown>}[]=[];
+    const base=mockClient();
+    const client=new ApiClient(async<T,>(path:string,init?:RequestInit)=>{calls.push({path,body:init?.body?JSON.parse(String(init.body)):undefined});if(path==="/api/bootstrap")return await base.bootstrap() as T;if(path==="/api/feeds/discover")return {title:"Canonical source title",kind:"rss",url:"https://example.com/feed",articles:[]} as T;if(path==="/api/subscriptions")return {id:"added",name:"Canonical source title",count:0,unreadCount:0,status:"active"} as T;return undefined as T});
+    const user=userEvent.setup();render(<App client={client}/>);await user.click(await screen.findByRole("button",{name:"Add subscription"}));await user.type(screen.getByLabelText("Feed or website URL"),"https://example.com/feed");await user.click(screen.getByRole("button",{name:"Check URL"}));await user.click(await within(screen.getByRole("dialog")).findByRole("button",{name:"Add subscription"}));
+    expect(calls.find(call=>call.path==="/api/subscriptions")?.body).toEqual({workspace_id:"ws",url:"https://example.com/feed",title:"Canonical source title"});
+  });
+
   it("requires a reason and retains it while validating pause", async () => {
     const user = userEvent.setup(); renderApp();
     const subscriptions=await screen.findByRole("navigation",{name:"Subscriptions"});
@@ -110,4 +137,6 @@ describe("reader application", () => {
     await userEvent.setup().click(screen.getByRole("button",{name:/Data engineering/}));
     expect(screen.getByRole("button", { name: /Финансы/ })).toBeInTheDocument();
   });
+
+  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/");renderApp();await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Subscriptions"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
 });

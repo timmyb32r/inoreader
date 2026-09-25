@@ -42,6 +42,9 @@ start_ydb() {
   local attempt
   for attempt in $(seq 1 90); do
     if docker exec "$name" /ydb -e grpc://localhost:2136 -d /local --no-discovery sql -s 'SELECT 1 AS ready;' >/dev/null 2>&1; then
+      # The query proxy becomes available a few seconds before the in-memory
+      # storage pool can accept table-creation operations.
+      sleep 5
       return 0
     fi
     if [[ "$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || true)" != true ]]; then
@@ -78,7 +81,10 @@ assert_query() {
 }
 
 start_ydb "$source_name"
-docker exec -i "$source_name" /ydb -e grpc://localhost:2136 -d /local --no-discovery sql <"$fixture"
+while IFS= read -r statement; do
+  [[ -z "$statement" ]] && continue
+  docker exec "$source_name" /ydb -e grpc://localhost:2136 -d /local --no-discovery sql --script "$statement" >/dev/null
+done <"$fixture"
 run_cli_tool /repo/tools/ydb_backup.sh --endpoint "grpc://${source_name}:2136" --database /local --output /artifacts/backup --no-discovery
 
 start_ydb "$target_name"

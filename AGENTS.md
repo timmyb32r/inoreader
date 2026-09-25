@@ -83,6 +83,30 @@ whose purpose is to crystallize good concepts quickly, not to preserve old APIs.
   boundaries with regression tests for every new conversion or destination
   constraint.
 
+## Absolute user isolation
+
+- Users are strict security and data-isolation boundaries. A user's subscriptions,
+  workspaces, custom names, notes, extraction recipes, rules, article state,
+  activity history, errors, exports, and all other user-visible or user-derived
+  data must never be visible to, returned to, mutated by, or inferred by another
+  user. Enforce ownership in repository queries and mutation boundaries; never
+  rely on frontend filtering or caller-supplied ownership identifiers.
+- Cross-user reuse is permitted only below the user-data boundary for fetching
+  the same public source. The system may coalesce or cache an outbound fetch so
+  that identical RSS or public-page URLs are requested once instead of once per
+  user. Shared fetch artifacts must contain no account credentials, private
+  headers, cookies, user configuration, notes, rules, read state, or other
+  tenant-specific data. Fan-out from a shared fetch must recreate and persist
+  each user's results independently under verified ownership.
+- Equality of source URLs never merges user-owned subscriptions or their state.
+  Unsubscribing, pausing, renaming, annotating, configuring, reading, saving,
+  deleting, or applying rules in one account must have no effect on another
+  account, even when both accounts consume the same fetched bytes.
+- Every feature that reads or writes user-owned data needs cross-user isolation
+  tests covering direct object lookup, list queries, mutations, exports, shared
+  source URLs, and guessed or reused identifiers. Treat any cross-user data
+  exposure or mutation as a release-blocking defect.
+
 ## User-visible semantics: never guess or silently transform
 
 - **Never make a product or UX decision on the user's behalf by silently changing

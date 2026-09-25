@@ -26,9 +26,20 @@ pub struct WorkspaceView {
 pub struct SubscriptionView {
     pub id: Uuid,
     pub name: String,
+    pub source_title: String,
+    pub custom_name: Option<String>,
+    pub personal_note: String,
+    pub source_url: String,
+    pub source_type: String,
+    pub created_at: Option<DateTime<Utc>>,
     pub count: usize,
+    pub unread_count: usize,
     pub status: String,
     pub last_update: Option<DateTime<Utc>>,
+    pub last_error_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: u32,
+    pub needs_attention: bool,
+    pub attention_reason: Option<String>,
     pub incomplete: bool,
     pub continuation: Option<String>,
     pub error: Option<String>,
@@ -145,6 +156,48 @@ pub struct AddSubscriptionRequest {
 #[serde(deny_unknown_fields)]
 pub struct RenameSubscriptionRequest {
     pub name: String,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SaveSubscriptionNoteRequest {
+    pub note: String,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionActivityView {
+    pub id: Uuid,
+    pub occurred_at: DateTime<Utc>,
+    pub successful: bool,
+    pub duration_ms: Option<u64>,
+    pub discovered_items: Option<usize>,
+    pub diagnostic: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PreviewSourceUrlRequest {
+    pub url: String,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceUrlPreviewResponse {
+    pub token: Uuid,
+    pub url: String,
+    pub title: String,
+    pub expires_at: DateTime<Utc>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CommitSourceUrlRequest {
+    pub preview_token: Uuid,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubscriptionExtractionView {
+    pub source_type: String,
+    pub feed_urls: Vec<String>,
+    pub recipe_version: Option<u64>,
+    pub recipe_summary: Option<String>,
+    pub last_preview: Option<DateTime<Utc>>,
 }
 #[derive(Debug, Deserialize)]
 pub struct ArticleListQuery {

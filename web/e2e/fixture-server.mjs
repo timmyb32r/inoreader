@@ -9,14 +9,18 @@ const articles = [
 ];
 const workspaces=[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}];
 let rules=[];
+let personalNote="";
+const subscription=()=>({id:"sub",name:"This Week in Rust",sourceTitle:"This Week in Rust",sourceUrl:"https://example.test/feed",sourceType:"feed",personalNote,count:2,unreadCount:2,status:"active",lastUpdate:"2026-09-25T18:00:00Z",editableWebFeed:false});
 const json=(response,status,body)=>{response.writeHead(status,{"content-type":"application/json"});response.end(JSON.stringify(body));};
 const body=async request=>{let value="";for await(const chunk of request)value+=chunk;return value?JSON.parse(value):{};};
 
 createServer(async(request,response)=>{
  const url=new URL(request.url,"http://127.0.0.1:4173");
  if(url.pathname.startsWith("/api/")){
-  if(url.pathname==="/api/bootstrap")return json(response,200,{account:{displayName:"Fixture",initials:"FX"},workspaces,activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"This Week in Rust",count:2,status:"active",lastUpdate:"now"}],articles,newArticleCount:0});
-  if(url.pathname==="/api/subscriptions"&&request.method==="GET")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[]:[{id:"sub",name:"This Week in Rust",count:2,status:"active",lastUpdate:"now"}]);
+  if(url.pathname==="/api/bootstrap")return json(response,200,{account:{displayName:"Fixture",initials:"FX"},workspaces,activeWorkspaceId:"ws",subscriptions:[subscription()],articles,newArticleCount:0});
+  if(url.pathname==="/api/subscriptions"&&request.method==="GET")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[]:[subscription()]);
+  if(url.pathname==="/api/subscriptions/sub"&&request.method==="GET")return json(response,200,subscription());
+  if(url.pathname==="/api/subscriptions/sub/note"&&request.method==="PUT"){personalNote=(await body(request)).note;return json(response,200,subscription());}
   if(url.pathname==="/api/articles")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[{...articles[0],id:"finance-1",title:"Finance workspace article"}]:articles);
   if(/\/api\/articles\/[^/]+\/state/.test(url.pathname)){const patch=await body(request);const item=articles.find(value=>url.pathname.includes(value.id));return json(response,200,{...item,...patch});}
   if(url.pathname==="/api/feeds/discover")return json(response,200,{title:"Fixture Feed",kind:"rss",url:"https://feed.test",articles:[{title:"Discovered article"}]});

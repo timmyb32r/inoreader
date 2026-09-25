@@ -71,5 +71,5 @@ fi
 
 connection=(--endpoint "$endpoint" --database "$database")
 if [[ "$no_discovery" == true ]]; then connection+=(--no-discovery); fi
-ydb "${connection[@]}" tools restore --path / --input "$input"
+ydb "${connection[@]}" tools restore --path "$database" --input "$input"
 printf 'restore completed; verify schema, primary rows, content manifests, and pending jobs before switching traffic\n'

@@ -28,7 +28,10 @@ use ydb::{
 mod ingest_store;
 pub use ingest_store::YdbIngestStore;
 
-const SCHEMA_VERSION: u64 = 6;
+const SCHEMA_VERSION: u64 = 7;
+fn activity_retention_complete(deleted: usize) -> bool {
+    deleted == 0
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 struct SchemaMarker {
     version: u64,
@@ -382,6 +385,21 @@ fn imported_source_kind(configuration: &serde_json::Value) -> Result<SourceKind,
     .map_err(|e| RepositoryError::Storage(e.to_string()))?;
     Ok(SourceKind::WebPage(recipe))
 }
+fn subscription_source_type(kind: &SourceKind) -> &'static str {
+    match kind {
+        SourceKind::WebPage(_) => "web",
+        SourceKind::BuiltIn(_) => "built_in",
+        SourceKind::Auto | SourceKind::XmlFeed | SourceKind::JsonFeed => "feed",
+    }
+}
+fn subscription_article_counts(
+    article_ids: Option<&std::collections::HashSet<String>>,
+    unread_articles: &std::collections::HashSet<String>,
+) -> (usize, usize) {
+    let total = article_ids.map_or(0, std::collections::HashSet::len);
+    let unread = article_ids.map_or(0, |ids| ids.intersection(unread_articles).count());
+    (total, unread)
+}
 
 /// Explicit production schema. None of these tables has a TTL.
 pub const SCHEMA_DDL: &[&str] = &[
@@ -413,8 +431,17 @@ pub const SCHEMA_DDL: &[&str] = &[
     "CREATE TABLE IF NOT EXISTS source_urls (url Utf8 NOT NULL, source_id Utf8 NOT NULL, PRIMARY KEY (url))",
     "CREATE TABLE IF NOT EXISTS subscription_sources (subscription_id Utf8 NOT NULL, source_id Utf8 NOT NULL, PRIMARY KEY (subscription_id))",
     "CREATE TABLE IF NOT EXISTS source_health (source_id Utf8 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (source_id))",
+    "CREATE TABLE IF NOT EXISTS subscription_activity (subscription_id Utf8 NOT NULL, occurred_at_ms Int64 NOT NULL, id Utf8 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (subscription_id, occurred_at_ms, id), INDEX expired_activity GLOBAL ON (occurred_at_ms))",
+    "CREATE TABLE IF NOT EXISTS source_url_previews (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id))",
+    "CREATE TABLE IF NOT EXISTS workspace_feed_urls (id Utf8 NOT NULL, subscription_id Utf8 NOT NULL, PRIMARY KEY (id))",
     "CREATE TABLE IF NOT EXISTS seed_items (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id))",
     "CREATE TABLE IF NOT EXISTS rule_evaluations (workspace_id Utf8 NOT NULL, article_id Utf8 NOT NULL, rule_id Utf8 NOT NULL, rule_version Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (workspace_id, article_id, rule_id, rule_version))",
+];
+
+const SCHEMA_V7_DDL: &[&str] = &[
+    "CREATE TABLE IF NOT EXISTS subscription_activity (subscription_id Utf8 NOT NULL, occurred_at_ms Int64 NOT NULL, id Utf8 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (subscription_id, occurred_at_ms, id), INDEX expired_activity GLOBAL ON (occurred_at_ms))",
+    "CREATE TABLE IF NOT EXISTS source_url_previews (id Utf8 NOT NULL, revision Uint64 NOT NULL, document Utf8 NOT NULL, PRIMARY KEY (id))",
+    "CREATE TABLE IF NOT EXISTS workspace_feed_urls (id Utf8 NOT NULL, subscription_id Utf8 NOT NULL, PRIMARY KEY (id))",
 ];
 
 pub struct ProductionYdbTransport {
@@ -718,6 +745,7 @@ pub trait YdbTransport: Send + Sync {
         job_id: String,
         job_item: Vec<u8>,
         backfill_limit: usize,
+        workspace_feed_url: Option<String>,
         isolated_source: bool,
         recipe_document: Option<String>,
     ) -> Result<(), String>;
@@ -774,10 +802,44 @@ pub trait YdbTransport: Send + Sync {
         &self,
         subscription_id: String,
     ) -> Result<Option<String>, String>;
+    async fn replace_subscription_source(
+        &self,
+        subscription_id: String,
+        expected_revision: u64,
+        revision: u64,
+        subscription_document: Vec<u8>,
+        old_workspace_feed_url: String,
+        new_workspace_feed_url: String,
+        source_url: String,
+        proposed_source_id: String,
+        source_document: Vec<u8>,
+        job_id: String,
+        job_item: Vec<u8>,
+    ) -> Result<bool, String>;
     async fn subscription_stats(
         &self,
         workspace_id: String,
-    ) -> Result<Vec<(String, usize, Option<i64>, bool, Option<String>, bool)>, String>;
+        subscription_ids: Vec<String>,
+    ) -> Result<
+        Vec<(
+            String,
+            usize,
+            usize,
+            Option<i64>,
+            Option<i64>,
+            u32,
+            bool,
+            Option<String>,
+            bool,
+            String,
+        )>,
+        String,
+    >;
+    async fn subscription_activity(
+        &self,
+        subscription_id: String,
+        since_ms: i64,
+    ) -> Result<Vec<Vec<u8>>, String>;
     async fn apply_seed(
         &self,
         rows: Vec<(
@@ -1000,6 +1062,7 @@ impl YdbTransport for ProductionYdbTransport {
         job_id: String,
         job_item: Vec<u8>,
         backfill_limit: usize,
+        workspace_feed_url: Option<String>,
         isolated_source: bool,
         recipe_document: Option<String>,
     ) -> Result<(), String> {
@@ -1009,9 +1072,10 @@ impl YdbTransport for ProductionYdbTransport {
             .map_err(|_| "source document is not UTF-8".to_owned())?;
         let job_item =
             String::from_utf8(job_item).map_err(|_| "job item is not UTF-8".to_owned())?;
-        self.client.query_client().retry_tx(ydb::closure!([subscription_id,subscription_document,source_url,proposed_source_id,source_document,job_id,job_item,isolated_source,recipe_document],async |tx:&mut Transaction|{
+        self.client.query_client().retry_tx(ydb::closure!([subscription_id,subscription_document,source_url,proposed_source_id,source_document,job_id,job_item,workspace_feed_url,isolated_source,recipe_document],async |tx:&mut Transaction|{
+            if let Some(key)=workspace_feed_url.clone(){if tx.query_row("SELECT subscription_id FROM workspace_feed_urls WHERE id=$id").param("$id",key.clone()).optional().await?.is_some(){return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("feed URL already exists in workspace".into())))}tx.exec("UPSERT INTO workspace_feed_urls (id,subscription_id) VALUES ($id,$subscription)").param("$id",key).param("$subscription",subscription_id.clone()).await?;}
             let existing=if *isolated_source{None}else{tx.query_row("SELECT source_id FROM source_urls WHERE url=$url").param("$url",source_url.clone()).optional().await?};
-            let source_id=match existing{Some(mut row)=>{let value:String=row.remove_field_by_name("source_id")?.try_into()?;value},None=>{
+            let source_id:String=match existing{Some(mut row)=>{let value:String=row.remove_field_by_name("source_id")?.try_into()?;value},None=>{
                 if !*isolated_source{tx.exec("UPSERT INTO source_urls (url,source_id) VALUES ($url,$source_id)").param("$url",source_url.clone()).param("$source_id",proposed_source_id.clone()).await?;}
                 tx.exec("UPSERT INTO sources (id,revision,document) VALUES ($source_id,0,$document)").param("$source_id",proposed_source_id.clone()).param("$document",source_document.clone()).await?;
                 proposed_source_id.clone()
@@ -1105,7 +1169,7 @@ impl YdbTransport for ProductionYdbTransport {
                 job,
             ));
         }
-        self.client.query_client().retry_tx(ydb::closure!([converted],async |tx:&mut Transaction|{for(id,_,_,_,_,_)in converted.iter(){if tx.query_row("SELECT id FROM subscriptions WHERE id=$id").param("$id",id.clone()).optional().await?.is_some(){return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("subscription already exists".into())))}}for(id,sub,url,proposed_source_id,source,job)in converted.iter(){let existing=tx.query_row("SELECT source_id FROM source_urls WHERE url=$url").param("$url",url.clone()).optional().await?;let source_id=match existing{Some(mut row)=>{let value:String=row.remove_field_by_name("source_id")?.try_into()?;value},None=>{tx.exec("UPSERT INTO source_urls (url,source_id) VALUES ($url,$source_id)").param("$url",url.clone()).param("$source_id",proposed_source_id.clone()).await?;tx.exec("UPSERT INTO sources (id,revision,document) VALUES ($source_id,0,$document)").param("$source_id",proposed_source_id.clone()).param("$document",source.clone()).await?;proposed_source_id.clone()}};tx.exec("UPSERT INTO subscriptions (id,revision,document) VALUES ($id,0,$document)").param("$id",id.clone()).param("$document",sub.clone()).await?;tx.exec("UPSERT INTO subscription_sources (subscription_id,source_id) VALUES ($subscription_id,$source_id)").param("$subscription_id",id.clone()).param("$source_id",source_id.clone()).await?;let source_uuid=uuid::Uuid::parse_str(&source_id).map_err(|_|ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("stored source id is invalid".into())))?;let source_id=SourceId::from_uuid(source_uuid);let item=WorkItem::PollSource{source_id};enqueue_work(tx,job.clone(),&item,chrono::Utc::now().timestamp_millis()).await?;enqueue_subscription_backfill(tx,source_id,id,backfill_limit).await?;}Ok::<(),ydb::YdbOrCustomerError>(())})).await.map_err(|e|e.to_string())
+        self.client.query_client().retry_tx(ydb::closure!([converted],async |tx:&mut Transaction|{for(id,_,_,_,_,_)in converted.iter(){if tx.query_row("SELECT id FROM subscriptions WHERE id=$id").param("$id",id.clone()).optional().await?.is_some(){return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("subscription already exists".into())))}}for(id,sub,url,proposed_source_id,source,job)in converted.iter(){let existing=tx.query_row("SELECT source_id FROM source_urls WHERE url=$url").param("$url",url.clone()).optional().await?;let source_id:String=match existing{Some(mut row)=>{let value:String=row.remove_field_by_name("source_id")?.try_into()?;value},None=>{tx.exec("UPSERT INTO source_urls (url,source_id) VALUES ($url,$source_id)").param("$url",url.clone()).param("$source_id",proposed_source_id.clone()).await?;tx.exec("UPSERT INTO sources (id,revision,document) VALUES ($source_id,0,$document)").param("$source_id",proposed_source_id.clone()).param("$document",source.clone()).await?;proposed_source_id.clone()}};tx.exec("UPSERT INTO subscriptions (id,revision,document) VALUES ($id,0,$document)").param("$id",id.clone()).param("$document",sub.clone()).await?;tx.exec("UPSERT INTO subscription_sources (subscription_id,source_id) VALUES ($subscription_id,$source_id)").param("$subscription_id",id.clone()).param("$source_id",source_id.clone()).await?;let source_uuid=uuid::Uuid::parse_str(&source_id).map_err(|_|ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("stored source id is invalid".into())))?;let source_id=SourceId::from_uuid(source_uuid);let item=WorkItem::PollSource{source_id};enqueue_work(tx,job.clone(),&item,chrono::Utc::now().timestamp_millis()).await?;enqueue_subscription_backfill(tx,source_id,id,backfill_limit).await?;}Ok::<(),ydb::YdbOrCustomerError>(())})).await.map_err(|e|e.to_string())
     }
     async fn presentation_metadata(
         &self,
@@ -1263,77 +1327,221 @@ impl YdbTransport for ProductionYdbTransport {
         })
         .transpose()
     }
+    async fn replace_subscription_source(
+        &self,
+        subscription_id: String,
+        expected_revision: u64,
+        revision: u64,
+        subscription_document: Vec<u8>,
+        old_workspace_feed_url: String,
+        new_workspace_feed_url: String,
+        source_url: String,
+        proposed_source_id: String,
+        source_document: Vec<u8>,
+        job_id: String,
+        job_item: Vec<u8>,
+    ) -> Result<bool, String> {
+        let subscription_document = String::from_utf8(subscription_document)
+            .map_err(|_| "subscription document is not UTF-8".to_owned())?;
+        let source_document = String::from_utf8(source_document)
+            .map_err(|_| "source document is not UTF-8".to_owned())?;
+        let job_item =
+            String::from_utf8(job_item).map_err(|_| "job item is not UTF-8".to_owned())?;
+        self.client.query_client().retry_tx(ydb::closure!([subscription_id,subscription_document,old_workspace_feed_url,new_workspace_feed_url,source_url,proposed_source_id,source_document,job_id,job_item],async |tx:&mut Transaction|{
+            let row=tx.query_row("SELECT revision FROM subscriptions WHERE id=$id").param("$id",subscription_id.clone()).optional().await?;let current=row.map(|mut row|->ydb::YdbResult<u64>{Ok(row.remove_field_by_name("revision")?.try_into()?)}).transpose()?;if current!=Some(expected_revision){return Ok(false)}
+            if let Some(mut row)=tx.query_row("SELECT subscription_id FROM workspace_feed_urls WHERE id=$id").param("$id",new_workspace_feed_url.clone()).optional().await?{let owner:String=row.remove_field_by_name("subscription_id")?.try_into()?;if owner!=*subscription_id{return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("feed URL already exists in workspace".into())))}}
+            let existing=tx.query_row("SELECT source_id FROM source_urls WHERE url=$url").param("$url",source_url.clone()).optional().await?;let source_id:String=match existing{Some(mut row)=>row.remove_field_by_name("source_id")?.try_into()?,None=>{tx.exec("UPSERT INTO source_urls (url,source_id) VALUES ($url,$source)").param("$url",source_url.clone()).param("$source",proposed_source_id.clone()).await?;tx.exec("UPSERT INTO sources (id,revision,document) VALUES ($id,0,$document)").param("$id",proposed_source_id.clone()).param("$document",source_document.clone()).await?;proposed_source_id.clone()}};
+            tx.exec("DELETE FROM workspace_feed_urls WHERE id=$id").param("$id",old_workspace_feed_url.clone()).await?;tx.exec("UPSERT INTO workspace_feed_urls (id,subscription_id) VALUES ($id,$subscription)").param("$id",new_workspace_feed_url.clone()).param("$subscription",subscription_id.clone()).await?;tx.exec("UPSERT INTO subscriptions (id,revision,document) VALUES ($id,$revision,$document)").param("$id",subscription_id.clone()).param("$revision",revision).param("$document",subscription_document.clone()).await?;tx.exec("UPSERT INTO subscription_sources (subscription_id,source_id) VALUES ($subscription,$source)").param("$subscription",subscription_id.clone()).param("$source",source_id.clone()).await?;let actual=SourceId::from_uuid(uuid::Uuid::parse_str(&source_id).map_err(|e|ydb::YdbOrCustomerError::from(ydb::YdbError::Custom(e.to_string())))?);let mut item:WorkItem=serde_json::from_str(&job_item).map_err(|e|ydb::YdbOrCustomerError::from(ydb::YdbError::Custom(e.to_string())))?;match &mut item{WorkItem::PollSource{source_id}|WorkItem::RefreshSource{source_id}=>*source_id=actual,_=>return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("invalid source replacement work item".into())))}enqueue_work(tx,job_id.clone(),&item,chrono::Utc::now().timestamp_millis()).await?;Ok(true)
+        })).await.map_err(|e|e.to_string())
+    }
     async fn subscription_stats(
         &self,
         workspace_id: String,
-    ) -> Result<Vec<(String, usize, Option<i64>, bool, Option<String>, bool)>, String> {
+        subscription_ids: Vec<String>,
+    ) -> Result<
+        Vec<(
+            String,
+            usize,
+            usize,
+            Option<i64>,
+            Option<i64>,
+            u32,
+            bool,
+            Option<String>,
+            bool,
+            String,
+        )>,
+        String,
+    > {
         let mut query = self.client.query_client();
-        let mut counts = std::collections::HashMap::new();
-        for mut row in query.query_result_set("SELECT subscription_id,COUNT(*) AS total FROM library_origins WHERE workspace_id=$workspace GROUP BY subscription_id").param("$workspace",workspace_id).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("subscription_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let total:u64=row.remove_field_by_name("total").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;counts.insert(id,total as usize);}
-        let mut health = std::collections::HashMap::new();
+        let mut article_ids_by_subscription =
+            std::collections::HashMap::<String, std::collections::HashSet<String>>::new();
         for mut row in query
-            .query_result_set("SELECT source_id,document FROM source_health")
+            .query_result_set("SELECT subscription_id,article_id FROM library_origins WHERE workspace_id=$workspace")
+            .param("$workspace", workspace_id.clone())
             .await
             .map_err(|e| e.to_string())?
         {
-            let id: String = row
-                .remove_field_by_name("source_id")
-                .map_err(|e| e.to_string())?
-                .try_into()
-                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let subscription: String = row.remove_field_by_name("subscription_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+            let article: String = row.remove_field_by_name("article_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+            article_ids_by_subscription.entry(subscription).or_default().insert(article);
+        }
+        let mut unread_articles = std::collections::HashSet::new();
+        let prefix = format!("{workspace_id}/");
+        let upper = format!("{workspace_id}0");
+        for mut row in query
+            .query_result_set("SELECT document FROM articles WHERE id >= $prefix AND id < $upper")
+            .param("$prefix", prefix)
+            .param("$upper", upper)
+            .await
+            .map_err(|e| e.to_string())?
+        {
             let document: String = row
                 .remove_field_by_name("document")
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            health.insert(
-                id,
-                serde_json::from_str::<ingest_store::SourceHealth>(&document)
-                    .map_err(|e| e.to_string())?,
-            );
-        }
-        let mut editable = std::collections::HashSet::new();
-        for mut row in query
-            .query_result_set("SELECT id FROM web_feed_recipes")
-            .await
-            .map_err(|e| e.to_string())?
-        {
-            let id: String = row
-                .remove_field_by_name("id")
-                .map_err(|e| e.to_string())?
-                .try_into()
-                .map_err(|e: ydb::YdbError| e.to_string())?;
-            editable.insert(id);
+            let article: Article = serde_json::from_str(&document).map_err(|e| e.to_string())?;
+            if !article.state.read {
+                unread_articles.insert(article.id.as_uuid().to_string());
+            }
         }
         let mut result = Vec::new();
-        for mut row in query
-            .query_result_set("SELECT subscription_id,source_id FROM subscription_sources")
-            .await
-            .map_err(|e| e.to_string())?
-        {
-            let subscription: String = row
-                .remove_field_by_name("subscription_id")
+        for subscription in subscription_ids {
+            let Some(mut link) = query
+                .query_row("SELECT source_id FROM subscription_sources WHERE subscription_id=$subscription")
+                .param("$subscription", subscription.clone())
+                .optional()
+                .await
                 .map_err(|e| e.to_string())?
-                .try_into()
-                .map_err(|e: ydb::YdbError| e.to_string())?;
-            let source: String = row
+            else { continue };
+            let source: String = link
                 .remove_field_by_name("source_id")
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            let state = health.get(&source);
-            let count = counts.get(&subscription).copied().unwrap_or(0);
-            let is_editable = editable.contains(&subscription);
+            let health = if let Some(mut row) = query
+                .query_row("SELECT document FROM source_health WHERE source_id=$source")
+                .param("$source", source.clone())
+                .optional()
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                let document: String = row
+                    .remove_field_by_name("document")
+                    .map_err(|e| e.to_string())?
+                    .try_into()
+                    .map_err(|e: ydb::YdbError| e.to_string())?;
+                Some(
+                    serde_json::from_str::<ingest_store::SourceHealth>(&document)
+                        .map_err(|e| e.to_string())?,
+                )
+            } else {
+                None
+            };
+            let source_type = if let Some(mut row) = query
+                .query_row("SELECT document FROM sources WHERE id=$source")
+                .param("$source", source)
+                .optional()
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                let document: String = row
+                    .remove_field_by_name("document")
+                    .map_err(|e| e.to_string())?
+                    .try_into()
+                    .map_err(|e: ydb::YdbError| e.to_string())?;
+                let definition: SourceDefinition =
+                    serde_json::from_str(&document).map_err(|e| e.to_string())?;
+                subscription_source_type(definition.kind()).to_owned()
+            } else {
+                "feed".to_owned()
+            };
+            let is_editable = query
+                .query_row("SELECT id FROM web_feed_recipes WHERE id=$subscription")
+                .param("$subscription", subscription.clone())
+                .optional()
+                .await
+                .map_err(|e| e.to_string())?
+                .is_some();
+            let state = health.as_ref();
+            let (count, unread) = subscription_article_counts(
+                article_ids_by_subscription.get(&subscription),
+                &unread_articles,
+            );
             result.push((
                 subscription,
                 count,
+                unread,
                 state.and_then(|v| v.last_success_ms),
+                state.and_then(|v| v.last_error_ms),
+                state.map_or(0, |v| v.consecutive_failures),
                 state.is_some_and(|v| v.incomplete),
                 state.and_then(|v| v.error.clone()),
                 is_editable,
-            ))
+                source_type,
+            ));
         }
         Ok(result)
+    }
+    async fn subscription_activity(
+        &self,
+        subscription_id: String,
+        since_ms: i64,
+    ) -> Result<Vec<Vec<u8>>, String> {
+        let mut query = self.client.query_client();
+        loop {
+            let expired = query
+                .query_result_set("SELECT subscription_id,occurred_at_ms,id FROM subscription_activity VIEW expired_activity WHERE occurred_at_ms < $since LIMIT 100")
+                .param("$since", since_ms)
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut deleted = 0usize;
+            for mut row in expired {
+                deleted += 1;
+                let subscription: String = row
+                    .remove_field_by_name("subscription_id")
+                    .map_err(|e| e.to_string())?
+                    .try_into()
+                    .map_err(|e: ydb::YdbError| e.to_string())?;
+                let occurred: i64 = row
+                    .remove_field_by_name("occurred_at_ms")
+                    .map_err(|e| e.to_string())?
+                    .try_into()
+                    .map_err(|e: ydb::YdbError| e.to_string())?;
+                let id: String = row
+                    .remove_field_by_name("id")
+                    .map_err(|e| e.to_string())?
+                    .try_into()
+                    .map_err(|e: ydb::YdbError| e.to_string())?;
+                query.exec("DELETE FROM subscription_activity WHERE subscription_id=$subscription AND occurred_at_ms=$occurred AND id=$id").param("$subscription",subscription).param("$occurred",occurred).param("$id",id).await.map_err(|e|e.to_string())?;
+            }
+            if activity_retention_complete(deleted) {
+                break;
+            }
+        }
+        query
+            .exec("DELETE FROM subscription_activity WHERE subscription_id=$subscription AND occurred_at_ms < $since")
+            .param("$subscription", subscription_id.clone())
+            .param("$since", since_ms)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut values = Vec::new();
+        for mut row in query
+            .query_result_set("SELECT document FROM subscription_activity WHERE subscription_id=$subscription AND occurred_at_ms >= $since ORDER BY occurred_at_ms DESC")
+            .param("$subscription", subscription_id)
+            .param("$since", since_ms)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let document: String = row
+                .remove_field_by_name("document")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            values.push(document.into_bytes());
+        }
+        Ok(values)
     }
     async fn apply_seed(
         &self,
@@ -1487,12 +1695,13 @@ impl YdbTransport for ProductionYdbTransport {
 }
 
 pub async fn prepare_schema(transport: &impl YdbTransport) -> Result<(), RepositoryError> {
-    for statement in SCHEMA_DDL {
-        transport
-            .execute_ddl(statement)
-            .await
-            .map_err(RepositoryError::Storage)?;
-    }
+    // The metadata table is the only DDL needed before selecting an upgrade path.
+    // Replaying every historical CREATE against serverless YDB consumes its schema
+    // operation quota even with IF NOT EXISTS.
+    transport
+        .execute_ddl(SCHEMA_DDL[0])
+        .await
+        .map_err(RepositoryError::Storage)?;
     let key = "schema".to_owned();
     let current = transport
         .read("schema_metadata", key.clone())
@@ -1505,6 +1714,17 @@ pub async fn prepare_schema(transport: &impl YdbTransport) -> Result<(), Reposit
         .map(|v| v.version);
     if expected == Some(SCHEMA_VERSION) {
         return Ok(());
+    }
+    let statements = if expected == Some(6) {
+        SCHEMA_V7_DDL
+    } else {
+        &SCHEMA_DDL[1..]
+    };
+    for statement in statements {
+        transport
+            .execute_ddl(statement)
+            .await
+            .map_err(RepositoryError::Storage)?;
     }
     let marker = encode(&SchemaMarker {
         version: SCHEMA_VERSION,
@@ -1952,9 +2172,26 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
             .map(|v| (v.id().as_uuid().to_string(), v.id()))
             .collect::<std::collections::HashMap<_, _>>();
         let mut result = std::collections::HashMap::new();
-        for (id, count, last_success_ms, incomplete, error, editable_web_feed) in self
+        for (
+            id,
+            count,
+            unread_count,
+            last_success_ms,
+            last_error_ms,
+            consecutive_failures,
+            incomplete,
+            error,
+            editable_web_feed,
+            source_type,
+        ) in self
             .transport
-            .subscription_stats(workspace.as_uuid().to_string())
+            .subscription_stats(
+                workspace.as_uuid().to_string(),
+                subscriptions
+                    .iter()
+                    .map(|value| value.id().as_uuid().to_string())
+                    .collect(),
+            )
             .await
             .map_err(RepositoryError::Storage)?
         {
@@ -1965,12 +2202,16 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
                 subscription,
                 reader_application::SubscriptionStats {
                     article_count: count,
+                    unread_count,
                     last_success_at: last_success_ms
                         .and_then(chrono::DateTime::from_timestamp_millis),
+                    last_error_at: last_error_ms.and_then(chrono::DateTime::from_timestamp_millis),
+                    consecutive_failures,
                     incomplete,
                     continuation: incomplete.then(|| "A durable continuation is queued".to_owned()),
                     error,
                     editable_web_feed,
+                    source_type,
                 },
             );
         }
@@ -1978,6 +2219,25 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
             result.entry(subscription.id()).or_default();
         }
         Ok(result)
+    }
+    async fn subscription_activity(
+        &self,
+        owner: AccountId,
+        subscription: SubscriptionId,
+        since: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<reader_application::SubscriptionActivity>, RepositoryError> {
+        let value = self.subscription(subscription).await?;
+        let workspace = self.workspace(value.workspace_id()).await?;
+        if workspace.owner() != owner {
+            return Err(RepositoryError::NotFound);
+        }
+        self.transport
+            .subscription_activity(subscription.as_uuid().to_string(), since.timestamp_millis())
+            .await
+            .map_err(RepositoryError::Storage)?
+            .into_iter()
+            .map(|document| decode(&document))
+            .collect()
     }
     async fn save_subscription(
         &self,
@@ -2008,11 +2268,22 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
                     JobId::new().as_uuid().to_string(),
                     encode(&item)?,
                     self.initial_scope,
+                    Some(format!(
+                        "{}\0{}",
+                        value.workspace_id().as_uuid(),
+                        value.source_url_exact()
+                    )),
                     false,
                     None,
                 )
                 .await
-                .map_err(RepositoryError::Storage);
+                .map_err(|error| {
+                    if error.contains("feed URL already exists in workspace") {
+                        RepositoryError::Conflict
+                    } else {
+                        RepositoryError::Storage(error)
+                    }
+                });
         }
         cas(
             self.transport.as_ref(),
@@ -2020,6 +2291,91 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
             value.id().as_uuid().to_string(),
             expected,
             value.revision(),
+            &value,
+        )
+        .await
+    }
+    async fn replace_subscription_source(
+        &self,
+        expected_revision: u64,
+        value: Subscription,
+    ) -> Result<(), RepositoryError> {
+        value
+            .validate(self.reason_policy)
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        let current = self.subscription(value.id()).await?;
+        if current.revision() != expected_revision {
+            return Err(RepositoryError::Conflict);
+        }
+        let source = SourceDefinition::new(
+            SourceId::new(),
+            value.source_url().clone(),
+            SourceKind::Auto,
+        )
+        .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        let item = WorkItem::PollSource {
+            source_id: source.id(),
+        };
+        let old_key = format!(
+            "{}\0{}",
+            value.workspace_id().as_uuid(),
+            current.source_url_exact()
+        );
+        let new_key = format!(
+            "{}\0{}",
+            value.workspace_id().as_uuid(),
+            value.source_url_exact()
+        );
+        let changed = self
+            .transport
+            .replace_subscription_source(
+                value.id().as_uuid().to_string(),
+                expected_revision,
+                value.revision(),
+                encode(&value)?,
+                old_key,
+                new_key,
+                value.source_url().as_str().to_owned(),
+                source.id().as_uuid().to_string(),
+                encode(&source)?,
+                JobId::new().as_uuid().to_string(),
+                encode(&item)?,
+            )
+            .await
+            .map_err(|error| {
+                if error.contains("feed URL already exists in workspace") {
+                    RepositoryError::Conflict
+                } else {
+                    RepositoryError::Storage(error)
+                }
+            })?;
+        if changed {
+            Ok(())
+        } else {
+            Err(RepositoryError::Conflict)
+        }
+    }
+    async fn source_url_preview(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<reader_application::SourceUrlPreviewRecord, RepositoryError> {
+        read_one(
+            self.transport.as_ref(),
+            "source_url_previews",
+            id.to_string(),
+        )
+        .await
+    }
+    async fn save_source_url_preview(
+        &self,
+        value: reader_application::SourceUrlPreviewRecord,
+    ) -> Result<(), RepositoryError> {
+        cas(
+            self.transport.as_ref(),
+            "source_url_previews",
+            value.id.to_string(),
+            None,
+            value.revision,
             &value,
         )
         .await
@@ -2212,6 +2568,7 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
                 JobId::new().as_uuid().to_string(),
                 encode(&item)?,
                 self.initial_scope,
+                None,
                 true,
                 Some(recipe_json),
             )

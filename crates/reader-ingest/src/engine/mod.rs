@@ -217,6 +217,7 @@ where
         source_id: reader_core::SourceId,
         now: DateTime<Utc>,
     ) -> Result<(), IngestError> {
+        let started = std::time::Instant::now();
         // No active delivery means no new poll. Already received fulltext jobs are
         // independent and still finish.
         if self.store.active_delivery_count(source_id).await? == 0 {
@@ -232,7 +233,15 @@ where
         }
         if page.not_modified {
             self.store
-                .record_source_success(lease, source_id, now, false)
+                .record_source_success(
+                    lease,
+                    source_id,
+                    now,
+                    false,
+                    started.elapsed().as_millis().try_into().map_err(|_| {
+                        IngestError::Parse("poll duration exceeds u64 milliseconds".into())
+                    })?,
+                )
                 .await?;
             return Ok(());
         }
@@ -305,6 +314,9 @@ where
                     final_url: page.final_url,
                     validators: page.validators,
                     incomplete,
+                    duration_ms: started.elapsed().as_millis().try_into().map_err(|_| {
+                        IngestError::Parse("poll duration exceeds u64 milliseconds".into())
+                    })?,
                 },
             )
             .await?;
@@ -411,6 +423,7 @@ where
         source_id: reader_core::SourceId,
         now: DateTime<Utc>,
     ) -> Result<(), IngestError> {
+        let started = std::time::Instant::now();
         if self.browser.capability() == BrowserCapability::Degraded {
             return Err(IngestError::BrowserDegraded);
         }
@@ -478,6 +491,9 @@ where
                     final_url: source.url().clone(),
                     validators: Default::default(),
                     incomplete,
+                    duration_ms: started.elapsed().as_millis().try_into().map_err(|_| {
+                        IngestError::Parse("collection duration exceeds u64 milliseconds".into())
+                    })?,
                 },
             )
             .await?;

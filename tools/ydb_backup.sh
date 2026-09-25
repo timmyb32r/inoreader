@@ -39,7 +39,7 @@ fi
 
 connection=(--endpoint "$endpoint" --database "$database")
 if [[ "$no_discovery" == true ]]; then connection+=(--no-discovery); fi
-ydb "${connection[@]}" tools dump --path / --output "$output"
+ydb "${connection[@]}" tools dump --path "$database" --output "$output"
 created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {
   printf 'schema_version=2\n'

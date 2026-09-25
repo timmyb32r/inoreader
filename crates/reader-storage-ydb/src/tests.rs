@@ -208,6 +208,7 @@ impl YdbTransport for Transport {
         _: String,
         _: Vec<u8>,
         _: usize,
+        _: Option<String>,
         _: bool,
         _: Option<String>,
     ) -> Result<(), String> {
@@ -281,10 +282,44 @@ impl YdbTransport for Transport {
     async fn source_id_for_subscription(&self, _: String) -> Result<Option<String>, String> {
         Ok(None)
     }
+    async fn replace_subscription_source(
+        &self,
+        _: String,
+        _: u64,
+        _: u64,
+        _: Vec<u8>,
+        _: String,
+        _: String,
+        _: String,
+        _: String,
+        _: Vec<u8>,
+        _: String,
+        _: Vec<u8>,
+    ) -> Result<bool, String> {
+        no()
+    }
     async fn subscription_stats(
         &self,
         _: String,
-    ) -> Result<Vec<(String, usize, Option<i64>, bool, Option<String>, bool)>, String> {
+        _: Vec<String>,
+    ) -> Result<
+        Vec<(
+            String,
+            usize,
+            usize,
+            Option<i64>,
+            Option<i64>,
+            u32,
+            bool,
+            Option<String>,
+            bool,
+            String,
+        )>,
+        String,
+    > {
+        Ok(vec![])
+    }
+    async fn subscription_activity(&self, _: String, _: i64) -> Result<Vec<Vec<u8>>, String> {
         Ok(vec![])
     }
     async fn apply_seed(
@@ -338,6 +373,19 @@ async fn schema_preparation_upgrades_an_existing_marker_after_ddl() {
     let cas = transport.cas.lock().unwrap();
     assert_eq!(cas[0].2, Some(0));
     assert_eq!(cas[0].3, SCHEMA_VERSION);
+}
+
+#[tokio::test]
+async fn schema_v6_upgrade_executes_only_v7_ddl() {
+    let transport = Transport::default();
+    transport.rows.lock().unwrap().insert(
+        ("schema_metadata", "schema".into()),
+        serde_json::to_vec(&SchemaMarker { version: 6 }).unwrap(),
+    );
+    prepare_schema(&transport).await.unwrap();
+    let ddl = transport.ddl.lock().unwrap();
+    assert_eq!(ddl[0], SCHEMA_DDL[0]);
+    assert_eq!(&ddl[1..], SCHEMA_V7_DDL);
 }
 
 #[tokio::test]
@@ -457,6 +505,10 @@ fn schema_contains_durable_uniqueness_rate_limit_and_rule_provenance_tables() {
         schema.contains("INDEX leased_by_origin GLOBAL ON (status, origin_key, lease_deadline_ms)")
     );
     assert!(schema.contains("document Utf8 NOT NULL"));
+    assert!(schema.contains("CREATE TABLE IF NOT EXISTS subscription_activity"));
+    assert!(schema.contains("INDEX expired_activity GLOBAL ON (occurred_at_ms)"));
+    assert!(schema.contains("PRIMARY KEY (subscription_id, occurred_at_ms, id)"));
+    assert!(schema.contains("CREATE TABLE IF NOT EXISTS workspace_feed_urls"));
     assert!(!schema.contains("document String"));
     assert!(!schema.contains("item String"));
     assert!(!schema.contains("dedup_key String"));
@@ -572,6 +624,37 @@ fn every_known_source_configuration_has_a_validated_runtime_mapping() {
     assert_eq!((feed, web, built_in), (2, 33, 7));
 }
 
+#[test]
+fn built_in_adapter_is_not_reported_as_a_plain_feed() {
+    let inventory: serde_json::Value =
+        serde_json::from_str(include_str!("../../../source-inventory/inventory.json")).unwrap();
+    let built_in = inventory["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|source| {
+            let kind = imported_source_kind(&source["configuration"]).ok()?;
+            matches!(kind, SourceKind::BuiltIn(_)).then_some(kind)
+        })
+        .unwrap();
+    assert_eq!(subscription_source_type(&built_in), "built_in");
+}
+
+#[test]
+fn subscription_counts_unique_articles_and_only_actual_unread_state() {
+    let articles = ["read".to_owned(), "unread".to_owned()]
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    let unread = ["unread".to_owned(), "other-subscription".to_owned()]
+        .into_iter()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        subscription_article_counts(Some(&articles), &unread),
+        (2, 1)
+    );
+    assert_eq!(subscription_article_counts(None, &unread), (0, 0));
+}
+
 #[tokio::test]
 async fn rule_application_progress_is_scoped_and_reports_durable_evaluations() {
     let transport = Arc::new(Transport::default());
@@ -640,6 +723,54 @@ async fn repository_fails_closed_when_persisted_reason_exceeds_current_policy() 
     assert!(matches!(
         repository.workspace(workspace.id()).await,
         Err(RepositoryError::Storage(_))
+    ));
+}
+
+#[test]
+fn activity_retention_continues_past_more_than_one_hundred_inactive_rows() {
+    let mut remaining = 205usize;
+    let mut rounds = 0;
+    loop {
+        let deleted = remaining.min(100);
+        remaining -= deleted;
+        rounds += 1;
+        if super::activity_retention_complete(deleted) {
+            break;
+        }
+    }
+    assert_eq!(rounds, 4);
+    assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn subscription_activity_rejects_a_different_workspace_owner() {
+    let transport = Arc::new(Transport::default());
+    let owner = AccountId::new();
+    let workspace = Workspace::new(WorkspaceId::new(), owner, "Private".into());
+    let subscription = Subscription::new(
+        SubscriptionId::new(),
+        workspace.id(),
+        Url::parse("https://example.test/shared-feed").unwrap(),
+        "Private subscription".into(),
+    );
+    transport.rows.lock().unwrap().insert(
+        ("workspaces", workspace.id().as_uuid().to_string()),
+        serde_json::to_vec(&workspace).unwrap(),
+    );
+    transport.rows.lock().unwrap().insert(
+        ("subscriptions", subscription.id().as_uuid().to_string()),
+        serde_json::to_vec(&subscription).unwrap(),
+    );
+    let repository = YdbRepository::new(transport, ReasonPolicy::new(128).unwrap(), 100).unwrap();
+    assert!(matches!(
+        repository
+            .subscription_activity(
+                AccountId::new(),
+                subscription.id(),
+                chrono::Utc::now() - chrono::Duration::days(30),
+            )
+            .await,
+        Err(RepositoryError::NotFound)
     ));
 }
 

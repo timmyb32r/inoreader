@@ -79,14 +79,66 @@ pub struct RuleApplicationProgress {
     pub evaluated: usize,
     pub cancel_reason: Option<String>,
 }
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SubscriptionStats {
     pub article_count: usize,
+
+    pub unread_count: usize,
     pub last_success_at: Option<DateTime<Utc>>,
+    pub last_error_at: Option<DateTime<Utc>>,
+    pub consecutive_failures: u32,
     pub incomplete: bool,
     pub continuation: Option<String>,
     pub error: Option<String>,
     pub editable_web_feed: bool,
+
+    pub source_type: String,
+}
+impl Default for SubscriptionStats {
+    fn default() -> Self {
+        Self {
+            article_count: 0,
+            unread_count: 0,
+            last_success_at: None,
+            last_error_at: None,
+            consecutive_failures: 0,
+            incomplete: false,
+            continuation: None,
+            error: None,
+            editable_web_feed: false,
+            source_type: "feed".into(),
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SubscriptionActivity {
+    pub id: Uuid,
+
+    pub subscription_id: SubscriptionId,
+
+    pub occurred_at: DateTime<Utc>,
+
+    pub successful: bool,
+
+    pub duration_ms: Option<u64>,
+
+    pub discovered_items: Option<usize>,
+
+    pub diagnostic: Option<String>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceUrlPreviewRecord {
+    pub id: Uuid,
+
+    pub subscription_id: SubscriptionId,
+
+    pub url: String,
+
+    pub source_title: String,
+
+    pub expires_at: DateTime<Utc>,
+
+    pub revision: u64,
 }
 
 #[async_trait]
@@ -180,11 +232,48 @@ pub trait ReaderRepository: Send + Sync {
         workspace: WorkspaceId,
         subscriptions: &[Subscription],
     ) -> Result<std::collections::HashMap<SubscriptionId, SubscriptionStats>, RepositoryError>;
+    async fn subscription_activity(
+        &self,
+        owner: AccountId,
+        subscription: SubscriptionId,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<SubscriptionActivity>, RepositoryError> {
+        let _ = (owner, subscription, since);
+        Err(RepositoryError::Storage(
+            "subscription activity is unavailable".into(),
+        ))
+    }
     async fn save_subscription(
         &self,
         expected_revision: Option<u64>,
         value: Subscription,
     ) -> Result<(), RepositoryError>;
+    async fn replace_subscription_source(
+        &self,
+        expected_revision: u64,
+        value: Subscription,
+    ) -> Result<(), RepositoryError> {
+        let _ = (expected_revision, value);
+        Err(RepositoryError::Storage(
+            "source URL replacement is unavailable".into(),
+        ))
+    }
+    async fn source_url_preview(
+        &self,
+        id: Uuid,
+    ) -> Result<SourceUrlPreviewRecord, RepositoryError> {
+        let _ = id;
+        Err(RepositoryError::NotFound)
+    }
+    async fn save_source_url_preview(
+        &self,
+        value: SourceUrlPreviewRecord,
+    ) -> Result<(), RepositoryError> {
+        let _ = value;
+        Err(RepositoryError::Storage(
+            "source URL preview storage is unavailable".into(),
+        ))
+    }
     /// Atomically publishes an active subscription revision and its durable catch-up work.
     async fn activate_subscription_with_refresh(
         &self,

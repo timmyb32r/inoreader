@@ -113,6 +113,7 @@ impl IngestStore for StoreStub {
         _: SourceId,
         _: DateTime<Utc>,
         _: bool,
+        _: u64,
     ) -> Result<(), StoreError> {
         Ok(())
     }

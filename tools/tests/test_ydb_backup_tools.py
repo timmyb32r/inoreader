@@ -58,7 +58,7 @@ class YdbBackupToolsTest(unittest.TestCase):
         self.assertIn("source_endpoint=grpc://source:2136\n", manifest)
         self.assertIn("source_database=/local\n", manifest)
         self.assertIn("backup_directory=backup\n", manifest)
-        self.assertIn("--no-discovery tools dump --path /", self.log.read_text())
+        self.assertIn("--no-discovery tools dump --path /local", self.log.read_text())
 
     def test_restore_accepts_exact_noninteractive_target_identity(self):
         backup = self.base / "backup"
@@ -76,7 +76,7 @@ class YdbBackupToolsTest(unittest.TestCase):
             "--confirm-target", "grpc://target:2136|/local",
             "--no-discovery",
         )
-        self.assertIn("--no-discovery tools restore --path /", self.log.read_text())
+        self.assertIn("--no-discovery tools restore --path /local", self.log.read_text())
 
     def test_restore_rejects_source_and_mismatched_confirmation(self):
         backup = self.base / "backup"

@@ -120,6 +120,7 @@ pub trait IngestStore: Send + Sync {
         source: SourceId,
         at: DateTime<Utc>,
         incomplete: bool,
+        duration_ms: u64,
     ) -> Result<(), StoreError>;
     async fn record(&self, id: SourceRecordId) -> Result<SourceRecord, StoreError>;
     async fn record_by_upstream(
