@@ -37,7 +37,9 @@ services:
     command: ["--remote-allow-origins=*"]
     expose: ["9222"]
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:9222/json/version"]
+      # The pinned headless-shell image intentionally has no curl or wget. Its
+      # entrypoint exposes CDP through a local socat proxy, so probe that port.
+      test: ["CMD-SHELL", "timeout 2 socat /dev/null TCP:127.0.0.1:9222,connect-timeout=2"]
       interval: 10s
       timeout: 3s
       retries: 6
