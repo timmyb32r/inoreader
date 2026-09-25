@@ -667,6 +667,14 @@ pub trait YdbTransport: Send + Sync {
         account_key: String,
         account_document: Vec<u8>,
     ) -> Result<bool, String>;
+    async fn atomic_create_account_and_workspace(
+        &self,
+        username: String,
+        account_key: String,
+        account_document: Vec<u8>,
+        workspace_key: String,
+        workspace_document: Vec<u8>,
+    ) -> Result<bool, String>;
     async fn atomic_accept_invite(
         &self,
         invite_key: String,
@@ -901,6 +909,21 @@ impl YdbTransport for ProductionYdbTransport {
             .map_err(|_| "account document is not UTF-8".to_owned())?;
         let qc = self.client.query_client();
         qc.retry_tx(ydb::closure!([username,account_key,document],async |tx:&mut Transaction|{if tx.query_row("SELECT id FROM `username_reservations` WHERE id=$key").param("$key",username.clone()).optional().await?.is_some(){return Ok(false)}tx.exec("UPSERT INTO `username_reservations` (id,revision,document) VALUES ($key,0,$document)").param("$key",username.clone()).param("$document",account_key.clone()).await?;tx.exec("UPSERT INTO `accounts` (id,revision,document) VALUES ($key,0,$document)").param("$key",account_key.clone()).param("$document",document.clone()).await?;Ok(true)})).await.map_err(|e|e.to_string())
+    }
+    async fn atomic_create_account_and_workspace(
+        &self,
+        username: String,
+        account_key: String,
+        account_document: Vec<u8>,
+        workspace_key: String,
+        workspace_document: Vec<u8>,
+    ) -> Result<bool, String> {
+        let account_document = String::from_utf8(account_document)
+            .map_err(|_| "account document is not UTF-8".to_owned())?;
+        let workspace_document = String::from_utf8(workspace_document)
+            .map_err(|_| "workspace document is not UTF-8".to_owned())?;
+        let qc = self.client.query_client();
+        qc.retry_tx(ydb::closure!([username,account_key,account_document,workspace_key,workspace_document],async |tx:&mut Transaction|{if tx.query_row("SELECT id FROM `username_reservations` WHERE id=$key").param("$key",username.clone()).optional().await?.is_some(){return Ok(false)}tx.exec("UPSERT INTO `username_reservations` (id,revision,document) VALUES ($key,0,$document)").param("$key",username.clone()).param("$document",account_key.clone()).await?;tx.exec("UPSERT INTO `accounts` (id,revision,document) VALUES ($key,0,$document)").param("$key",account_key.clone()).param("$document",account_document.clone()).await?;tx.exec("UPSERT INTO `workspaces` (id,revision,document) VALUES ($key,0,$document)").param("$key",workspace_key.clone()).param("$document",workspace_document.clone()).await?;Ok(true)})).await.map_err(|e|e.to_string())
     }
     async fn atomic_accept_invite(
         &self,
@@ -1616,6 +1639,36 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
                 &value,
             )
             .await
+        }
+    }
+    async fn create_account_and_workspace(
+        &self,
+        account: reader_application::AccountRecord,
+        workspace: Workspace,
+    ) -> Result<(), RepositoryError> {
+        if workspace.owner() != account.id || workspace.revision() != 0 {
+            return Err(RepositoryError::Storage(
+                "initial workspace must belong to the new account at revision zero".into(),
+            ));
+        }
+        workspace
+            .validate(self.reason_policy)
+            .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+        let ok = self
+            .transport
+            .atomic_create_account_and_workspace(
+                account.username.clone(),
+                account.id.as_uuid().to_string(),
+                encode(&account)?,
+                workspace.id().as_uuid().to_string(),
+                encode(&workspace)?,
+            )
+            .await
+            .map_err(RepositoryError::Storage)?;
+        if ok {
+            Ok(())
+        } else {
+            Err(RepositoryError::Conflict)
         }
     }
     async fn invite_by_token_hash(

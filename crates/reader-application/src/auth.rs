@@ -315,7 +315,10 @@ impl<R: ReaderRepository> AuthService<R> {
             auth_revision: 0,
             revision: 0,
         };
-        self.repository.save_account(None, account.clone()).await?;
+        let workspace = Workspace::new(WorkspaceId::new(), account.id, "Personal".to_owned());
+        self.repository
+            .create_account_and_workspace(account.clone(), workspace)
+            .await?;
         Ok(account)
     }
 }

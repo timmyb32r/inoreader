@@ -104,6 +104,12 @@ pub trait ReaderRepository: Send + Sync {
         expected_revision: Option<u64>,
         value: AccountRecord,
     ) -> Result<(), RepositoryError>;
+    /// Atomically creates the first administrator and their initial workspace.
+    async fn create_account_and_workspace(
+        &self,
+        account: AccountRecord,
+        workspace: Workspace,
+    ) -> Result<(), RepositoryError>;
     async fn invite_by_token_hash(&self, token_hash: &str)
         -> Result<InviteRecord, RepositoryError>;
     async fn save_invite(

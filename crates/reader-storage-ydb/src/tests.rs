@@ -58,10 +58,42 @@ struct Transport {
     ddl_failure: Mutex<Option<&'static str>>,
     ingest: Mutex<HashMap<String, (String, String, Option<String>)>>,
     evaluations: Mutex<usize>,
+    account_workspaces: Mutex<Vec<(String, String, Vec<u8>, String, Vec<u8>)>>,
 }
 
 fn no<T>() -> Result<T, String> {
     Err("unused transport operation".into())
+}
+
+#[tokio::test]
+async fn administrator_creation_persists_account_and_initial_workspace_atomically() {
+    let transport = Arc::new(Transport::default());
+    let repository =
+        YdbRepository::new(transport.clone(), ReasonPolicy::new(128).unwrap(), 100).unwrap();
+    let account = reader_application::AccountRecord {
+        id: AccountId::new(),
+        username: "admin".into(),
+        password_hash: "encoded".into(),
+        admin: true,
+        auth_revision: 0,
+        revision: 0,
+    };
+    let workspace = Workspace::new(WorkspaceId::new(), account.id, "Personal".into());
+
+    repository
+        .create_account_and_workspace(account.clone(), workspace.clone())
+        .await
+        .unwrap();
+
+    let writes = transport.account_workspaces.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].0, "admin");
+    assert_eq!(writes[0].1, account.id.as_uuid().to_string());
+    assert_eq!(writes[0].3, workspace.id().as_uuid().to_string());
+    assert_eq!(
+        serde_json::from_slice::<Workspace>(&writes[0].4).unwrap(),
+        workspace
+    );
 }
 
 #[async_trait]
@@ -102,6 +134,23 @@ impl YdbTransport for Transport {
         _: Vec<u8>,
     ) -> Result<bool, String> {
         no()
+    }
+    async fn atomic_create_account_and_workspace(
+        &self,
+        username: String,
+        account_key: String,
+        account_document: Vec<u8>,
+        workspace_key: String,
+        workspace_document: Vec<u8>,
+    ) -> Result<bool, String> {
+        self.account_workspaces.lock().unwrap().push((
+            username,
+            account_key,
+            account_document,
+            workspace_key,
+            workspace_document,
+        ));
+        Ok(true)
     }
     async fn atomic_accept_invite(
         &self,

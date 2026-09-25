@@ -4,7 +4,7 @@ use crate::{
     SeedSource, SessionRecord,
 };
 use async_trait::async_trait;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use url::Url;
 use uuid::Uuid;
 
@@ -14,6 +14,7 @@ struct Repository {
     saved_workspace: Mutex<Vec<(Option<u64>, Workspace)>>,
     saved_subscription: Mutex<Vec<(Option<u64>, Subscription)>>,
     refreshes: Mutex<Vec<SubscriptionId>>,
+    created_account_workspace: Mutex<Vec<(AccountRecord, Workspace)>>,
 }
 
 impl Repository {
@@ -24,12 +25,46 @@ impl Repository {
             saved_workspace: Mutex::new(vec![]),
             saved_subscription: Mutex::new(vec![]),
             refreshes: Mutex::new(vec![]),
+            created_account_workspace: Mutex::new(vec![]),
         }
     }
 }
 
 fn unused<T>() -> Result<T, RepositoryError> {
     Err(RepositoryError::NotFound)
+}
+
+#[tokio::test]
+async fn bootstrap_admin_creates_an_owned_initial_workspace() {
+    let owner = AccountId::new();
+    let workspace = Workspace::new(WorkspaceId::new(), owner, "fixture".into());
+    let subscription = Subscription::new(
+        SubscriptionId::new(),
+        workspace.id(),
+        Url::parse("https://example.test/feed").unwrap(),
+        "Feed".into(),
+    );
+    let repository = Arc::new(Repository::new(workspace, subscription));
+    let service = crate::AuthService::new(
+        repository.clone(),
+        crate::AuthPolicy {
+            session_lifetime_seconds: 60,
+            invite_lifetime_seconds: 60,
+            reset_lifetime_seconds: 60,
+            argon2id: crate::Argon2idPolicy::new(8, 1, 1).unwrap(),
+        },
+    );
+
+    let account = service
+        .bootstrap_admin("admin".into(), "correct horse battery staple")
+        .await
+        .unwrap();
+
+    let writes = repository.created_account_workspace.lock().unwrap();
+    assert_eq!(writes.len(), 1);
+    assert_eq!(writes[0].0.id, account.id);
+    assert_eq!(writes[0].1.owner(), account.id);
+    assert_eq!(writes[0].1.name(), "Personal");
 }
 
 #[async_trait]
@@ -48,6 +83,17 @@ impl ReaderRepository for Repository {
     }
     async fn save_account(&self, _: Option<u64>, _: AccountRecord) -> Result<(), RepositoryError> {
         unused()
+    }
+    async fn create_account_and_workspace(
+        &self,
+        account: AccountRecord,
+        workspace: Workspace,
+    ) -> Result<(), RepositoryError> {
+        self.created_account_workspace
+            .lock()
+            .unwrap()
+            .push((account, workspace));
+        Ok(())
     }
     async fn invite_by_token_hash(&self, _: &str) -> Result<InviteRecord, RepositoryError> {
         unused()
