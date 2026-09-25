@@ -2,10 +2,23 @@ import { fireEvent, render, screen, within } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
 import { mockClient } from "../test/mockClient";
+import { ApiClient, ApiError } from "../api/client";
 
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  it("replaces the bootstrap spinner with a retryable error", async () => {
+    const client = new ApiClient(async () => {
+      throw new ApiError(500, "storage operation failed");
+    });
+    render(<App client={client}/>);
+
+    expect(await screen.findByRole("heading", { name: "Reader is unavailable" })).toBeVisible();
+    expect(screen.getByText("storage operation failed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+    expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
+  });
+
   it("opens an article and marks it read without changing saved state", async () => {
     const user = userEvent.setup(); renderApp();
     const row = (await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 })).closest("article")!;

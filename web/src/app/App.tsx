@@ -126,9 +126,9 @@ export function App({ client }: { client: ApiClient }) {
     window.addEventListener("keydown", keyboard); return () => window.removeEventListener("keydown", keyboard);
   }, []);
 
+  if (loadError) return <main class="fatal-state"><h1>Reader is unavailable</h1><p>{loadError}</p><button class="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
   if (signedIn === null) return <main class="fatal-state" aria-busy="true"><span class="spinner"/><p>Opening your library…</p></main>;
   if (!signedIn || /\/(invite|reset-password|change-password)/.test(window.location.pathname)) return <AuthScreen client={client} onSignedIn={() => setSignedIn(null)} />;
-  if (loadError) return <main class="fatal-state"><h1>Reader is unavailable</h1><p>{loadError}</p><button class="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
   return <div class={`app theme-${theme}`} data-theme={theme}>
     <header class="topbar">
       <button class="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setMobilePanel("nav")}><Icon name="menu" /></button>
