@@ -10,7 +10,7 @@ export function AuthScreen({ client, onSignedIn }: { client:ApiClient; onSignedI
   const submit = (event: Event) => { event.preventDefault();if(pending)return;if(mode!=="signin"&&password!==confirmation){setError("New password and confirmation must match.");return}setPending(true); setError("");const request=mode==="invite"?client.acceptInvite(token,username,password):mode==="reset"?client.resetPassword(token,password):mode==="change"?client.changePassword(currentPassword,password):client.signIn(username,password);request.then(()=>{if(mode!=="signin")window.history.replaceState({},"","/");onSignedIn();}).catch((failure: Error) => setError(failure.message)).finally(() => setPending(false)); };
   return <main class="auth-shell">
     <section class="auth-story" aria-label="Product introduction">
-      <div class="brand brand--large"><span class="brand__mark"><Icon name="feed" size={23}/></span><span>Reader</span><i>/ transferia</i></div>
+      <div class="brand brand--large"><span class="brand__mark"><Icon name="feed" size={23}/></span><span>Reader</span></div>
       <div class="auth-story__copy"><p class="eyebrow">Your signal, uninterrupted</p><h1>A quieter place<br/>for the open web.</h1><p>Follow every source. Keep every useful word. Read at your own pace.</p></div>
       <div class="auth-story__status"><span class="status-dot"/> Private, invitation-only access</div>
     </section>

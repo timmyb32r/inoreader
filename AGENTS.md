@@ -324,86 +324,6 @@ whose purpose is to crystallize good concepts quickly, not to preserve old APIs.
   in the sink contract and validate them during discovery and again before side
   effects. Do not leak ClickHouse or S3 details into generic pipeline code.
 
-## Repository architecture
-
-- `crates/transferia-core/` is the compiler-enforced stable data-plane API. It owns connector-neutral messages,
-  Arrow datasets and schemas, discovery and sink-limit contracts, memory leases,
-  and the runtime `Source`/`Sink` ports. `core` may depend on external primitive
-  libraries, but never on connectors, parsers, delivery preparation/execution,
-  runtime adapters, or server code. The application crate re-exports it as
-  `transferia::core`; do not recreate core types or compatibility wrappers under
-  `src/`. Export the most important contracts from the core crate root so callers
-  do not need to discover their storage layout.
-- `crates/transferia-delivery/` owns delivery orchestration. `delivery/config/`
-  owns runnable configuration; `delivery/preparation/` owns resolution,
-  discovery, validation, and construction of a resolved `DeliveryPlan`; and
-  `delivery/execution/` owns delivery-level partition startup and restart.
-  Shared semantics, parser, middleware, retry, tracker, and metrics contracts
-  belong to `crates/transferia-delivery-contracts/`. The connector-neutral
-  read/parse/write/commit loop belongs to `crates/transferia-pipeline/`.
-- `crates/transferia-registry/` defines configured connector and middleware
-  factory boundaries, immutable component registration, UI definitions, and the
-  connector-neutral `Composition` port. It is intentionally not
-  `core::Source`/`core::Sink`: factories assemble parser, metrics,
-  durable-storage, and runtime-port implementations around those core data-plane
-  ports. Delivery orchestration depends on this neutral port and must never
-  depend on concrete connector crates.
-- `crates/transferia-connector-support/` owns connector-neutral parser,
-  serializer, schema-registry, durable-storage, and address helpers. It must not
-  depend on any concrete connector crate.
-- Every heavyweight connector lives in its own `crates/transferia-connector-*`
-  crate. Connector crates may depend on core, registry, delivery contracts, and
-  connector support, but never on a sibling connector crate. Heavy client
-  dependencies belong exclusively to their connector crate; the architecture
-  checker enforces both rules.
-- Every middleware implementation lives in its own
-  `crates/transferia-middleware-*` crate and registers its typed configuration,
-  runtime factory, and optional preview capability through `transferia-registry`.
-  Middleware crates may depend on core, registry, and delivery contracts, but
-  never on delivery orchestration, connectors, or sibling middleware crates.
-  Heavy execution engines such as DataFusion belong exclusively to their
-  middleware crate; delivery and control-plane code must use registry ports.
-- `crates/transferia-connector-logbroker/` owns Logbroker discovery, generated
-  YDB protocol types, YDB Topic and PQv1 transports, protocol decoding, and
-  source/sink behavior. Do not expose Logbroker/YDB transport details through
-  connector-neutral modules.
-- Shared source configuration, discovery, and mode dispatch live in `source/`.
-  Source implementations live in mode-specific `src_batch/`, `src_stream/`, or
-  `src_batch_and_stream/` modules. `src_stream/` owns live queue streams and
-  ordinary database replication. `src_batch_and_stream/` owns only the explicit
-  batch-and-stream coordination layer; ordinary batch and CDC implementations
-  remain in their respective modules. Keep
-  connector-wide transport in the connector root; each mode owns only its
-  specific settings and reader. Do not create empty mode modules before an
-  implementation exists.
-- Reserve the name `src_dblog/` exclusively for a real implementation of
-  **DBLog: A Watermark Based Change-Data-Capture Framework**
-  (<https://arxiv.org/abs/2010.12597>): a watermark protocol that interleaves
-  transaction-log events with chunked, resumable table selects, comparable in
-  purpose to Debezium incremental snapshots. A one-time MVCC snapshot followed
-  by replication, an exported-slot snapshot handoff, a generic batch-and-stream
-  phase machine, ordinary CDC, or any other merely replication-adjacent code is
-  not DBLog and must never use the `dblog` name. Do not create `src_dblog/`
-  until that specific watermark-based protocol is actually implemented.
-- `crates/transferia-runtime/` defines the environment-neutral worker-runtime
-  boundary. `crates/transferia-runtime-local/` owns local process supervision.
-  Executable CLI/worker composition belongs to `crates/transferia-composition/`.
-  Future Kubernetes or EC2 implementations must be sibling runtime adapters.
-  Delivery execution itself remains in `crates/transferia-delivery/` and the
-  connector-neutral per-partition pipeline lives in `crates/transferia-pipeline/`.
-  Name connector components after their responsibility, such as `reader`,
-  `writer`, `client`, or `actor`; never use a generic `runtime` module for
-  connector logic.
-- `crates/transferia-connector-clickhouse/` and
-  `crates/transferia-connector-s3/` own all destination-specific validation and
-  runtime behavior. The same ownership rule applies to Kafka, PostgreSQL, and
-  YTsaurus in their respective connector crates.
-- `tests/` contains cross-component integration and end-to-end tests.
-
-Preserve the startup sequence: source discovery, semantic validation, sink-limit
-validation, destination preparation, then workers. Runtime batches must be
-validated before INSERT, upload, commit, or any other irreversible side effect.
-
 ## Testing rules
 
 - **Never mix test bodies and production code in one file.** A production module
@@ -493,13 +413,6 @@ repeated full-workspace commands.
   crate's `tests/` directory. The root `tests/` directory is only for genuinely
   cross-crate behavior. Otherwise checking one connector reconstructs a large
   monolithic root test target.
-- Share integration-only utilities through `transferia-test-support`; never
-  make production crates depend on root-test helpers.
-- Keep generators lightweight. Server DTO/schema generation belongs to
-  `transferia-server-contracts` and must not construct the connector catalog.
-  Connector catalog generation is a separate, explicitly heavy operation. Do
-  not make `cargo build`, normal typechecking, or API contract generation pull
-  every connector or DataFusion into the dependency graph.
 - Builds and checks should consume generated artifacts without rewriting them.
   Regeneration is an explicit task performed only when the owning contract
   changes.
@@ -546,35 +459,6 @@ repeated full-workspace commands.
   the CPU count does not shorten a dependency-chain critical path and can worsen
   memory and I/O contention. Optimize dependency boundaries and cache reuse
   before changing parallelism.
-
-## Performance log contract
-
-- Every new source and sink must report through `SourceCounters`, `ParseCounters`,
-  and `SinkCounters` so the standard reporter emits one stable, parseable line per
-  partition and interval. Do not invent connector-local throughput log formats.
-- Preserve the named `[stats p=<partition>]` sections and units emitted by
-  `transferia-delivery-contracts`: source record/raw-network/decoded-network rates,
-  response wait and network-decode duty, parser rows/Arrow/DLQ/source-message
-  rates, sink rows/bytes/flushes/source-
-  message rates, attempt load, retries, buffering/object gauges, backpressure,
-  delivery guarantee, CPU, and RSS.
-- A connector that does not perform a stage must report zero/`N/A` through the
-  common counters; it must not remove or reorder fields. Sink `busy` is attempt
-  load, not CPU utilization, and may exceed 100% when operations are concurrent.
-  Source `network-decode` is likewise summed decode work across concurrent
-  source workers and may exceed 100%.
-- `network-raw` must count only bytes observed before transport decompression or
-  decoding. When a client library exposes only decoded payloads, leave the raw
-  counter at zero rather than inventing an on-wire estimate. `network-decoded`
-  counts the corresponding payload after transport decoding, not generic parser
-  output or generated in-memory data.
-- Any deliberate log-contract change must update `scripts/stats_avg.py`,
-  `scripts/run_single_partition_benchmark.py`, their separate tests, and
-  `docs/benchmarks.md` in the same commit.
-- Before accepting a new connector, feed representative connector log lines through
-  `scripts/stats_avg.py` and add a regression fixture proving they parse. Use the
-  restored aggregator as `python3 scripts/stats_avg.py transferia.log` or pipe
-  logs on stdin; use `--json` for automation.
 
 ## Change hygiene
 

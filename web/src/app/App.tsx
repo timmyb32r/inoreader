@@ -132,7 +132,7 @@ export function App({ client }: { client: ApiClient }) {
   return <div class={`app theme-${theme}`} data-theme={theme}>
     <header class="topbar">
       <button class="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setMobilePanel("nav")}><Icon name="menu" /></button>
-      <div class="brand"><span class="brand__mark"><Icon name="feed"/></span><span>Reader</span><i>/ transferia</i></div>
+      <div class="brand"><span class="brand__mark"><Icon name="feed"/></span><span>Reader</span></div>
       <div class="topbar__spacer" />
       <button class="search-stub" disabled aria-describedby="search-description"><Icon name="search"/><span>Search</span><kbd>Coming later</kbd></button><span id="search-description" class="sr-only">Search is not available in this version.</span>
       <button class="icon-button" aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><Icon name={theme === "light" ? "moon" : "sun"}/></button>
