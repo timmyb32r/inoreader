@@ -482,21 +482,24 @@ async fn serve(
     let observer = RequestObserver {
         format: config.observability.log_format,
     };
-    let fetcher = Arc::new(
-        SecureWebFetcher::new(OutboundHttpClient::new(
+    let fetcher = Arc::new(SecureWebFetcher::new(
+        OutboundHttpClient::new(
             outbound_policy.clone(),
             TokioDnsResolver,
             ReqwestPinnedTransport,
             observer,
-        ))
+        )
+        .with_user_agent(&config.http.user_agent)?,
+    ));
+    let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(
+        OutboundHttpClient::new(
+            outbound_policy,
+            TokioDnsResolver,
+            ReqwestPinnedTransport,
+            observer,
+        )
         .with_user_agent(&config.http.user_agent)?,
     );
-    let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(OutboundHttpClient::new(
-        outbound_policy,
-        TokioDnsResolver,
-        ReqwestPinnedTransport,
-        observer,
-    ));
     let cdp = CdpBrowserCollector::configured(
         config.browser.cdp_endpoint.clone(),
         browser_http.clone(),

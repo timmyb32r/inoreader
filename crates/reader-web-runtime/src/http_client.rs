@@ -88,6 +88,7 @@ pub struct OutboundHttpClient<R, T, O> {
     resolver: R,
     transport: T,
     observer: O,
+    user_agent: Option<header::HeaderValue>,
 }
 
 impl<R, T, O> OutboundHttpClient<R, T, O>
@@ -102,13 +103,25 @@ where
             resolver,
             transport,
             observer,
+            user_agent: None,
         }
+    }
+
+    pub fn with_user_agent(mut self, value: &str) -> Result<Self, header::InvalidHeaderValue> {
+        self.user_agent = Some(header::HeaderValue::from_str(value)?);
+        Ok(self)
     }
 
     pub async fn execute(
         &self,
         mut request: PreparedRequest,
     ) -> Result<OutboundResponse, OutboundError> {
+        if let Some(user_agent) = &self.user_agent {
+            request
+                .headers
+                .entry(header::USER_AGENT)
+                .or_insert_with(|| user_agent.clone());
+        }
         let started = Instant::now();
         let result = self.execute_inner(&mut request).await;
         let outcome = match &result {

@@ -201,3 +201,46 @@ async fn not_modified_is_returned_without_requiring_a_location_header() {
         ExternalRequestOutcome::Success
     );
 }
+
+#[tokio::test]
+async fn configured_user_agent_is_applied_at_the_shared_outbound_boundary() {
+    let public: IpAddr = "93.184.216.34".parse().unwrap();
+    let client = OutboundHttpClient::new(
+        OutboundPolicy::new(
+            false,
+            OutboundLimits {
+                connect_timeout: Duration::from_secs(1),
+                request_deadline: Duration::from_secs(5),
+                max_redirect_hops: 1,
+                max_response_body_bytes: 10,
+            },
+        ),
+        Resolver {
+            answers: Mutex::new(VecDeque::from([vec![public]])),
+        },
+        Transport {
+            responses: Mutex::new(VecDeque::from([response(StatusCode::OK, None, b"ok")])),
+            requests: Mutex::new(vec![]),
+        },
+        Arc::new(Observer::default()),
+    )
+    .with_user_agent("inoreader/0.1")
+    .unwrap();
+
+    let result = client
+        .execute(PreparedRequest {
+            method: Method::GET,
+            url: Url::parse("https://publisher.test/feed").unwrap(),
+            headers: HeaderMap::new(),
+            body: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.body, b"ok");
+    assert_eq!(
+        client.transport.requests.lock().unwrap()[0]
+            .headers
+            .get(header::USER_AGENT),
+        Some(&HeaderValue::from_static("inoreader/0.1"))
+    );
+}
