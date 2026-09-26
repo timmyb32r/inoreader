@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
-import { App, formatArticleDate } from "./App";
+import { App } from "./App";
+import { formatArticleDate } from "../ui/formatArticleDate";
 import { articles, mockClient } from "../test/mockClient";
 import { ApiClient, ApiError } from "../api/client";
 
@@ -316,7 +317,7 @@ describe("reader application", () => {
     const user = userEvent.setup(); renderApp();
     const subscriptions=await screen.findByRole("navigation",{name:"Subscriptions"});
     await user.click(within(subscriptions).getByRole("button", { name: /This Week in Rust/ }));
-    await user.click(screen.getByRole("button", { name: "Settings & shortcuts" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(screen.getByRole("button", { name: "Pause This Week in Rust" }));
     const reason = screen.getByLabelText(/Reason/);
     const submit = screen.getByRole("button", { name: "Pause subscription" });

@@ -8,13 +8,13 @@ test("workspace switch reloads its library without moving the picker",async({pag
 });
 
 test("OPML preview gates apply and export is a download",async({page})=>{
- await page.getByRole("button",{name:"Settings & shortcuts"}).click();const apply=page.getByRole("button",{name:"Apply previewed import"});await expect(apply).toBeDisabled();
+ await page.getByRole("button",{name:"Settings"}).click();const apply=page.getByRole("button",{name:"Apply previewed import"});await expect(apply).toBeDisabled();
  await page.getByLabel("OPML document").fill("<opml version=\"2.0\"/>");await page.getByRole("button",{name:"Preview import"}).dblclick();await expect(page.getByText(/2 subscriptions ready/)).toBeVisible();await expect(apply).toBeEnabled();await apply.click();await expect(page.getByText("Import applied")).toBeVisible();
  const download=page.waitForEvent("download");await page.getByRole("button",{name:"Download OPML export"}).click();expect((await download).suggestedFilename()).toContain("Data engineering");
 });
 
 test("administrator creates invite and reset links with one request per activation",async({page})=>{
- await page.getByRole("button",{name:"Settings & shortcuts"}).click();await page.getByLabel("Username").fill("friend");
+ await page.getByRole("button",{name:"Settings"}).click();await page.getByLabel("Username").fill("friend");
  await page.getByRole("button",{name:"Create invitation"}).dblclick();await expect(page.getByText(/Invitation: .*token=fixed/)).toBeVisible();
  await page.getByRole("button",{name:"Create password reset"}).click();await expect(page.getByText(/Password reset: .*token=fixed/)).toBeVisible();
 });
@@ -37,5 +37,5 @@ test("Web Feed stages an advanced recipe, keeps actions stable and requires a fr
 
 test("focus and theme remain stable",async({page})=>{
  await page.getByRole("button",{name:"Use dark theme"}).click();await expect(page.locator(".app")).toHaveAttribute("data-theme","dark");
- await page.getByRole("button",{name:"Settings & shortcuts"}).click();await expect(page.getByRole("dialog")).toBeFocused();await page.getByRole("button",{name:"Close dialog"}).click();
+ await page.getByRole("button",{name:"Settings"}).click();await expect(page.getByRole("dialog")).toBeFocused();await page.getByRole("button",{name:"Close dialog"}).click();
 });

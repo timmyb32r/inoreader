@@ -20,3 +20,12 @@ it("keeps the subscriptions dialog on an opaque themed background", () => {
   expect(stylesheet).toMatch(/\.subscriptions-window\{[^}]*background:var\(--bg\)/);
   expect(stylesheet).not.toContain("var(--app-bg)");
 });
+
+it("keeps feature modules independent from the App shell", () => {
+  const src = join(process.cwd(), "src");
+  const offenders = files(src)
+    .filter(path => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path) && !path.endsWith("main.tsx"))
+    .filter(path => /from\s+["'][^"']*\/App["']/.test(readFileSync(path, "utf8")))
+    .map(path => relative(src, path));
+  expect(offenders).toEqual([]);
+});

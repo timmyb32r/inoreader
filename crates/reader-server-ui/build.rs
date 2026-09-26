@@ -33,6 +33,8 @@ fn content_type(path: &str) -> &'static str {
         "text/css; charset=utf-8"
     } else if path.ends_with(".svg") {
         "image/svg+xml"
+    } else if path.ends_with(".ico") {
+        "image/x-icon"
     } else if path.ends_with(".json") {
         "application/json"
     } else {

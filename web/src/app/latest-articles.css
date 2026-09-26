@@ -1,0 +1,17 @@
+.recent-card article { padding: 0; }
+.recent-article-link {
+  width: 100%; min-height: 45px; display: flex; align-items: center;
+  gap: 10px; padding: 10px 8px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--text); font: inherit;
+  text-align: left; cursor: pointer;
+}
+.recent-article-link strong { flex: 1; }
+.recent-article-link span { color: var(--text-muted); }
+.recent-article-link:hover, .recent-article-link:focus-visible {
+  background: var(--accent-soft); color: var(--accent-deep);
+}
+.recent-article-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.recent-article-link:active { background: var(--line); }
+@media (max-width: 760px) {
+  .recent-article-link { align-items: flex-start; flex-direction: column; }
+}

@@ -13,7 +13,7 @@ test("reader navigation and article states", async ({ page }) => {
 test("pause validates reason without moving the dialog footer", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("navigation", { name: "Subscriptions" }).getByRole("button", { name: /This Week in Rust/ }).click();
-  await page.getByRole("button", { name: "Settings & shortcuts" }).click();
+  await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Pause This Week in Rust" }).click();
   const submit = page.getByRole("button", { name: "Pause subscription" });
   const before = await submit.boundingBox();
