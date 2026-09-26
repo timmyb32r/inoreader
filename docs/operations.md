@@ -71,54 +71,41 @@ evidence. A host-run app uses endpoint `grpc://127.0.0.1:2136`, database path
 
 ## Backup and restore
 
-User archives have no TTL. Backups therefore use the provider-supported YDB
-export mechanism and include the complete database path. `tools/ydb_backup.sh`
-is a strict wrapper around `ydb tools dump`: it refuses an existing destination
-and writes its manifest only after the dump exits successfully. Credentials stay
-in the YDB CLI environment and are never copied to the backup.
+PostgreSQL is the production source of truth. Back up the named
+`postgres-data` volume with `pg_dump --format=custom` from the pinned PostgreSQL
+image, write to a new operator-owned path, and keep the password in the Docker
+secret. A valid backup is not just a successful command: restore it into a fresh
+PostgreSQL database, run `prepare-schema`, compare every table count, and run the
+authentication, library, content, queue, and cross-user isolation smoke tests
+before accepting it.
+
+The one-way YDB migration keeps the old YDB database unchanged for rollback.
+Before cutover, stop the application, run `migrate-ydb-to-postgres`, and wait for
+the command to report all 33 table counts, byte totals, and fingerprints. The
+command refuses a non-empty PostgreSQL target and reads YDB rows in primary-key
+order. It commits the import atomically, reads every row back from PostgreSQL,
+and requires exact typed row equality in addition to the recorded counts and
+fingerprints. Only then replace the active configuration and start workers.
 
 ```sh
-tools/ydb_backup.sh \
-  --endpoint grpcs://example.net:2135 \
-  --database /region/project/database \
-  --output /secure/backups/inoreader-2026-09-25
+docker compose stop app
+docker compose run --rm --no-deps \
+  -v ./config.postgres.yaml:/etc/inoreader/config.postgres.yaml:ro \
+  app --config /etc/inoreader/config.postgres.yaml migrate-ydb-to-postgres
+docker compose up -d --force-recreate app
 ```
 
-Restore is a separate command and requires a different, explicitly named target
-database. `tools/ydb_restore.sh` checks the backup manifest, requires the operator
-to type the exact `ENDPOINT|DATABASE` target identity, and invokes `ydb tools restore`.
-Automation may pass the same exact identity through `--confirm-target`; a database
-path alone is insufficient because independent YDB clusters may use the same path. It never drops,
-truncates, or prepares the target schema. Restore into a fresh database, run the
-application's schema/version check, then compare primary row counts and sampled
-content manifests before changing traffic. Jobs and outbox rows are primary
-data: restore them as-is so expired leases resume through normal fencing logic.
-Derived counters may be rebuilt only after primary verification.
+Do not write to both databases. A rollback stops PostgreSQL-backed writers
+before restoring the saved YDB configuration. Keep the immutable YDB source and
+its service-account key for the explicit rollback window; remove migration
+credentials from the runtime after that window closes.
 
-```sh
-tools/ydb_restore.sh \
-  --endpoint grpcs://example.net:2135 \
-  --database /region/project/restored-database \
-  --input /secure/backups/inoreader-2026-09-25
-```
-
-The release gate runs `tools/test_ydb_backup_restore.sh` against two independent,
-ephemeral containers using a digest-pinned YDB 25.4.1 image
-(`sha256:55fdd320ee0064b9e8c628cb766d481f9be6a2c021ec8235ea8d2280fc937aaf`).
-It populates representative library, fulltext, rule, state, and expired
-lease rows; invokes the production backup and restore wrappers; verifies primary
-rows; proves the expired job is eligible for leasing; and rebuilds the derived
-subscription count from restored origins. Missing Docker or image access is a
-hard failure rather than a skipped test. A deployment backup is verified only
-after the same procedure succeeds against its separately provisioned target.
-
-The `reader-storage-ydb` integration target independently starts the same pinned
-image on a random loopback port and exercises the production Rust SDK, schema
-preparation, optimistic transactions, atomic subscription provisioning, and
-fenced durable leases. It is part of `cargo test --workspace`, owns its container,
-and reports startup logs on failure. The official local YDB image is currently
-`linux/amd64`; Apple Silicon runners therefore need Docker Desktop Rosetta or an
-x86_64 CI runner. An incompatible runtime fails the gate explicitly.
+The release gate includes the digest-pinned PostgreSQL Docker acceptance test.
+It creates the complete schema, checks idempotency and constraints, exercises
+lease theft fencing, and proves that two users may share a public fetch source
+without sharing workspace, subscription, activity, note, or article state. The
+existing YDB Docker tests remain migration-source coverage until the rollback
+window ends. Missing Docker is a hard failure, never a skipped test.
 
 ## Initial source seed
 
