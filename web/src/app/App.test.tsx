@@ -80,12 +80,15 @@ describe("reader application", () => {
     const readerStatus = await screen.findByText(/Fetching the full article/);
     expect(readerStatus).toBeVisible();
     expect(readerStatus.querySelector(".spinner")).not.toBeNull();
+    const contentLoading = screen.getByRole("status", { name: "Loading full article content" });
+    expect(contentLoading.querySelector(".spinner")).not.toBeNull();
     const row = screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article");
     expect(row?.querySelector(".fulltext--pending .spinner")).not.toBeNull();
 
     expect(await screen.findByText("Extracted body", {}, { timeout: 2000 })).toBeVisible();
     expect(getArticle).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/Fetching the full article/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Loading full article content" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article")).toBe(row);
   });
 
