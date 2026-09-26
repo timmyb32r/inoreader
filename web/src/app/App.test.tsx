@@ -8,6 +8,18 @@ const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
   beforeEach(()=>history.replaceState({},"","/reader"));
+  it("highlights only the current navigation destination when returning home", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    const all = await screen.findByRole("button", { name: "All articles" });
+    expect(all).toHaveClass("active");
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    expect(screen.getByRole("button", { name: "Home" })).toHaveClass("active");
+    expect(all).not.toHaveClass("active");
+    await user.click(all);
+    expect(all).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Home" })).not.toHaveClass("active");
+  });
   it("opens the selected subscription settings from its list heading", async () => {
     const user = userEvent.setup();
     renderApp();
