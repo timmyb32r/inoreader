@@ -31,6 +31,65 @@ impl YdbIngestStore {
             max_retry_age,
         })
     }
+
+    /// Reclassifies ready jobs created before priority bands were introduced.
+    /// The update preserves every payload, attempt and diagnostic field.
+    pub async fn reprioritize_ready_jobs(&self) -> Result<usize, StoreError> {
+        let rows = self
+            .transport
+            .client
+            .query_client()
+            .query_result_set(
+                "SELECT id,item,revision,run_at_ms FROM ingest_jobs WHERE status='ready'",
+            )
+            .await
+            .map_err(storage)?;
+        let mut updates = Vec::new();
+        for mut row in rows {
+            let id: String = row
+                .remove_field_by_name("id")
+                .map_err(storage)?
+                .try_into()
+                .map_err(storage)?;
+            let item: String = row
+                .remove_field_by_name("item")
+                .map_err(storage)?
+                .try_into()
+                .map_err(storage)?;
+            let _revision: u64 = row
+                .remove_field_by_name("revision")
+                .map_err(storage)?
+                .try_into()
+                .map_err(storage)?;
+            let current: i64 = row
+                .remove_field_by_name("run_at_ms")
+                .map_err(storage)?
+                .try_into()
+                .map_err(storage)?;
+            let work: WorkItem = serde_json::from_str(&item).map_err(storage)?;
+            let priority = crate::initial_job_run_at(&work);
+            if current == 0 && priority != 0 {
+                updates.push(ydb::ydb_struct!("id"=>id,"run_at_ms"=>priority));
+            }
+        }
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let count = updates.len();
+        let values = Value::list_from(
+            ydb::ydb_struct!("id"=>String::new(),"run_at_ms"=>0_i64),
+            updates,
+        )
+        .map_err(storage)?;
+        self.transport
+            .client
+            .query_client()
+            .exec("UPDATE ingest_jobs ON SELECT id,run_at_ms FROM AS_TABLE($rows)")
+            .param("$rows", values)
+            .await
+            .map_err(storage)?;
+        Ok(count)
+    }
 }
 struct RecordBatch(Vec<PolledRecord>);
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -228,11 +287,11 @@ impl YdbIngestStore {
      identity_rows.push(ydb::ydb_struct!("source_id"=>record.source_id().as_uuid().to_string(),"upstream_id"=>record.upstream_id().to_owned(),"record_id"=>record.id().as_uuid().to_string(),"observed_at_ms"=>observed_at_ms,"revision"=>record.revision(),"document"=>document));
      if matches!(record.action,PollAction::Deliver|PollAction::Regroup){
       let item=WorkItem::FanOut{source_id:record.source_id(),record_id:record.id(),after_subscription:None};
-      job_rows.push(ydb::ydb_struct!("id"=>record_job("fanout",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>0_i64,"first_attempt_ms"=>first_attempt_ms,"origin_key"=>source_origin_key.clone(),"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
+      job_rows.push(ydb::ydb_struct!("id"=>record_job("fanout",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>crate::initial_job_run_at(&item),"first_attempt_ms"=>first_attempt_ms,"origin_key"=>source_origin_key.clone(),"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
      }
      if let Some(url)=record.key().location.fetch_url(){
       let item=WorkItem::ExtractFullText{record_id:record.id(),source_revision:record.revision(),url:url.clone(),manual:false};
-      job_rows.push(ydb::ydb_struct!("id"=>record_job("fulltext",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>0_i64,"first_attempt_ms"=>first_attempt_ms,"origin_key"=>crate::http_origin(url)?,"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
+      job_rows.push(ydb::ydb_struct!("id"=>record_job("fulltext",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>crate::initial_job_run_at(&item),"first_attempt_ms"=>first_attempt_ms,"origin_key"=>crate::http_origin(url)?,"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
      }
     }
     let source_values=Value::list_from(ydb::ydb_struct!("id"=>String::new(),"revision"=>0_u64,"document"=>String::new()),source_rows).map_err(customer)?;

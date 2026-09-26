@@ -2,7 +2,9 @@ use std::{future::Future, sync::Arc, time::Duration};
 
 use tokio::sync::watch;
 
-use crate::{BrowserCollector, FeedFetcher, FullTextExtractor, IngestStore, IngestWorker};
+use crate::{
+    BrowserCollector, FeedFetcher, FullTextExtractor, IngestError, IngestStore, IngestWorker,
+};
 
 /// Runs a fixed number of workers. Shutdown closes admission immediately and
 /// waits for the currently leased operation to finish; its heartbeat remains
@@ -38,6 +40,9 @@ pub async fn run_until_shutdown<S, F, X, B, Q>(
                     }
                     Err(error) => {
                         eprintln!("ingest worker {identity} failed: {error}");
+                        if !matches!(error, IngestError::Store(_)) {
+                            continue;
+                        }
                         tokio::select! {
                             _ = tokio::time::sleep(idle_poll) => {},
                             changed = stop.changed() => { if changed.is_err() || *stop.borrow() { break; } }

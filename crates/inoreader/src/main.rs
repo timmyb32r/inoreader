@@ -46,6 +46,10 @@ enum Command {
     Serve,
     CheckConfig,
     PrepareSchema,
+    PrioritizeJobs,
+    BenchmarkLibrary {
+        workspace_id: uuid::Uuid,
+    },
     BootstrapAdmin {
         username: String,
     },
@@ -119,6 +123,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::PrepareSchema => {
             prepare_schema(transport.as_ref()).await?;
             println!("YDB schema prepared");
+        }
+        Command::PrioritizeJobs => {
+            let store = YdbIngestStore::new(
+                transport,
+                chrono::Duration::seconds(config.scheduler.polling_interval_seconds as i64),
+                config.scheduler.per_origin_concurrency,
+                chrono::Duration::seconds(config.scheduler.max_retry_age_seconds as i64),
+            )?;
+            let count = store.reprioritize_ready_jobs().await?;
+            println!("reprioritized {count} ready ingest jobs");
+        }
+        Command::BenchmarkLibrary { workspace_id } => {
+            let repository = YdbRepository::new(
+                transport,
+                ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?,
+                config.ingest.initial_feed_items,
+            )?;
+            let started = std::time::Instant::now();
+            let articles = repository
+                .article_presentations_by_workspace(WorkspaceId::from_uuid(workspace_id))
+                .await?;
+            println!(
+                "loaded {} article presentations in {} ms",
+                articles.len(),
+                started.elapsed().as_millis()
+            );
         }
         Command::BootstrapAdmin { username } => {
             let password = rpassword::prompt_password("Administrator password: ")?;

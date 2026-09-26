@@ -19,6 +19,35 @@ fn production_client_limits_reject_unbounded_or_disabled_values() {
 }
 
 #[test]
+fn interactive_content_jobs_precede_background_polling() {
+    let record_id = SourceRecordId::new();
+    let url = url::Url::parse("https://example.test/article").unwrap();
+    let manual = WorkItem::ExtractFullText {
+        record_id,
+        source_revision: 1,
+        url: url.clone(),
+        manual: true,
+    };
+    let automatic = WorkItem::ExtractFullText {
+        record_id,
+        source_revision: 1,
+        url,
+        manual: false,
+    };
+    let fanout = WorkItem::FanOut {
+        source_id: SourceId::new(),
+        record_id,
+        after_subscription: None,
+    };
+    let poll = WorkItem::PollSource {
+        source_id: SourceId::new(),
+    };
+    assert!(initial_job_run_at(&manual) < initial_job_run_at(&automatic));
+    assert!(initial_job_run_at(&automatic) < initial_job_run_at(&fanout));
+    assert!(initial_job_run_at(&fanout) < initial_job_run_at(&poll));
+}
+
+#[test]
 fn generic_imported_html_source_has_a_normalized_editable_recipe() {
     let workspace = WorkspaceId::new();
     let url = Url::parse("https://example.com/news").unwrap();
@@ -245,11 +274,11 @@ impl YdbTransport for Transport {
     ) -> Result<(), String> {
         no()
     }
-    async fn presentation_metadata(
+    async fn presentation_metadata_batch(
         &self,
         _: String,
-        _: String,
-    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>), String> {
+        _: Vec<String>,
+    ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String> {
         no()
     }
     async fn enqueue_ingest_job(&self, id: String, item: Vec<u8>) -> Result<(), String> {

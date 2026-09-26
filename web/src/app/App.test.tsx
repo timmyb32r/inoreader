@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { App } from "./App";
-import { mockClient } from "../test/mockClient";
+import { articles, mockClient } from "../test/mockClient";
 import { ApiClient, ApiError } from "../api/client";
 
 const renderApp = () => render(<App client={mockClient()}/>);
@@ -37,6 +37,31 @@ describe("reader application", () => {
     expect(screen.getByText("storage operation failed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
     expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
+  });
+
+  it("replaces pending full text in place when background extraction completes", async () => {
+    const client = mockClient();
+    const pending = { ...articles[0], fullText: "pending" as const, body: [] };
+    vi.spyOn(client, "bootstrap").mockResolvedValue({
+      account: { displayName: "Test", initials: "TB" },
+      workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
+      activeWorkspaceId: "ws",
+      subscriptions: [],
+      articles: [pending],
+      newArticleCount: 0,
+    });
+    const listArticles = vi.spyOn(client, "listArticles").mockResolvedValue([
+      { ...pending, fullText: "ready", body: ["Extracted body"] },
+    ]);
+
+    render(<App client={client}/>);
+    expect(await screen.findByText(/Fetching the full article/)).toBeVisible();
+    const row = screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article");
+
+    expect(await screen.findByText("Extracted body", {}, { timeout: 2000 })).toBeVisible();
+    expect(listArticles).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Fetching the full article/)).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article")).toBe(row);
   });
 
   it("opens an account menu before an explicit sign out", async () => {

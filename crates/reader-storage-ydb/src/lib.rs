@@ -23,7 +23,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 use ydb::{
     Client, ClientBuilder, FromEnvCredentials, RetrySettings, RetryState, RetryStrategy,
-    SessionPoolSettings, Transaction,
+    SessionPoolSettings, Transaction, Value,
 };
 mod ingest_store;
 pub use ingest_store::YdbIngestStore;
@@ -564,6 +564,7 @@ async fn enqueue_work(
     first_attempt_ms: i64,
 ) -> Result<(), ydb::YdbOrCustomerError> {
     let origin = work_origin(tx, item).await?;
+    let run_at_ms = initial_job_run_at(item);
     let document = serde_json::to_string(item)
         .map_err(|error| ydb::YdbOrCustomerError::from(ydb::YdbError::Custom(error.to_string())))?;
     if let Some(mut existing) = tx
@@ -580,7 +581,23 @@ async fn enqueue_work(
             "durable job identity collision",
         )));
     }
-    tx.exec("UPSERT INTO ingest_jobs (id,status,run_at_ms,first_attempt_ms,origin_key,attempt,item,revision) VALUES ($id,'ready',0,$first,$origin,0,$item,0)").param("$id",id).param("$first",first_attempt_ms).param("$origin",origin).param("$item",document).await.map_err(Into::into)
+    tx.exec("UPSERT INTO ingest_jobs (id,status,run_at_ms,first_attempt_ms,origin_key,attempt,item,revision) VALUES ($id,'ready',$run_at,$first,$origin,0,$item,0)").param("$id",id).param("$run_at",run_at_ms).param("$first",first_attempt_ms).param("$origin",origin).param("$item",document).await.map_err(Into::into)
+}
+
+/// Smaller values are claimed first by the durable `ready_jobs` index. These
+/// class bands keep content requested by a reader ahead of background polling
+/// without creating a second source of truth or weakening lease fencing.
+pub(crate) fn initial_job_run_at(item: &WorkItem) -> i64 {
+    match item {
+        WorkItem::ExtractFullText { manual: true, .. } => -400,
+        WorkItem::ExtractFullText { manual: false, .. } => -300,
+        WorkItem::FanOut { .. } => -200,
+        WorkItem::EvaluateArticleRules { .. } | WorkItem::ApplyRule { .. } => -100,
+        WorkItem::CleanupContent { .. } => -50,
+        WorkItem::PollSource { .. }
+        | WorkItem::RefreshSource { .. }
+        | WorkItem::CollectWebFeed { .. } => 0,
+    }
 }
 async fn enqueue_subscription_backfill(
     tx: &mut Transaction,
@@ -795,11 +812,11 @@ pub trait YdbTransport: Send + Sync {
         rows: Vec<(String, Vec<u8>, String, String, Vec<u8>, String)>,
         backfill_limit: usize,
     ) -> Result<(), String>;
-    async fn presentation_metadata(
+    async fn presentation_metadata_batch(
         &self,
         workspace: String,
-        article: String,
-    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>), String>;
+        articles: Vec<String>,
+    ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String>;
     async fn enqueue_ingest_job(&self, id: String, item: Vec<u8>) -> Result<(), String>;
     async fn refresh_subscription(
         &self,
@@ -1193,17 +1210,32 @@ impl YdbTransport for ProductionYdbTransport {
         }
         self.client.query_client().retry_tx(ydb::closure!([converted],async |tx:&mut Transaction|{for(id,_,_,_,_,_)in converted.iter(){if tx.query_row("SELECT id FROM subscriptions WHERE id=$id").param("$id",id.clone()).optional().await?.is_some(){return Err(ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("subscription already exists".into())))}}for(id,sub,url,proposed_source_id,source,job)in converted.iter(){let existing=tx.query_row("SELECT source_id FROM source_urls WHERE url=$url").param("$url",url.clone()).optional().await?;let source_id:String=match existing{Some(mut row)=>{let value:String=row.remove_field_by_name("source_id")?.try_into()?;value},None=>{tx.exec("UPSERT INTO source_urls (url,source_id) VALUES ($url,$source_id)").param("$url",url.clone()).param("$source_id",proposed_source_id.clone()).await?;tx.exec("UPSERT INTO sources (id,revision,document) VALUES ($source_id,0,$document)").param("$source_id",proposed_source_id.clone()).param("$document",source.clone()).await?;proposed_source_id.clone()}};tx.exec("UPSERT INTO subscriptions (id,revision,document) VALUES ($id,0,$document)").param("$id",id.clone()).param("$document",sub.clone()).await?;tx.exec("UPSERT INTO subscription_sources (subscription_id,source_id) VALUES ($subscription_id,$source_id)").param("$subscription_id",id.clone()).param("$source_id",source_id.clone()).await?;let source_uuid=uuid::Uuid::parse_str(&source_id).map_err(|_|ydb::YdbOrCustomerError::from(ydb::YdbError::Custom("stored source id is invalid".into())))?;let source_id=SourceId::from_uuid(source_uuid);let item=WorkItem::PollSource{source_id};enqueue_work(tx,job.clone(),&item,chrono::Utc::now().timestamp_millis()).await?;enqueue_subscription_backfill(tx,source_id,id,backfill_limit).await?;}Ok::<(),ydb::YdbOrCustomerError>(())})).await.map_err(|e|e.to_string())
     }
-    async fn presentation_metadata(
+    async fn presentation_metadata_batch(
         &self,
         workspace: String,
-        article: String,
-    ) -> Result<(Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>), String> {
+        articles: Vec<String>,
+    ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String> {
+        if articles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let wanted = articles
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let mut query = self.client.query_client();
-        let rows=query.query_result_set("SELECT subscription_id,source_record_id FROM library_origins WHERE workspace_id=$workspace AND article_id=$article").param("$workspace",workspace).param("$article",article).await.map_err(|e|e.to_string())?;
-        let mut subscriptions = Vec::new();
-        let mut manifests = Vec::new();
-        let mut failures = Vec::new();
+        let rows=query.query_result_set("SELECT article_id,subscription_id,source_record_id FROM library_origins WHERE workspace_id=$workspace").param("$workspace",workspace).await.map_err(|e|e.to_string())?;
+        let mut origins = Vec::new();
+        let mut subscription_ids = std::collections::HashSet::new();
+        let mut record_ids = std::collections::HashSet::new();
         for mut row in rows {
+            let article: String = row
+                .remove_field_by_name("article_id")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            if !wanted.contains(&article) {
+                continue;
+            }
             let subscription: String = row
                 .remove_field_by_name("subscription_id")
                 .map_err(|e| e.to_string())?
@@ -1214,30 +1246,64 @@ impl YdbTransport for ProductionYdbTransport {
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            if let Some(value) = self.read("subscriptions", subscription).await? {
-                subscriptions.push(value)
+            subscription_ids.insert(subscription.clone());
+            record_ids.insert(record.clone());
+            origins.push((article, subscription, record));
+        }
+        let list = |values: &std::collections::HashSet<String>| {
+            Value::list_from(
+                ydb::ydb_struct!("id"=>String::new()),
+                values
+                    .iter()
+                    .cloned()
+                    .map(|id| ydb::ydb_struct!("id"=>id))
+                    .collect(),
+            )
+            .map_err(|e| e.to_string())
+        };
+        let mut subscription_docs = std::collections::HashMap::new();
+        if !subscription_ids.is_empty() {
+            for mut row in query.query_result_set("SELECT s.id AS id,s.document AS document FROM subscriptions AS s INNER JOIN AS_TABLE($ids) AS wanted ON s.id=wanted.id").param("$ids",list(&subscription_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;subscription_docs.insert(id,document.into_bytes());}
+        }
+        let mut pointers = std::collections::HashMap::new();
+        if !record_ids.is_empty() {
+            for mut row in query.query_result_set("SELECT m.id AS id,m.document AS document FROM content_manifests AS m INNER JOIN AS_TABLE($ids) AS wanted ON m.id=wanted.id").param("$ids",list(&record_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;pointers.insert(id,serde_json::from_str::<reader_ingest::ContentManifestPointer>(&document).map_err(|e|e.to_string())?);}
+        }
+        let refresh_rows=pointers.iter().map(|(record,pointer)|ydb::ydb_struct!("record_id"=>record.clone(),"refresh_id"=>pointer.refresh_id.to_string())).collect::<Vec<_>>();
+        let mut chunks =
+            std::collections::HashMap::<String, Vec<reader_ingest::ContentChunk>>::new();
+        if !refresh_rows.is_empty() {
+            let values = Value::list_from(
+                ydb::ydb_struct!("record_id"=>String::new(),"refresh_id"=>String::new()),
+                refresh_rows,
+            )
+            .map_err(|e| e.to_string())?;
+            for mut row in query.query_result_set("SELECT c.record_id AS record_id,c.ordinal AS ordinal,c.bytes AS bytes FROM staged_content_chunks AS c INNER JOIN AS_TABLE($refreshes) AS wanted ON c.record_id=wanted.record_id AND c.refresh_id=wanted.refresh_id WHERE c.representation='safe' ORDER BY record_id,ordinal").param("$refreshes",values).await.map_err(|e|e.to_string())?{let record:String=row.remove_field_by_name("record_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let ordinal:u32=row.remove_field_by_name("ordinal").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let encoded:String=row.remove_field_by_name("bytes").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;chunks.entry(record).or_default().push(reader_ingest::ContentChunk{ordinal,bytes:serde_json::from_str(&encoded).map_err(|e|e.to_string())?});}
+        }
+        let failure_ids = record_ids
+            .iter()
+            .map(|record| format!("failure/{record}"))
+            .collect::<std::collections::HashSet<_>>();
+        let mut failures = std::collections::HashMap::new();
+        if !failure_ids.is_empty() {
+            for mut row in query.query_result_set("SELECT s.id AS id,s.document AS document FROM content_refresh_state AS s INNER JOIN AS_TABLE($ids) AS wanted ON s.id=wanted.id").param("$ids",list(&failure_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;failures.insert(id.trim_start_matches("failure/").to_owned(),document.into_bytes());}
+        }
+        let mut result = articles
+            .into_iter()
+            .map(|article| (article, (Vec::new(), Vec::new(), Vec::new())))
+            .collect::<std::collections::HashMap<_, _>>();
+        for (article, subscription, record) in origins {
+            let Some(entry) = result.get_mut(&article) else {
+                continue;
+            };
+            if let Some(document) = subscription_docs.get(&subscription) {
+                entry.0.push(document.clone())
             }
-            if let Some(value) = self.read("content_manifests", record.clone()).await? {
-                let pointer: reader_ingest::ContentManifestPointer =
-                    serde_json::from_slice(&value).map_err(|e| e.to_string())?;
-                let rows=query.query_result_set("SELECT ordinal,bytes FROM staged_content_chunks WHERE record_id=$record AND refresh_id=$refresh AND representation='safe' ORDER BY ordinal").param("$record",record.clone()).param("$refresh",pointer.refresh_id.to_string()).await.map_err(|e|e.to_string())?;
-                let mut chunks = Vec::new();
-                for mut chunk in rows {
-                    let ordinal: u32 = chunk
-                        .remove_field_by_name("ordinal")
-                        .map_err(|e| e.to_string())?
-                        .try_into()
-                        .map_err(|e: ydb::YdbError| e.to_string())?;
-                    let encoded: String = chunk
-                        .remove_field_by_name("bytes")
-                        .map_err(|e| e.to_string())?
-                        .try_into()
-                        .map_err(|e: ydb::YdbError| e.to_string())?;
-                    let bytes = serde_json::from_str(&encoded).map_err(|e| e.to_string())?;
-                    chunks.push(reader_ingest::ContentChunk { ordinal, bytes })
-                }
-                if chunks.len() != pointer.safe_html_chunks as usize
-                    || chunks
+            if let Some(pointer) = pointers.get(&record) {
+                let mut safe = chunks.get(&record).cloned().unwrap_or_default();
+                safe.sort_by_key(|v| v.ordinal);
+                if safe.len() != pointer.safe_html_chunks as usize
+                    || safe
                         .iter()
                         .enumerate()
                         .any(|(expected, chunk)| chunk.ordinal != expected as u32)
@@ -1251,20 +1317,24 @@ impl YdbTransport for ProductionYdbTransport {
                     source_revision: pointer.source_revision,
                     refresh_id: pointer.refresh_id,
                     raw_chunks: Vec::new(),
-                    safe_html_chunks: chunks,
+                    safe_html_chunks: safe,
                     fetched_at: pointer.fetched_at,
-                    final_url: pointer.final_url,
+                    final_url: pointer.final_url.clone(),
                 };
-                manifests.push(serde_json::to_vec(&revision).map_err(|e| e.to_string())?)
+                entry
+                    .1
+                    .push(serde_json::to_vec(&revision).map_err(|e| e.to_string())?)
             }
-            if let Some(value) = self
-                .read("content_refresh_state", format!("failure/{record}"))
-                .await?
-            {
-                failures.push(value)
+            if let Some(document) = failures.get(&record) {
+                entry.2.push(document.clone())
             }
         }
-        Ok((subscriptions, manifests, failures))
+        Ok(result
+            .into_iter()
+            .map(|(article, (subscriptions, manifests, failures))| {
+                (article, subscriptions, manifests, failures)
+            })
+            .collect())
     }
     async fn enqueue_ingest_job(&self, id: String, item: Vec<u8>) -> Result<(), String> {
         let item: WorkItem = serde_json::from_slice(&item).map_err(|e| e.to_string())?;
@@ -2729,16 +2799,27 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
         workspace: WorkspaceId,
     ) -> Result<Vec<reader_application::ArticlePresentation>, RepositoryError> {
         let articles = self.articles_by_workspace(workspace).await?;
+        let mut metadata = self
+            .transport
+            .presentation_metadata_batch(
+                workspace.as_uuid().to_string(),
+                articles
+                    .iter()
+                    .map(|article| article.id.as_uuid().to_string())
+                    .collect(),
+            )
+            .await
+            .map_err(RepositoryError::Storage)?
+            .into_iter()
+            .map(|(article, subscriptions, manifests, failures)| {
+                (article, (subscriptions, manifests, failures))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
         let mut result = Vec::with_capacity(articles.len());
         for article in articles {
-            let (sub_docs, manifest_docs, failure_docs) = self
-                .transport
-                .presentation_metadata(
-                    workspace.as_uuid().to_string(),
-                    article.id.as_uuid().to_string(),
-                )
-                .await
-                .map_err(RepositoryError::Storage)?;
+            let (sub_docs, manifest_docs, failure_docs) = metadata
+                .remove(&article.id.as_uuid().to_string())
+                .unwrap_or_default();
             let mut subscription_ids = Vec::new();
             let mut titles = Vec::new();
             for raw in sub_docs {
