@@ -7,7 +7,6 @@
     "name": "LaserData Blog",
     "url": "https://laserdata.com/blog",
     "link_selector": "main a[href^=\"/blog/\"]",
-    "card_selector": "a[href^=\"/blog/\"]",
     "date_selector": "time",
     "content_selector": ".ld-prose",
     "url_pattern": "^https://laserdata\\.com/blog/[^/?]+$",

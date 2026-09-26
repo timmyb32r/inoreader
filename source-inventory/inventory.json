@@ -13,12 +13,11 @@
         "id": "airbyte",
         "name": "Airbyte",
         "url": "https://airbyte.com/blog",
-        "link_selector": ".blog_list-wrapper .library-blog_card-link[href]",
-        "card_selector": ".library-blog_item",
+        "link_selector": "a.library-blog_card-link[href]",
         "url_pattern": "^https://airbyte\\.com/blog/[^/?]+/?$",
         "next_selector": "a.w-pagination-next",
         "max_pages": 2,
-        "browser_fallback": true
+        "browser_fallback": false
       },
       "adapter_kind": "generic_html",
       "historical_observations": [
@@ -1152,7 +1151,6 @@
         "name": "LaserData Blog",
         "url": "https://laserdata.com/blog",
         "link_selector": "main a[href^=\"/blog/\"]",
-        "card_selector": "a[href^=\"/blog/\"]",
         "date_selector": "time",
         "content_selector": ".ld-prose",
         "url_pattern": "^https://laserdata\\.com/blog/[^/?]+$",
