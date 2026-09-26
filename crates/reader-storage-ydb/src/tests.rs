@@ -90,6 +90,7 @@ struct Transport {
     ingest: Mutex<HashMap<String, (String, String, Option<String>)>>,
     evaluations: Mutex<usize>,
     account_workspaces: Mutex<Vec<(String, String, Vec<u8>, String, Vec<u8>)>>,
+    presentation_requests: Mutex<Vec<(Vec<String>, bool)>>,
 }
 
 fn no<T>() -> Result<T, String> {
@@ -277,9 +278,17 @@ impl YdbTransport for Transport {
     async fn presentation_metadata_batch(
         &self,
         _: String,
-        _: Vec<String>,
+        articles: Vec<String>,
+        include_content: bool,
     ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String> {
-        no()
+        self.presentation_requests
+            .lock()
+            .unwrap()
+            .push((articles.clone(), include_content));
+        Ok(articles
+            .into_iter()
+            .map(|id| (id, Vec::new(), Vec::new(), Vec::new()))
+            .collect())
     }
     async fn enqueue_ingest_job(&self, id: String, item: Vec<u8>) -> Result<(), String> {
         self.jobs.lock().unwrap().push((id, item));
@@ -684,6 +693,56 @@ fn subscription_counts_unique_articles_and_only_actual_unread_state() {
         (2, 1)
     );
     assert_eq!(subscription_article_counts(None, &unread), (0, 0));
+}
+
+#[tokio::test]
+async fn article_lists_skip_content_chunks_and_detail_fetches_only_one_article() {
+    let transport = Arc::new(Transport::default());
+    let workspace = WorkspaceId::new();
+    let article = Article {
+        id: ArticleId::new(),
+        key: DedupKey {
+            location: ArticleLocation::from(Url::parse("https://example.test/item").unwrap()),
+            title: "One article".into(),
+            description: Some("Excerpt".into()),
+        },
+        state: ArticleState::default(),
+        first_arrived_at: Utc::now(),
+        origins: vec![],
+        revision: 0,
+    };
+    transport
+        .scans
+        .lock()
+        .unwrap()
+        .insert("articles", vec![serde_json::to_vec(&article).unwrap()]);
+    transport.rows.lock().unwrap().insert(
+        (
+            "articles",
+            format!("{}/{}", workspace.as_uuid(), article.id.as_uuid()),
+        ),
+        serde_json::to_vec(&article).unwrap(),
+    );
+    let repository =
+        YdbRepository::new(transport.clone(), ReasonPolicy::new(128).unwrap(), 100).unwrap();
+
+    repository
+        .article_summaries_by_workspace(workspace)
+        .await
+        .unwrap();
+    repository
+        .article_presentation(workspace, article.id)
+        .await
+        .unwrap();
+
+    let requests = transport.presentation_requests.lock().unwrap();
+    assert_eq!(
+        requests.as_slice(),
+        &[
+            (vec![article.id.as_uuid().to_string()], false),
+            (vec![article.id.as_uuid().to_string()], true)
+        ]
+    );
 }
 
 #[tokio::test]

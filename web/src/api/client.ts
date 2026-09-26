@@ -54,6 +54,7 @@ export class ApiClient {
   changePassword = (currentPassword: string, newPassword: string) => this.transport<void>("/api/auth/password/change", json("POST", { current_password: currentPassword, new_password: newPassword }));
   resetPassword = (token: string, newPassword: string) => this.transport<void>("/api/auth/password/reset", json("POST", { token, new_password: newPassword }));
   listArticles = (workspaceId: string, view: string, subscriptionId?: string) => this.transport<Article[]>(`/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}`);
+  getArticle = (workspaceId: string, articleId: string) => this.transport<Article>(`/api/articles/${enc(articleId)}?workspace_id=${enc(workspaceId)}`);
   listSubscriptions = (workspaceId: string) => this.transport<Subscription[]>(`/api/subscriptions?workspace_id=${enc(workspaceId)}`);
   getSubscription = (id:string) => this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}`);
   saveSubscriptionNote = (id:string,note:string) => this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}/note`,json("PUT",{note}));

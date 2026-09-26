@@ -141,14 +141,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 config.ingest.initial_feed_items,
             )?;
             let started = std::time::Instant::now();
-            let articles = repository
-                .article_presentations_by_workspace(WorkspaceId::from_uuid(workspace_id))
-                .await?;
+            let workspace = WorkspaceId::from_uuid(workspace_id);
+            let articles = repository.article_summaries_by_workspace(workspace).await?;
             println!(
-                "loaded {} article presentations in {} ms",
+                "loaded {} article summaries in {} ms",
                 articles.len(),
                 started.elapsed().as_millis()
             );
+            if let Some(first) = articles.first() {
+                let started = std::time::Instant::now();
+                repository
+                    .article_presentation(workspace, first.article.id)
+                    .await?;
+                println!(
+                    "loaded one article presentation in {} ms",
+                    started.elapsed().as_millis()
+                );
+            }
         }
         Command::BootstrapAdmin { username } => {
             let password = rpassword::prompt_password("Administrator password: ")?;

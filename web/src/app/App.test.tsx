@@ -50,16 +50,16 @@ describe("reader application", () => {
       articles: [pending],
       newArticleCount: 0,
     });
-    const listArticles = vi.spyOn(client, "listArticles").mockResolvedValue([
+    const getArticle = vi.spyOn(client, "getArticle").mockResolvedValue(
       { ...pending, fullText: "ready", body: ["Extracted body"] },
-    ]);
+    );
 
     render(<App client={client}/>);
     expect(await screen.findByText(/Fetching the full article/)).toBeVisible();
     const row = screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article");
 
     expect(await screen.findByText("Extracted body", {}, { timeout: 2000 })).toBeVisible();
-    expect(listArticles).toHaveBeenCalledTimes(1);
+    expect(getArticle).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/Fetching the full article/)).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article")).toBe(row);
   });

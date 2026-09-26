@@ -9,7 +9,8 @@ it("uses the reserved server routes and exact request shapes", async () => {
   await client.importOpml("workspace-id","<opml/>");
   await client.importOpml("workspace-id","<opml/>","preview-id");
   await client.saveRule("workspace-id",{subscriptionId:"sub",field:"title",phrase:"career",action:"mark_read",enabled:true});
-  expect(calls.map(call=>call.path)).toEqual(["/api/auth/sessions","/api/subscriptions","/api/opml/import","/api/opml/import","/api/rules?workspace_id=workspace-id"]);
+  await client.getArticle("workspace-id", "article-id");
+  expect(calls.map(call=>call.path)).toEqual(["/api/auth/sessions","/api/subscriptions","/api/opml/import","/api/opml/import","/api/rules?workspace_id=workspace-id","/api/articles/article-id?workspace_id=workspace-id"]);
   expect(JSON.parse(String(calls[1].init?.body))).toEqual({workspace_id:"workspace-id",url:"https://example.com/feed",title:"Discovered title"});
   expect(JSON.parse(String(calls[2].init?.body))).toEqual({workspace_id:"workspace-id",opml:"<opml/>",apply:false});
   expect(JSON.parse(String(calls[3].init?.body))).toEqual({workspace_id:"workspace-id",opml:"<opml/>",apply:true,preview_id:"preview-id"});

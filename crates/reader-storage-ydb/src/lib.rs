@@ -816,6 +816,7 @@ pub trait YdbTransport: Send + Sync {
         &self,
         workspace: String,
         articles: Vec<String>,
+        include_content: bool,
     ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String>;
     async fn enqueue_ingest_job(&self, id: String, item: Vec<u8>) -> Result<(), String>;
     async fn refresh_subscription(
@@ -1214,120 +1215,140 @@ impl YdbTransport for ProductionYdbTransport {
         &self,
         workspace: String,
         articles: Vec<String>,
+        include_content: bool,
     ) -> Result<Vec<(String, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Vec<u8>>)>, String> {
         if articles.is_empty() {
             return Ok(Vec::new());
         }
-        let wanted = articles
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
+        let article_values = Value::list_from(
+            ydb::ydb_struct!("id"=>String::new()),
+            articles
+                .iter()
+                .cloned()
+                .map(|id| ydb::ydb_struct!("id"=>id))
+                .collect(),
+        )
+        .map_err(|e| e.to_string())?;
+        let statement = r#"
+            SELECT o.article_id AS article_id, o.source_record_id AS record_id,
+                   s.document AS subscription_document,
+                   m.document AS manifest_document,
+                   f.document AS failure_document
+            FROM library_origins AS o
+            INNER JOIN AS_TABLE($articles) AS wanted ON o.article_id = wanted.id
+            INNER JOIN subscriptions AS s ON o.subscription_id = s.id
+            LEFT JOIN content_manifests AS m ON o.source_record_id = m.id
+            LEFT JOIN content_refresh_state AS f ON f.id = 'failure/' || o.source_record_id
+            WHERE o.workspace_id = $workspace
+        "#;
+        let mut result = articles
+            .into_iter()
+            .map(|article| (article, (Vec::new(), Vec::new(), Vec::new())))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut pointers =
+            std::collections::HashMap::<String, reader_ingest::ContentManifestPointer>::new();
+        let mut manifest_articles = Vec::<(String, String)>::new();
         let mut query = self.client.query_client();
-        let rows=query.query_result_set("SELECT article_id,subscription_id,source_record_id FROM library_origins WHERE workspace_id=$workspace").param("$workspace",workspace).await.map_err(|e|e.to_string())?;
-        let mut origins = Vec::new();
-        let mut subscription_ids = std::collections::HashSet::new();
-        let mut record_ids = std::collections::HashSet::new();
-        for mut row in rows {
+        for mut row in query
+            .query_result_set(statement)
+            .param("$workspace", workspace)
+            .param("$articles", article_values)
+            .await
+            .map_err(|e| e.to_string())?
+        {
             let article: String = row
                 .remove_field_by_name("article_id")
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            if !wanted.contains(&article) {
-                continue;
-            }
-            let subscription: String = row
-                .remove_field_by_name("subscription_id")
-                .map_err(|e| e.to_string())?
-                .try_into()
-                .map_err(|e: ydb::YdbError| e.to_string())?;
             let record: String = row
-                .remove_field_by_name("source_record_id")
+                .remove_field_by_name("record_id")
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            subscription_ids.insert(subscription.clone());
-            record_ids.insert(record.clone());
-            origins.push((article, subscription, record));
+            let subscription_document: String = row
+                .remove_field_by_name("subscription_document")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let manifest_document: Option<String> = row
+                .remove_field_by_name("manifest_document")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let failure_document: Option<String> = row
+                .remove_field_by_name("failure_document")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let Some(entry) = result.get_mut(&article) else {
+                return Err(
+                    "metadata query returned an article outside the requested workspace scope"
+                        .into(),
+                );
+            };
+            entry.0.push(subscription_document.into_bytes());
+            if let Some(document) = manifest_document {
+                let pointer =
+                    serde_json::from_str::<reader_ingest::ContentManifestPointer>(&document)
+                        .map_err(|e| e.to_string())?;
+                pointers.insert(record.clone(), pointer);
+                manifest_articles.push((article.clone(), record));
+            }
+            if let Some(document) = failure_document {
+                entry.2.push(document.into_bytes());
+            }
         }
-        let list = |values: &std::collections::HashSet<String>| {
-            Value::list_from(
-                ydb::ydb_struct!("id"=>String::new()),
-                values
-                    .iter()
-                    .cloned()
-                    .map(|id| ydb::ydb_struct!("id"=>id))
-                    .collect(),
-            )
-            .map_err(|e| e.to_string())
-        };
-        let mut subscription_docs = std::collections::HashMap::new();
-        if !subscription_ids.is_empty() {
-            for mut row in query.query_result_set("SELECT s.id AS id,s.document AS document FROM subscriptions AS s INNER JOIN AS_TABLE($ids) AS wanted ON s.id=wanted.id").param("$ids",list(&subscription_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;subscription_docs.insert(id,document.into_bytes());}
-        }
-        let mut pointers = std::collections::HashMap::new();
-        if !record_ids.is_empty() {
-            for mut row in query.query_result_set("SELECT m.id AS id,m.document AS document FROM content_manifests AS m INNER JOIN AS_TABLE($ids) AS wanted ON m.id=wanted.id").param("$ids",list(&record_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;pointers.insert(id,serde_json::from_str::<reader_ingest::ContentManifestPointer>(&document).map_err(|e|e.to_string())?);}
-        }
-        let refresh_rows=pointers.iter().map(|(record,pointer)|ydb::ydb_struct!("record_id"=>record.clone(),"refresh_id"=>pointer.refresh_id.to_string())).collect::<Vec<_>>();
+
         let mut chunks =
             std::collections::HashMap::<String, Vec<reader_ingest::ContentChunk>>::new();
-        if !refresh_rows.is_empty() {
+        if include_content && !pointers.is_empty() {
             let values = Value::list_from(
                 ydb::ydb_struct!("record_id"=>String::new(),"refresh_id"=>String::new()),
-                refresh_rows,
+                pointers
+                    .iter()
+                    .map(|(record, pointer)| ydb::ydb_struct!("record_id"=>record.clone(),"refresh_id"=>pointer.refresh_id.to_string()))
+                    .collect(),
             )
             .map_err(|e| e.to_string())?;
-            for mut row in query.query_result_set("SELECT c.record_id AS record_id,c.ordinal AS ordinal,c.bytes AS bytes FROM staged_content_chunks AS c INNER JOIN AS_TABLE($refreshes) AS wanted ON c.record_id=wanted.record_id AND c.refresh_id=wanted.refresh_id WHERE c.representation='safe' ORDER BY record_id,ordinal").param("$refreshes",values).await.map_err(|e|e.to_string())?{let record:String=row.remove_field_by_name("record_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let ordinal:u32=row.remove_field_by_name("ordinal").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let encoded:String=row.remove_field_by_name("bytes").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;chunks.entry(record).or_default().push(reader_ingest::ContentChunk{ordinal,bytes:serde_json::from_str(&encoded).map_err(|e|e.to_string())?});}
-        }
-        let failure_ids = record_ids
-            .iter()
-            .map(|record| format!("failure/{record}"))
-            .collect::<std::collections::HashSet<_>>();
-        let mut failures = std::collections::HashMap::new();
-        if !failure_ids.is_empty() {
-            for mut row in query.query_result_set("SELECT s.id AS id,s.document AS document FROM content_refresh_state AS s INNER JOIN AS_TABLE($ids) AS wanted ON s.id=wanted.id").param("$ids",list(&failure_ids)?).await.map_err(|e|e.to_string())?{let id:String=row.remove_field_by_name("id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;let document:String=row.remove_field_by_name("document").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;failures.insert(id.trim_start_matches("failure/").to_owned(),document.into_bytes());}
-        }
-        let mut result = articles
-            .into_iter()
-            .map(|article| (article, (Vec::new(), Vec::new(), Vec::new())))
-            .collect::<std::collections::HashMap<_, _>>();
-        for (article, subscription, record) in origins {
-            let Some(entry) = result.get_mut(&article) else {
-                continue;
-            };
-            if let Some(document) = subscription_docs.get(&subscription) {
-                entry.0.push(document.clone())
+            for mut row in query.query_result_set("SELECT c.record_id AS record_id,c.ordinal AS ordinal,c.bytes AS bytes FROM staged_content_chunks AS c INNER JOIN AS_TABLE($refreshes) AS wanted ON c.record_id=wanted.record_id AND c.refresh_id=wanted.refresh_id WHERE c.representation='safe' ORDER BY record_id,ordinal").param("$refreshes",values).await.map_err(|e|e.to_string())? {
+                let record: String = row.remove_field_by_name("record_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+                let ordinal: u32 = row.remove_field_by_name("ordinal").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+                let encoded: String = row.remove_field_by_name("bytes").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+                chunks.entry(record).or_default().push(reader_ingest::ContentChunk { ordinal, bytes: serde_json::from_str(&encoded).map_err(|e|e.to_string())? });
             }
-            if let Some(pointer) = pointers.get(&record) {
-                let mut safe = chunks.get(&record).cloned().unwrap_or_default();
-                safe.sort_by_key(|v| v.ordinal);
-                if safe.len() != pointer.safe_html_chunks as usize
+        }
+        for (article, record) in manifest_articles {
+            let pointer = pointers
+                .get(&record)
+                .ok_or_else(|| "manifest row lost its pointer".to_owned())?;
+            let mut safe = chunks.get(&record).cloned().unwrap_or_default();
+            safe.sort_by_key(|value| value.ordinal);
+            if include_content
+                && (safe.len() != pointer.safe_html_chunks as usize
                     || safe
                         .iter()
                         .enumerate()
-                        .any(|(expected, chunk)| chunk.ordinal != expected as u32)
-                {
-                    return Err(
-                        "current content manifest references incomplete safe HTML chunks".into(),
-                    );
-                }
-                let revision = reader_ingest::ContentRevision {
-                    record_id: pointer.record_id,
-                    source_revision: pointer.source_revision,
-                    refresh_id: pointer.refresh_id,
-                    raw_chunks: Vec::new(),
-                    safe_html_chunks: safe,
-                    fetched_at: pointer.fetched_at,
-                    final_url: pointer.final_url.clone(),
-                };
-                entry
-                    .1
-                    .push(serde_json::to_vec(&revision).map_err(|e| e.to_string())?)
+                        .any(|(expected, chunk)| chunk.ordinal != expected as u32))
+            {
+                return Err(
+                    "current content manifest references incomplete safe HTML chunks".into(),
+                );
             }
-            if let Some(document) = failures.get(&record) {
-                entry.2.push(document.clone())
-            }
+            let revision = reader_ingest::ContentRevision {
+                record_id: pointer.record_id,
+                source_revision: pointer.source_revision,
+                refresh_id: pointer.refresh_id,
+                raw_chunks: Vec::new(),
+                safe_html_chunks: safe,
+                fetched_at: pointer.fetched_at,
+                final_url: pointer.final_url.clone(),
+            };
+            result
+                .get_mut(&article)
+                .ok_or_else(|| "manifest references an article outside the result".to_owned())?
+                .1
+                .push(serde_json::to_vec(&revision).map_err(|e| e.to_string())?);
         }
         Ok(result
             .into_iter()
@@ -1895,6 +1916,114 @@ fn encode<T: Serialize>(value: &T) -> Result<Vec<u8>, RepositoryError> {
 }
 fn decode<T: DeserializeOwned>(raw: &[u8]) -> Result<T, RepositoryError> {
     serde_json::from_slice(raw).map_err(|e| RepositoryError::Storage(e.to_string()))
+}
+
+impl<T: YdbTransport> YdbRepository<T> {
+    async fn presentations(
+        &self,
+        workspace: WorkspaceId,
+        include_content: bool,
+    ) -> Result<Vec<reader_application::ArticlePresentation>, RepositoryError> {
+        let articles: Vec<Article> = scan(
+            self.transport.as_ref(),
+            "articles",
+            &format!("{}/", workspace.as_uuid()),
+        )
+        .await?;
+        self.presentations_for_articles(workspace, articles, include_content)
+            .await
+    }
+
+    async fn presentations_for_articles(
+        &self,
+        workspace: WorkspaceId,
+        articles: Vec<Article>,
+        include_content: bool,
+    ) -> Result<Vec<reader_application::ArticlePresentation>, RepositoryError> {
+        let mut metadata = self
+            .transport
+            .presentation_metadata_batch(
+                workspace.as_uuid().to_string(),
+                articles
+                    .iter()
+                    .map(|article| article.id.as_uuid().to_string())
+                    .collect(),
+                include_content,
+            )
+            .await
+            .map_err(RepositoryError::Storage)?
+            .into_iter()
+            .map(|(article, subscriptions, manifests, failures)| {
+                (article, (subscriptions, manifests, failures))
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut result = Vec::with_capacity(articles.len());
+        for article in articles {
+            let (sub_docs, manifest_docs, failure_docs) = metadata
+                .remove(&article.id.as_uuid().to_string())
+                .unwrap_or_default();
+            let mut subscription_ids = Vec::new();
+            let mut titles = Vec::new();
+            for raw in sub_docs {
+                let sub: Subscription = decode(&raw)?;
+                sub.validate(self.reason_policy)
+                    .map_err(|e| RepositoryError::Storage(e.to_string()))?;
+                if !subscription_ids.contains(&sub.id()) {
+                    subscription_ids.push(sub.id())
+                }
+                if !titles.iter().any(|v| v == sub.title()) {
+                    titles.push(sub.title().to_owned())
+                }
+            }
+            let mut revisions = Vec::new();
+            for raw in manifest_docs {
+                revisions.push(decode::<reader_ingest::ContentRevision>(&raw)?)
+            }
+            let latest = revisions.into_iter().max_by_key(|v| v.fetched_at);
+            let safe_html = if include_content {
+                latest
+                    .as_ref()
+                    .map(|revision| {
+                        let mut chunks = revision.safe_html_chunks.clone();
+                        chunks.sort_by_key(|v| v.ordinal);
+                        let mut bytes = Vec::new();
+                        for chunk in chunks {
+                            bytes.extend_from_slice(&chunk.bytes)
+                        }
+                        String::from_utf8(bytes).map_err(|_| {
+                            RepositoryError::Storage("safe HTML content is not UTF-8".into())
+                        })
+                    })
+                    .transpose()?
+            } else {
+                None
+            };
+            let failure_reason = failure_docs
+                .last()
+                .and_then(|raw| serde_json::from_slice::<serde_json::Value>(raw).ok())
+                .and_then(|v| {
+                    v.get("diagnostic")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned)
+                });
+            let status = if latest.is_some() {
+                "ready"
+            } else if failure_reason.is_some() {
+                "failed"
+            } else {
+                "pending"
+            };
+            result.push(reader_application::ArticlePresentation {
+                article,
+                subscription_ids,
+                subscription_titles: titles,
+                safe_html,
+                full_text_status: status,
+                failure_reason,
+            })
+        }
+        Ok(result)
+    }
 }
 
 #[async_trait]
@@ -2798,85 +2927,30 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
         &self,
         workspace: WorkspaceId,
     ) -> Result<Vec<reader_application::ArticlePresentation>, RepositoryError> {
-        let articles = self.articles_by_workspace(workspace).await?;
-        let mut metadata = self
-            .transport
-            .presentation_metadata_batch(
-                workspace.as_uuid().to_string(),
-                articles
-                    .iter()
-                    .map(|article| article.id.as_uuid().to_string())
-                    .collect(),
-            )
-            .await
-            .map_err(RepositoryError::Storage)?
+        self.presentations(workspace, true).await
+    }
+    async fn article_summaries_by_workspace(
+        &self,
+        workspace: WorkspaceId,
+    ) -> Result<Vec<reader_application::ArticlePresentation>, RepositoryError> {
+        self.presentations(workspace, false).await
+    }
+    async fn article_presentation(
+        &self,
+        workspace: WorkspaceId,
+        id: ArticleId,
+    ) -> Result<reader_application::ArticlePresentation, RepositoryError> {
+        let article: Article = read_one(
+            self.transport.as_ref(),
+            "articles",
+            format!("{}/{}", workspace.as_uuid(), id.as_uuid()),
+        )
+        .await?;
+        self.presentations_for_articles(workspace, vec![article], true)
+            .await?
             .into_iter()
-            .map(|(article, subscriptions, manifests, failures)| {
-                (article, (subscriptions, manifests, failures))
-            })
-            .collect::<std::collections::HashMap<_, _>>();
-        let mut result = Vec::with_capacity(articles.len());
-        for article in articles {
-            let (sub_docs, manifest_docs, failure_docs) = metadata
-                .remove(&article.id.as_uuid().to_string())
-                .unwrap_or_default();
-            let mut subscription_ids = Vec::new();
-            let mut titles = Vec::new();
-            for raw in sub_docs {
-                let sub: Subscription = decode(&raw)?;
-                sub.validate(self.reason_policy)
-                    .map_err(|e| RepositoryError::Storage(e.to_string()))?;
-                if !subscription_ids.contains(&sub.id()) {
-                    subscription_ids.push(sub.id())
-                }
-                if !titles.iter().any(|v| v == sub.title()) {
-                    titles.push(sub.title().to_owned())
-                }
-            }
-            let mut revisions = Vec::new();
-            for raw in manifest_docs {
-                revisions.push(decode::<reader_ingest::ContentRevision>(&raw)?)
-            }
-            let latest = revisions.into_iter().max_by_key(|v| v.fetched_at);
-            let safe_html = latest
-                .as_ref()
-                .map(|revision| {
-                    let mut chunks = revision.safe_html_chunks.clone();
-                    chunks.sort_by_key(|v| v.ordinal);
-                    let mut bytes = Vec::new();
-                    for chunk in chunks {
-                        bytes.extend_from_slice(&chunk.bytes)
-                    }
-                    String::from_utf8(bytes).map_err(|_| {
-                        RepositoryError::Storage("safe HTML content is not UTF-8".into())
-                    })
-                })
-                .transpose()?;
-            let failure_reason = failure_docs
-                .last()
-                .and_then(|raw| serde_json::from_slice::<serde_json::Value>(raw).ok())
-                .and_then(|v| {
-                    v.get("diagnostic")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_owned)
-                });
-            let status = if safe_html.is_some() {
-                "ready"
-            } else if failure_reason.is_some() {
-                "failed"
-            } else {
-                "pending"
-            };
-            result.push(reader_application::ArticlePresentation {
-                article,
-                subscription_ids,
-                subscription_titles: titles,
-                safe_html,
-                full_text_status: status,
-                failure_reason,
-            })
-        }
-        Ok(result)
+            .next()
+            .ok_or(RepositoryError::NotFound)
     }
     async fn save_article(
         &self,

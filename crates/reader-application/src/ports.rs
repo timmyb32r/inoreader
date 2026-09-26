@@ -312,6 +312,23 @@ pub trait ReaderRepository: Send + Sync {
         &self,
         workspace: WorkspaceId,
     ) -> Result<Vec<ArticlePresentation>, RepositoryError>;
+    async fn article_summaries_by_workspace(
+        &self,
+        workspace: WorkspaceId,
+    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
+        self.article_presentations_by_workspace(workspace).await
+    }
+    async fn article_presentation(
+        &self,
+        workspace: WorkspaceId,
+        id: ArticleId,
+    ) -> Result<ArticlePresentation, RepositoryError> {
+        self.article_presentations_by_workspace(workspace)
+            .await?
+            .into_iter()
+            .find(|value| value.article.id == id)
+            .ok_or(RepositoryError::NotFound)
+    }
     async fn save_article(
         &self,
         workspace: WorkspaceId,

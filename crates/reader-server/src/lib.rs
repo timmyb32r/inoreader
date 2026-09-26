@@ -163,6 +163,7 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
             post(refresh_subscription::<R>),
         )
         .route("/api/articles", get(list_articles::<R>))
+        .route("/api/articles/{id}", get(get_article::<R>))
         .route("/api/articles/{id}/state", post(update_article::<R>))
         .route(
             "/api/articles/{id}/full-text/refresh",
@@ -373,7 +374,7 @@ async fn bootstrap<R: ReaderRepository + 'static>(
     let subscriptions = s.repository.subscriptions_by_workspace(active_id).await?;
     let articles = s
         .repository
-        .article_presentations_by_workspace(active_id)
+        .article_summaries_by_workspace(active_id)
         .await?;
     let unread = articles.iter().filter(|a| !a.article.state.read).count();
     let initials = actor
@@ -948,7 +949,7 @@ async fn list_articles<R: ReaderRepository + 'static>(
     owned_workspace(&s, workspace, actor.account.id).await?;
     let mut values = s
         .repository
-        .article_presentations_by_workspace(workspace)
+        .article_summaries_by_workspace(workspace)
         .await?;
     if let Some(subscription_id) = query.subscription_id {
         let subscription_id = SubscriptionId::from_uuid(subscription_id);
@@ -965,6 +966,21 @@ async fn list_articles<R: ReaderRepository + 'static>(
         })
     }
     Ok(Json(values.iter().map(article_view).collect()))
+}
+async fn get_article<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<WorkspaceQuery>,
+) -> Result<Json<ArticleView>, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let workspace = WorkspaceId::from_uuid(query.workspace_id);
+    owned_workspace(&s, workspace, actor.account.id).await?;
+    let value = s
+        .repository
+        .article_presentation(workspace, ArticleId::from_uuid(id))
+        .await?;
+    Ok(Json(article_view(&value)))
 }
 async fn update_article<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
@@ -1004,16 +1020,9 @@ async fn update_article<R: ReaderRepository + 'static>(
         .await?;
     let presentation = s
         .repository
-        .article_presentations_by_workspace(workspace)
-        .await?
-        .into_iter()
-        .find(|candidate| candidate.article.id == article_id);
-    Ok(Json(
-        presentation
-            .as_ref()
-            .map(article_view)
-            .unwrap_or_else(|| article_domain_view(&value)),
-    ))
+        .article_presentation(workspace, article_id)
+        .await?;
+    Ok(Json(article_view(&presentation)))
 }
 async fn refresh_full_text<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
@@ -1054,7 +1063,7 @@ async fn mark_all_read<R: ReaderRepository + 'static>(
     let mut selected = Vec::new();
     for presentation in s
         .repository
-        .article_presentations_by_workspace(workspace)
+        .article_summaries_by_workspace(workspace)
         .await?
     {
         if subscription

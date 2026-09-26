@@ -87,23 +87,22 @@ export function App({ client }: { client: ApiClient }) {
   const selected = filtered.find((a) => a.id === selectedId) ?? filtered[0];
   filteredRef.current=filtered;selectedIdRef.current=selectedId;selectedRef.current=selected;
   useEffect(() => {
-    if (!workspaceId || !selected || selected.fullText !== "pending") return;
+    if (!workspaceId || !selected) return;
     let active = true;
     let timer: number | undefined;
-    let delay = 1000;
-    const poll = () => client.listArticles(workspaceId, "all").then((next) => {
+    let delay = selected.fullText === "pending" ? 1000 : 0;
+    const poll = () => client.getArticle(workspaceId, selected.id).then((next) => {
       if (!active) return;
-      const byId = new Map(next.map((article) => [article.id, article]));
-      setArticles((current) => current.map((article) => byId.get(article.id) ?? article));
-    }).catch(() => undefined).finally(() => {
-      if (active) {
-        delay = Math.min(delay * 2, 30000);
-        timer = window.setTimeout(poll, delay);
-      }
+      setArticles((current) => current.map((article) => article.id === next.id ? next : article));
+      if (next.fullText !== "pending") return;
+      delay = Math.min(Math.max(delay, 1000) * 2, 30000);
+      timer = window.setTimeout(poll, delay);
+    }).catch(() => {
+      if (active && selected.fullText === "pending") timer = window.setTimeout(poll, 3000);
     });
     timer = window.setTimeout(poll, delay);
     return () => { active = false; if (timer) window.clearTimeout(timer); };
-  }, [client, workspaceId, selected?.id, selected?.fullText]);
+  }, [client, workspaceId, selected?.id]);
 
   const update = (id: string, patch: Partial<Pick<Article, "read" | "saved" | "later" | "trash">>) => {
     const before = articlesRef.current.find((item) => item.id === id); if (!before || !workspaceId) return;
