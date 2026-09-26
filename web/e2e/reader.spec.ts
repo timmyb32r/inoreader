@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("reader navigation and article states", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "All articles" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
   await page.getByRole("heading", { name: "The durable queue is the product", level: 2 }).click();
   await expect(page.getByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
   await page.getByRole("article", { name: "Article reader" }).getByRole("button", { name: "Save" }).click();
@@ -35,7 +35,7 @@ test("theme and responsive panels remain usable", async ({ page }) => {
   await page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 }).click();
   await expect(page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 })).toBeVisible();
   await page.getByRole("button", { name: "Back to articles" }).click();
-  await expect(page.getByRole("heading", { name: "All articles" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
 });
 
 test("search is an inert placeholder", async ({ page }) => {

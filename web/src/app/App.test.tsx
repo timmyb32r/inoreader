@@ -11,7 +11,7 @@ describe("reader application", () => {
   it("highlights only the current navigation destination when returning home", async () => {
     const user = userEvent.setup();
     renderApp();
-    const all = await screen.findByRole("button", { name: "All articles" });
+    const all = await screen.findByRole("button", { name: /^Feed \(\d+\)$/ });
     expect(all).toHaveClass("active");
     await user.click(screen.getByRole("button", { name: "Home" }));
     expect(screen.getByRole("button", { name: "Home" })).toHaveClass("active");
@@ -75,6 +75,8 @@ describe("reader application", () => {
     const list=vi.spyOn(client,"listArticles").mockResolvedValue({articles:[articles[1]],total:100,unreadTotal:75,newerCursor:"newer-2",olderCursor:"older-2"});
     render(<App client={client}/>);
     expect(await screen.findByText("1–50 of 100")).toBeVisible();
+    expect(screen.getByRole("button", {name:"Feed (75)"})).toBeVisible();
+    expect(screen.getByRole("heading", {name:"Feed (75)"})).toBeVisible();
     await userEvent.setup().click(screen.getByRole("button",{name:"Older →"}));
     expect(await screen.findByRole("heading",{name:articles[1].title,level:2})).toBeVisible();
     expect(list).toHaveBeenCalledWith("ws","all",undefined,"older-1","older");
@@ -137,7 +139,7 @@ describe("reader application", () => {
     await user.click(collapse);
     expect(sidebar).toHaveClass("sidebar--collapsed");
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "All articles" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Feed \(\d+\)$/ })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
     expect(sidebar).not.toHaveClass("sidebar--collapsed");
   });
@@ -148,9 +150,9 @@ describe("reader application", () => {
     await user.click(await screen.findByRole("button", { name: "Home" }));
     expect(window.location.pathname).toBe("/");
     expect(screen.getByRole("heading", { name: "Your reading activity" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open library" }));
+    await user.click(screen.getByRole("button", { name: "Open feed" }));
     expect(window.location.pathname).toBe("/reader");
-    expect(screen.getByRole("heading", { name: "All articles" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
   });
 
   it("centers an accessible spinner while bootstrap is pending", () => {
@@ -356,5 +358,5 @@ describe("reader application", () => {
     expect(screen.getByRole("button", { name: /Финансы/ })).toBeInTheDocument();
   });
 
-  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/reader");renderApp();await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Subscriptions 1"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
+  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/reader");renderApp();await screen.findByRole("heading",{name:/^Feed \(\d+\)$/});await user.click(screen.getByRole("button",{name:"Subscriptions 1"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
 });

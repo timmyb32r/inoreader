@@ -1,6 +1,6 @@
 import { expect,test } from "@playwright/test";
 
-test.beforeEach(async({page})=>{await page.goto("/");await expect(page.getByRole("heading",{name:"All articles"})).toBeVisible();});
+test.beforeEach(async({page})=>{await page.goto("/");await expect(page.getByRole("heading",{name:/^Feed \(\d+\)$/})).toBeVisible();});
 
 test("workspace switch reloads its library without moving the picker",async({page})=>{
  const picker=page.getByRole("button",{name:/Data engineering/});const before=await picker.boundingBox();await picker.click();await page.getByRole("button",{name:/Финансы/}).click();
