@@ -1406,64 +1406,98 @@ impl YdbTransport for ProductionYdbTransport {
                 unread_articles.insert(article.id.as_uuid().to_string());
             }
         }
-        let mut result = Vec::new();
-        for subscription in subscription_ids {
-            let Some(mut link) = query
-                .query_row("SELECT source_id FROM subscription_sources WHERE subscription_id=$subscription")
-                .param("$subscription", subscription.clone())
-                .optional()
-                .await
-                .map_err(|e| e.to_string())?
-            else { continue };
-            let source: String = link
+        let subscription_values = subscription_ids.iter().cloned().collect::<ydb::Value>();
+        let mut sources_by_subscription = std::collections::HashMap::new();
+        for mut row in query
+            .query_result_set("SELECT subscription_id,source_id FROM subscription_sources WHERE subscription_id IN $subscriptions")
+            .param("$subscriptions", subscription_values.clone())
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let subscription: String = row.remove_field_by_name("subscription_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+            let source: String = row.remove_field_by_name("source_id").map_err(|e|e.to_string())?.try_into().map_err(|e:ydb::YdbError|e.to_string())?;
+            sources_by_subscription.insert(subscription, source);
+        }
+        let source_values = sources_by_subscription
+            .values()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<ydb::Value>();
+        let mut health_by_source = std::collections::HashMap::new();
+        for mut row in query
+            .query_result_set(
+                "SELECT source_id,document FROM source_health WHERE source_id IN $sources",
+            )
+            .param("$sources", source_values.clone())
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let source: String = row
                 .remove_field_by_name("source_id")
                 .map_err(|e| e.to_string())?
                 .try_into()
                 .map_err(|e: ydb::YdbError| e.to_string())?;
-            let health = if let Some(mut row) = query
-                .query_row("SELECT document FROM source_health WHERE source_id=$source")
-                .param("$source", source.clone())
-                .optional()
-                .await
+            let document: String = row
+                .remove_field_by_name("document")
                 .map_err(|e| e.to_string())?
-            {
-                let document: String = row
-                    .remove_field_by_name("document")
-                    .map_err(|e| e.to_string())?
-                    .try_into()
-                    .map_err(|e: ydb::YdbError| e.to_string())?;
-                Some(
-                    serde_json::from_str::<ingest_store::SourceHealth>(&document)
-                        .map_err(|e| e.to_string())?,
-                )
-            } else {
-                None
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            health_by_source.insert(
+                source,
+                serde_json::from_str::<ingest_store::SourceHealth>(&document)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        let mut source_types = std::collections::HashMap::new();
+        for mut row in query
+            .query_result_set("SELECT id,document FROM sources WHERE id IN $sources")
+            .param("$sources", source_values)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let source: String = row
+                .remove_field_by_name("id")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let document: String = row
+                .remove_field_by_name("document")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            let definition: SourceDefinition =
+                serde_json::from_str(&document).map_err(|e| e.to_string())?;
+            source_types.insert(
+                source,
+                subscription_source_type(definition.kind()).to_owned(),
+            );
+        }
+        let mut editable = std::collections::HashSet::new();
+        for mut row in query
+            .query_result_set("SELECT id FROM web_feed_recipes WHERE id IN $subscriptions")
+            .param("$subscriptions", subscription_values)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            let id: String = row
+                .remove_field_by_name("id")
+                .map_err(|e| e.to_string())?
+                .try_into()
+                .map_err(|e: ydb::YdbError| e.to_string())?;
+            editable.insert(id);
+        }
+        let mut result = Vec::new();
+        for subscription in subscription_ids {
+            let Some(source) = sources_by_subscription.get(&subscription) else {
+                continue;
             };
-            let source_type = if let Some(mut row) = query
-                .query_row("SELECT document FROM sources WHERE id=$source")
-                .param("$source", source)
-                .optional()
-                .await
-                .map_err(|e| e.to_string())?
-            {
-                let document: String = row
-                    .remove_field_by_name("document")
-                    .map_err(|e| e.to_string())?
-                    .try_into()
-                    .map_err(|e: ydb::YdbError| e.to_string())?;
-                let definition: SourceDefinition =
-                    serde_json::from_str(&document).map_err(|e| e.to_string())?;
-                subscription_source_type(definition.kind()).to_owned()
-            } else {
-                "feed".to_owned()
-            };
-            let is_editable = query
-                .query_row("SELECT id FROM web_feed_recipes WHERE id=$subscription")
-                .param("$subscription", subscription.clone())
-                .optional()
-                .await
-                .map_err(|e| e.to_string())?
-                .is_some();
+            let health = health_by_source.get(source);
+            let source_type = source_types
+                .get(source)
+                .cloned()
+                .unwrap_or_else(|| "feed".to_owned());
+            let is_editable = editable.contains(&subscription);
             let state = health.as_ref();
             let (count, unread) = subscription_article_counts(
                 article_ids_by_subscription.get(&subscription),
