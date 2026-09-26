@@ -40,6 +40,20 @@ impl DnsResolver for TokioDnsResolver {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ReqwestPinnedTransport;
 
+fn pinned_client(
+    host: &str,
+    socket: SocketAddr,
+    connect_timeout: Duration,
+    remaining_deadline: Duration,
+) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(connect_timeout)
+        .timeout(remaining_deadline)
+        .resolve(host, socket)
+        .build()
+}
+
 type ByteStream =
     Pin<Box<dyn Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static>>;
 
@@ -79,14 +93,11 @@ impl OutboundTransport for ReqwestPinnedTransport {
                 kind: "missing_port",
             })?;
         let socket = SocketAddr::new(authorization.address(), port);
-        let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .connect_timeout(connect_timeout)
-            .timeout(remaining_deadline)
-            .resolve(host, socket)
-            .build()
-            .map_err(|_| TransportError {
-                kind: "client_build",
+        let client =
+            pinned_client(host, socket, connect_timeout, remaining_deadline).map_err(|_| {
+                TransportError {
+                    kind: "client_build",
+                }
             })?;
         let mut builder = client.request(request.method.clone(), request.url.clone());
         builder = builder.headers(request.headers.clone());
@@ -127,3 +138,6 @@ impl OutboundTransport for ReqwestPinnedTransport {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

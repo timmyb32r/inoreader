@@ -10,7 +10,7 @@ async-trait = "0.1"
 bytes = "1"
 futures-util = "0.3"
 http = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip", "brotli", "deflate", "zstd"] }
 thiserror = "2"
 tokio = { version = "1", features = ["net"] }
 url = "2"
