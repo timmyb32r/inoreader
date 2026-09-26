@@ -8,6 +8,17 @@ const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
   beforeEach(()=>history.replaceState({},"","/reader"));
+  it("opens the selected subscription settings from its list heading", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    const sources = await screen.findByRole("navigation", { name: "Subscriptions" });
+    await user.click(within(sources).getByRole("button", { name: /This Week in Rust/ }));
+    const link = await screen.findByRole("link", { name: "Open settings for This Week in Rust" });
+    expect(link).toHaveAttribute("href", "/subscriptions/sub");
+    await user.click(link);
+    expect(await screen.findByRole("dialog", { name: "Subscription details" })).toBeVisible();
+    expect(window.location.pathname).toBe("/subscriptions/sub");
+  });
   it("replaces the visible batch through stable cursors and preserves the position in the URL", async () => {
     const client=mockClient();
     vi.spyOn(client,"bootstrap").mockResolvedValue({account:{id:"account",displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[articles[0]],total:100,unreadTotal:75,olderCursor:"older-1"}});
