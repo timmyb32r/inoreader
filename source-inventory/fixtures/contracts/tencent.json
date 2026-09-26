@@ -6,11 +6,9 @@
     "id": "tencent",
     "name": "Tencent Cloud Developer",
     "url": "https://cloud.tencent.com/developer",
-    "link_selector": "a.cdc-article-panel-response2__title",
+    "link_selector": "a[href^=\"https://cloud.tencent.com/developer/article/\"]:not([href*=\"?\"])",
     "url_pattern": "/developer/article/[0-9]+$",
-    "browser_fallback": true,
-    "browser": true,
-    "scroll_steps": 3
+    "browser_fallback": false
   },
   "historical_expectations": [
     {

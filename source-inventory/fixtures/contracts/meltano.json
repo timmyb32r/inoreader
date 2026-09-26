@@ -10,11 +10,7 @@
     "card_selector": "article.blog-list-item",
     "date_selector": ".blog-list-item-date, .blog-author-date .bold",
     "url_pattern": "^https://meltano\\.com/blog/[^/?]+/?$",
-    "browser": true,
-    "browser_fallback": true,
-    "wait_selector": "article.blog-list-item",
-    "load_more_selector": "#load-more-button",
-    "load_more_clicks": 1
+    "browser_fallback": false
   },
   "historical_expectations": [
     {

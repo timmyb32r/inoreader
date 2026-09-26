@@ -7,7 +7,6 @@
     "name": "Timecho 技术解析",
     "url": "https://www.timecho.com/tags/introduction",
     "link_selector": ".main-post-list-container a.post-container-wrapper",
-    "card_selector": ".post-container-wrapper",
     "title_selector": ".post-detail-title, .page-content-title",
     "date_selector": ".post-detail-date",
     "url_pattern": "^https://www\\.timecho\\.com/archives/[^/?]+$",

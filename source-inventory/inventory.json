@@ -91,11 +91,7 @@
         "card_selector": "article.blog-list-item",
         "date_selector": ".blog-list-item-date, .blog-author-date .bold",
         "url_pattern": "^https://meltano\\.com/blog/[^/?]+/?$",
-        "browser": true,
-        "browser_fallback": true,
-        "wait_selector": "article.blog-list-item",
-        "load_more_selector": "#load-more-button",
-        "load_more_clicks": 1
+        "browser_fallback": false
       },
       "adapter_kind": "generic_html",
       "historical_observations": [
@@ -261,12 +257,8 @@
         "url": "https://www.informatica.com/blogs.html",
         "link_selector": "a.blog-infa-tile",
         "url_pattern": "/blogs/[^/]+\\.html$",
-        "browser_fallback": true,
-        "browser": true,
-        "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27",
-        "wait_selector": "a.CoveoResultLink",
-        "load_more_selector": ".coveo-pager-next span[role=button]",
-        "load_more_clicks": 2
+        "browser_fallback": false,
+        "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27"
       },
       "adapter_kind": "generic_html",
       "historical_observations": [
@@ -293,11 +285,9 @@
         "id": "tencent",
         "name": "Tencent Cloud Developer",
         "url": "https://cloud.tencent.com/developer",
-        "link_selector": "a.cdc-article-panel-response2__title",
+        "link_selector": "a[href^=\"https://cloud.tencent.com/developer/article/\"]:not([href*=\"?\"])",
         "url_pattern": "/developer/article/[0-9]+$",
-        "browser_fallback": true,
-        "browser": true,
-        "scroll_steps": 3
+        "browser_fallback": false
       },
       "adapter_kind": "generic_html",
       "historical_observations": [
@@ -769,11 +759,7 @@
         "url": "https://risingwave.com/blog/",
         "link_selector": "a[href*=\"/blog/\"]",
         "url_pattern": "/blog/[^/?]+/?$",
-        "browser_fallback": true,
-        "browser": true,
-        "wait_selector": "button[class*=\"w-1/2\"]",
-        "load_more_selector": "button[class*=\"w-1/2\"]",
-        "load_more_clicks": 2
+        "browser_fallback": false
       },
       "adapter_kind": "generic_html",
       "historical_observations": [
@@ -943,7 +929,6 @@
         "name": "Timecho 技术解析",
         "url": "https://www.timecho.com/tags/introduction",
         "link_selector": ".main-post-list-container a.post-container-wrapper",
-        "card_selector": ".post-container-wrapper",
         "title_selector": ".post-detail-title, .page-content-title",
         "date_selector": ".post-detail-date",
         "url_pattern": "^https://www\\.timecho\\.com/archives/[^/?]+$",
@@ -992,7 +977,6 @@
         "name": "SelectDB",
         "url": "https://www.selectdb.com/blogs",
         "link_selector": "a.blog-card",
-        "card_selector": "a.blog-card",
         "title_selector": ".blog-card-title",
         "date_selector": ".blog-card-meta-date",
         "url_pattern": "^https://www.selectdb.com/blog/[0-9]+$",

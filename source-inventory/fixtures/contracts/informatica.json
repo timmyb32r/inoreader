@@ -8,12 +8,8 @@
     "url": "https://www.informatica.com/blogs.html",
     "link_selector": "a.blog-infa-tile",
     "url_pattern": "/blogs/[^/]+\\.html$",
-    "browser_fallback": true,
-    "browser": true,
-    "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27",
-    "wait_selector": "a.CoveoResultLink",
-    "load_more_selector": ".coveo-pager-next span[role=button]",
-    "load_more_clicks": 2
+    "browser_fallback": false,
+    "listing_url": "https://www.informatica.com/blogs.html#t=WWW&sort=%40wwwpublishdate%20descending&numberOfResults=27"
   },
   "historical_expectations": [
     {

@@ -7,7 +7,6 @@
     "name": "SelectDB",
     "url": "https://www.selectdb.com/blogs",
     "link_selector": "a.blog-card",
-    "card_selector": "a.blog-card",
     "title_selector": ".blog-card-title",
     "date_selector": ".blog-card-meta-date",
     "url_pattern": "^https://www.selectdb.com/blog/[0-9]+$",

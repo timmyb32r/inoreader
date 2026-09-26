@@ -8,11 +8,7 @@
     "url": "https://risingwave.com/blog/",
     "link_selector": "a[href*=\"/blog/\"]",
     "url_pattern": "/blog/[^/?]+/?$",
-    "browser_fallback": true,
-    "browser": true,
-    "wait_selector": "button[class*=\"w-1/2\"]",
-    "load_more_selector": "button[class*=\"w-1/2\"]",
-    "load_more_clicks": 2
+    "browser_fallback": false
   },
   "historical_expectations": [
     {
