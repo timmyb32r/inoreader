@@ -7,6 +7,16 @@ import { ApiClient, ApiError } from "../api/client";
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  it("uses the brand as a link back to the main library", async () => {
+    history.replaceState({}, "", "/subscriptions");
+    const user = userEvent.setup();
+    renderApp();
+
+    await user.click(await screen.findByRole("link", { name: "Reader home" }));
+    expect(window.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { name: "All articles" })).toBeVisible();
+  });
+
   it("centers an accessible spinner while bootstrap is pending", () => {
     const client = new ApiClient(async () => new Promise(() => undefined));
     render(<App client={client}/>);

@@ -130,6 +130,7 @@ export function App({ client }: { client: ApiClient }) {
     }).finally(() => { if (requestWorkspace === workspaceId) setMarkingAll(false); });
   };
   const navigate=(path:string)=>{if(path!==locationPathRef.current&&!confirmDiscard())return false;history.pushState({},"",path);locationPathRef.current=path;setLocationPath(path);return true};
+  const goHome=()=>{if(!navigate("/"))return;chooseView("all");setSelectedId(articles[0]?.id??"")};
   const subscriptionRoute=/^\/subscriptions(?:\/([^/]+))?$/.exec(locationPath);
   const openRef=useRef(open),updateRef=useRef(update);openRef.current=open;updateRef.current=update;
   useLayoutEffect(() => {
@@ -152,7 +153,7 @@ export function App({ client }: { client: ApiClient }) {
   return <div class={`app theme-${theme}`} data-theme={theme}>
     <header class="topbar">
       <button class="mobile-menu icon-button" aria-label="Open navigation" onClick={() => setMobilePanel("nav")}><Icon name="menu" /></button>
-      <div class="brand"><span class="brand__mark"><Icon name="feed"/></span><span>Reader</span></div>
+      <a class="brand" href="/" aria-label="Reader home" onClick={(event)=>{event.preventDefault();goHome()}}><span class="brand__mark"><Icon name="feed"/></span><span>Reader</span></a>
       <div class="topbar__spacer" />
       <button class="search-stub" disabled aria-describedby="search-description"><Icon name="search"/><span>Search</span><kbd>Coming later</kbd></button><span id="search-description" class="sr-only">Search is not available in this version.</span>
       <button class="icon-button" aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><Icon name={theme === "light" ? "moon" : "sun"}/></button>
