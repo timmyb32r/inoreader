@@ -60,10 +60,8 @@ impl YdbContainer {
     fn connection_string(&self) -> String {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
-            let processes = command("docker", &["top", &self.name, "-eo", "comm"]);
-            let process_list = String::from_utf8_lossy(&processes.stdout);
             let output = command("docker", &["port", &self.name, "2136/tcp"]);
-            if process_list.lines().any(|line| line.trim() == "ydbd") && output.status.success() {
+            if output.status.success() {
                 let mapping = String::from_utf8(output.stdout)
                     .expect("docker port output must be UTF-8")
                     .trim()
