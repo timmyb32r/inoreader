@@ -304,7 +304,6 @@ impl Config {
                 "http.max_decompressed_bytes",
                 self.http.max_decompressed_bytes,
             ),
-            ("scheduler.workers", self.scheduler.workers),
             (
                 "scheduler.per_origin_concurrency",
                 self.scheduler.per_origin_concurrency,

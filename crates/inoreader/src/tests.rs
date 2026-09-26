@@ -7,6 +7,13 @@ fn example() -> Config {
 fn example_configuration_is_valid() {
     Config::validate(&example()).unwrap()
 }
+
+#[test]
+fn zero_workers_explicitly_pauses_ingest_without_invalidating_the_server() {
+    let mut value = example();
+    value.scheduler.workers = 0;
+    value.validate().unwrap();
+}
 #[test]
 fn external_request_metrics_cannot_be_disabled() {
     let mut value = example();
