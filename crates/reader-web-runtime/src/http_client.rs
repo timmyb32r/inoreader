@@ -167,7 +167,7 @@ where
                 .map_err(|error| OutboundError::Transport { kind: error.kind })?;
             authorization.verify_connected_peer(response.connected_peer)?;
 
-            if response.status.is_redirection() {
+            if follows_location(response.status) {
                 let location = response
                     .headers
                     .get(header::LOCATION)
@@ -197,6 +197,17 @@ where
             });
         }
     }
+}
+
+fn follows_location(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::MOVED_PERMANENTLY
+            | StatusCode::FOUND
+            | StatusCode::SEE_OTHER
+            | StatusCode::TEMPORARY_REDIRECT
+            | StatusCode::PERMANENT_REDIRECT
+    )
 }
 
 #[cfg(test)]

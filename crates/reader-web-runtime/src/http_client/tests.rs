@@ -156,3 +156,48 @@ async fn redirect_to_private_dns_is_rejected_and_observed() {
         ExternalRequestOutcome::Rejected
     );
 }
+
+#[tokio::test]
+async fn not_modified_is_returned_without_requiring_a_location_header() {
+    let public: IpAddr = "93.184.216.34".parse().unwrap();
+    let observer = Arc::new(Observer::default());
+    let client = OutboundHttpClient::new(
+        OutboundPolicy::new(
+            false,
+            OutboundLimits {
+                connect_timeout: Duration::from_secs(1),
+                request_deadline: Duration::from_secs(5),
+                max_redirect_hops: 3,
+                max_response_body_bytes: 10,
+            },
+        ),
+        Resolver {
+            answers: Mutex::new(VecDeque::from([vec![public]])),
+        },
+        Transport {
+            responses: Mutex::new(VecDeque::from([response(
+                StatusCode::NOT_MODIFIED,
+                None,
+                b"",
+            )])),
+            requests: Mutex::new(vec![]),
+        },
+        observer.clone(),
+    );
+
+    let result = client
+        .execute(PreparedRequest {
+            method: Method::GET,
+            url: Url::parse("https://feed.test/rss").unwrap(),
+            headers: HeaderMap::new(),
+            body: None,
+        })
+        .await
+        .expect("304 is a terminal cache response");
+
+    assert_eq!(result.status, StatusCode::NOT_MODIFIED);
+    assert_eq!(
+        observer.0.lock().unwrap()[0].outcome,
+        ExternalRequestOutcome::Success
+    );
+}
