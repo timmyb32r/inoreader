@@ -201,6 +201,12 @@ CREATE TABLE IF NOT EXISTS subscription_sources (
     source_id TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS subscription_icons (
+    subscription_id TEXT PRIMARY KEY,
+    data_url TEXT NOT NULL,
+    fetched_at_ms BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS source_health (
     source_id TEXT PRIMARY KEY,
     document TEXT NOT NULL

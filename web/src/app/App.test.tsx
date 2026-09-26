@@ -7,10 +7,10 @@ import { ApiClient, ApiError } from "../api/client";
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
-  beforeEach(()=>history.replaceState({},"","/"));
+  beforeEach(()=>history.replaceState({},"","/reader"));
   it("replaces the visible batch through stable cursors and preserves the position in the URL", async () => {
     const client=mockClient();
-    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[articles[0]],total:100,unreadTotal:75,olderCursor:"older-1"}});
+    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{id:"account",displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[articles[0]],total:100,unreadTotal:75,olderCursor:"older-1"}});
     const list=vi.spyOn(client,"listArticles").mockResolvedValue({articles:[articles[1]],total:100,unreadTotal:75,newerCursor:"newer-2",olderCursor:"older-2"});
     render(<App client={client}/>);
     expect(await screen.findByText("1–50 of 100")).toBeVisible();
@@ -25,7 +25,7 @@ describe("reader application", () => {
     expect(formatArticleDate("2026-09-26T14:06:26.316789727+00:00")).toBe("2026-sep-26 14:06:26");
     const timestamped={...articles[0],age:"2026-09-26T14:06:26.316789727+00:00",author:undefined};
     const client=mockClient();
-    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[timestamped],total:1,unreadTotal:1}});
+    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{id:"account",displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[timestamped],total:1,unreadTotal:1}});
     render(<App client={client}/>);
     expect((await screen.findAllByText("2026-sep-26 14:06:26")).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/Unknown author| ago/)).not.toBeInTheDocument();
@@ -35,7 +35,7 @@ describe("reader application", () => {
     const client = mockClient();
     const failed = { id:"failed",name:"Broken feed",sourceType:"feed" as const,count:0,status:"active" as const,error:"outbound request timed out" };
     vi.spyOn(client, "bootstrap").mockResolvedValue({
-      account: { displayName: "Test", initials: "TB" },
+      account: { id: "account", displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
       activeWorkspaceId: "ws", subscriptions: [failed], articlePage:{articles:[],total:0,unreadTotal:0},
     });
@@ -52,14 +52,44 @@ describe("reader application", () => {
     expect(activity).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the brand as a link back to the main library", async () => {
+  it("uses the brand as a link back to the home dashboard", async () => {
     history.replaceState({}, "", "/subscriptions");
     const user = userEvent.setup();
     renderApp();
 
     await user.click(await screen.findByRole("link", { name: "Reader home" }));
     expect(window.location.pathname).toBe("/");
-    expect(await screen.findByRole("heading", { name: "All articles" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Your reading activity" })).toBeVisible();
+  });
+
+  it("shows the active subscription count beside the catalog link", async () => {
+    renderApp();
+    const link = await screen.findByRole("button", { name: "Subscriptions 1" });
+    expect(link).toBeVisible();
+  });
+
+  it("collapses and expands the sidebar without removing its navigation", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    const sidebar = await screen.findByRole("complementary", { name: "Reader navigation" });
+    const collapse = screen.getByRole("button", { name: "Collapse sidebar" });
+    await user.click(collapse);
+    expect(sidebar).toHaveClass("sidebar--collapsed");
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "All articles" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    expect(sidebar).not.toHaveClass("sidebar--collapsed");
+  });
+
+  it("opens the activity home and returns to the library", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(await screen.findByRole("button", { name: "Home" }));
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByRole("heading", { name: "Your reading activity" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open library" }));
+    expect(window.location.pathname).toBe("/reader");
+    expect(screen.getByRole("heading", { name: "All articles" })).toBeVisible();
   });
 
   it("centers an accessible spinner while bootstrap is pending", () => {
@@ -88,7 +118,7 @@ describe("reader application", () => {
     const client = mockClient();
     const pending = { ...articles[0], fullText: "pending" as const, body: [] };
     vi.spyOn(client, "bootstrap").mockResolvedValue({
-      account: { displayName: "Test", initials: "TB" },
+      account: { id: "account", displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
       activeWorkspaceId: "ws",
       subscriptions: [],
@@ -122,7 +152,7 @@ describe("reader application", () => {
       bodyHtml: '<h2>Benefits</h2><p>Use <strong>structured data</strong>.</p><ul><li>Fast</li></ul><img src="https://example.com/diagram.png" alt="CSV diagram">',
     };
     vi.spyOn(client, "bootstrap").mockResolvedValue({
-      account: { displayName: "Test", initials: "TB" },
+      account: { id: "account", displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
       activeWorkspaceId: "ws", subscriptions: [], articlePage:{articles:[formatted],total:1,unreadTotal:1},
     });
@@ -265,5 +295,5 @@ describe("reader application", () => {
     expect(screen.getByRole("button", { name: /Финансы/ })).toBeInTheDocument();
   });
 
-  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/");renderApp();await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Subscriptions"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
+  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/reader");renderApp();await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Subscriptions 1"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
 });

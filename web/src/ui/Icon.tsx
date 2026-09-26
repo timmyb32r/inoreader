@@ -1,8 +1,10 @@
 import type { JSX } from "preact";
 
-export type IconName = "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
+export type IconName = "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
 
 const paths: Record<IconName, JSX.Element> = {
+  home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
+  collapse: <><path d="m14 7-5 5 5 5"/><path d="M20 4v16"/></>,
   inbox: <><path d="M4 5h16v14H4z"/><path d="M4 14h4l2 3h4l2-3h4"/></>,
   unread: <><circle cx="12" cy="12" r="8"/><path d="m9.5 12 1.7 1.7 3.8-4"/></>,
   star: <path d="m12 3 2.7 5.5 6.1.9-4.4 4.3 1 6-5.4-2.8-5.4 2.8 1-6-4.4-4.3 6.1-.9z"/>,

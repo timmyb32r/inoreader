@@ -3,7 +3,7 @@ import { reportApiRequest } from "../performanceDiagnostics";
 
 export type ArticlePage = { articles:Article[]; total:number; unreadTotal:number; newerCursor?:string; olderCursor?:string };
 export type ArticlePagePosition = { view?:string; subscriptionId?:string|null; cursor?:string; direction?:"older"|"newer" };
-export type Bootstrap = { account: { displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articlePage:ArticlePage };
+export type Bootstrap = { account: { id: string; displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articlePage:ArticlePage };
 export type RuleDraft = { id?: string; subscriptionId: string; field: "title" | "full_text" | "title_or_full_text"; phrase: string; action: "mark_read" | "move_to_trash"; enabled: boolean };
 export type RulePreview = { matchedArticles:number; sharedArticles:number; totalSubscriptionArticles:number; sampleArticleIds:string[] };
 export type RuleApplicationStatusName = "queued"|"running"|"completed"|"cancelled"|"failed";

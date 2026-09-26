@@ -112,6 +112,7 @@ type PreparedSeed = (String, Subscription, SeedSource, serde_json::Value);
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let config = Config::load(&cli.config)?;
+    init_logging(config.observability.log_format);
     if matches!(cli.command, Command::CheckConfig) {
         require_database_credentials(&config)?;
         println!("configuration and credential reference are valid");
@@ -328,10 +329,33 @@ async fn postgres_pool(config: &Config) -> Result<sqlx::PgPool, Box<dyn std::err
         .acquire_timeout(Duration::from_secs(
             config.database.postgres.acquire_timeout_seconds,
         ))
-        .connect_with(options)
+        .connect_with(reader_storage_postgres::instrument_postgres(options))
         .await?;
     prepare_schema(&pool).await?;
     Ok(pool)
+}
+
+fn init_logging(format: LogFormat) {
+    use std::io::Write;
+
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    builder.format_timestamp_millis();
+    if format == LogFormat::Json {
+        builder.format(|buffer, record| {
+            writeln!(
+                buffer,
+                "{}",
+                serde_json::json!({
+                    "event": "log",
+                    "level": record.level().to_string(),
+                    "target": record.target(),
+                    "message": record.args().to_string(),
+                })
+            )
+        });
+    }
+    let _ = builder.try_init();
 }
 
 async fn connect_ydb_migration_source(
@@ -491,6 +515,24 @@ async fn serve(
         )
         .with_user_agent(&config.http.user_agent)?,
     ));
+    let icon_pool = pool.clone();
+    let icon_fetcher = fetcher.clone();
+    let icon_refresh_interval = Duration::from_secs(config.scheduler.polling_interval_seconds);
+    let icon_workers = config.scheduler.workers;
+    tokio::spawn(async move {
+        loop {
+            if let Err(error) = refresh_missing_subscription_icons(
+                icon_pool.clone(),
+                icon_fetcher.clone(),
+                icon_workers,
+            )
+            .await
+            {
+                log::warn!("subscription icon refresh failed: {error}");
+            }
+            tokio::time::sleep(icon_refresh_interval).await;
+        }
+    });
     let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(
         OutboundHttpClient::new(
             outbound_policy,
@@ -605,6 +647,69 @@ async fn serve(
             config.server.graceful_shutdown_seconds
         )
     })??;
+    Ok(())
+}
+
+async fn refresh_missing_subscription_icons(
+    pool: sqlx::PgPool,
+    fetcher: Arc<SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>>,
+    concurrency: usize,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT mapping.subscription_id,source.document FROM subscription_sources mapping JOIN sources source ON source.id=mapping.source_id LEFT JOIN subscription_icons icon ON icon.subscription_id=mapping.subscription_id WHERE icon.subscription_id IS NULL",
+    )
+    .fetch_all(&pool)
+    .await?;
+    let mut grouped = HashMap::<String, Vec<String>>::new();
+    for (subscription_id, document) in rows {
+        let source: SourceDefinition = serde_json::from_str(&document)?;
+        let mut favicon = source.url().clone();
+        favicon.set_path("/favicon.ico");
+        favicon.set_query(None);
+        favicon.set_fragment(None);
+        grouped
+            .entry(favicon.to_string())
+            .or_default()
+            .push(subscription_id);
+    }
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency.max(1)));
+    let mut tasks = tokio::task::JoinSet::new();
+    for (favicon, subscription_ids) in grouped {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let fetcher = fetcher.clone();
+        tasks.spawn(async move {
+            let _permit = permit;
+            let url = Url::parse(&favicon).map_err(|error| error.to_string())?;
+            let page = fetcher
+                .fetch(&url, &CacheValidators::default())
+                .await
+                .map_err(|error| error.to_string())?;
+            let content_type = page
+                .content_type
+                .as_deref()
+                .and_then(|value| value.split(';').next())
+                .filter(|value| value.starts_with("image/"))
+                .ok_or_else(|| "favicon response is not an image".to_owned())?;
+            let data_url = format!("data:{content_type};base64,{}", BASE64.encode(page.body));
+            Ok::<_, String>((subscription_ids, data_url))
+        });
+    }
+    while let Some(result) = tasks.join_next().await {
+        match result {
+            Ok(Ok((subscription_ids, data_url))) => {
+                sqlx::query(
+                    "INSERT INTO subscription_icons(subscription_id,data_url,fetched_at_ms) SELECT id,$2,$3 FROM unnest($1::text[]) AS id ON CONFLICT(subscription_id) DO UPDATE SET data_url=EXCLUDED.data_url,fetched_at_ms=EXCLUDED.fetched_at_ms",
+                )
+                .bind(subscription_ids)
+                .bind(data_url)
+                .bind(chrono::Utc::now().timestamp_millis())
+                .execute(&pool)
+                .await?;
+            }
+            Ok(Err(error)) => log::debug!("subscription icon unavailable: {error}"),
+            Err(error) => log::warn!("subscription icon task failed: {error}"),
+        }
+    }
     Ok(())
 }
 

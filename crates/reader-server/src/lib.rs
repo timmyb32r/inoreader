@@ -1,6 +1,7 @@
 use axum::{
     extract::{Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
+    middleware,
     response::{IntoResponse, Response},
     routing::{get, patch, post, put},
     Json, Router,
@@ -21,6 +22,9 @@ use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "reader_session";
 const ARTICLE_PAGE_SIZE: usize = 50;
+
+mod api_observability;
+mod opml;
 
 #[async_trait::async_trait]
 pub trait FeedDiscovery: Send + Sync {
@@ -184,6 +188,7 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         .route("/api/opml/import", post(import_opml::<R>))
         .route("/api/opml/export", get(export_opml::<R>))
         .with_state(state)
+        .layer(middleware::from_fn(api_observability::observe))
 }
 
 async fn ready<R: ReaderRepository + 'static>(
@@ -395,6 +400,7 @@ async fn bootstrap<R: ReaderRepository + 'static>(
         .unwrap_or_default();
     Ok(Json(BootstrapResponse {
         account: BootstrapAccount {
+            id: actor.account.id.as_uuid(),
             display_name: actor.account.username,
             initials,
         },
@@ -1291,11 +1297,11 @@ async fn import_opml<R: ReaderRepository + 'static>(
             "OPML must be previewed unchanged before apply",
         ));
     }
-    let outlines = opml_outlines(&body.opml)?;
+    let outlines = opml::outlines(&body.opml).map_err(ApiFailure::from)?;
     let existing = s.repository.subscriptions_by_workspace(workspace).await?;
     let mut values = Vec::new();
     let mut warnings = Vec::new();
-    if opml_has_folders(&body.opml)? {
+    if opml::has_folders(&body.opml).map_err(ApiFailure::from)? {
         warnings.push("OPML folders are flattened into the target workspace".to_owned())
     }
     let mut seen = std::collections::HashSet::new();
@@ -1336,9 +1342,9 @@ async fn export_opml<R: ReaderRepository + 'static>(
     let mut result=String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?><opml version=\"2.0\"><head><title>Subscriptions</title></head><body>");
     for value in subscriptions {
         result.push_str("<outline type=\"rss\" text=\"");
-        result.push_str(&xml(value.title()));
+        result.push_str(&opml::escape_xml(value.title()));
         result.push_str("\" xmlUrl=\"");
-        result.push_str(&xml(value.source_url().as_str()));
+        result.push_str(&opml::escape_xml(value.source_url().as_str()));
         result.push_str("\"/>")
     }
     result.push_str("</body></opml>");
@@ -1422,60 +1428,6 @@ fn rule_draft(value: Rule) -> RuleDraft {
         enabled: value.enabled,
     }
 }
-fn opml_outlines(document: &str) -> Result<Vec<(Url, String)>, ApiFailure> {
-    if document.contains("<!DOCTYPE") || document.contains("<!ENTITY") {
-        return Err(ApiFailure::Validation(
-            "OPML document declarations are forbidden",
-        ));
-    }
-    let tree = roxmltree::Document::parse(document)
-        .map_err(|_| ApiFailure::Validation("invalid OPML document"))?;
-    if tree.root_element().tag_name().name() != "opml" {
-        return Err(ApiFailure::Validation("root element must be opml"));
-    }
-    let mut values = Vec::new();
-    for node in tree
-        .descendants()
-        .filter(|v| v.is_element() && v.tag_name().name() == "outline")
-    {
-        let Some(raw) = node.attribute("xmlUrl") else {
-            continue;
-        };
-        let url = Url::parse(raw).map_err(|_| ApiFailure::Validation("invalid OPML URL"))?;
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err(ApiFailure::Validation("OPML URL must use HTTP or HTTPS"));
-        }
-        let title = node
-            .attribute("text")
-            .or_else(|| node.attribute("title"))
-            .unwrap_or(raw)
-            .to_owned();
-        valid_name(&title)?;
-        values.push((url, title))
-    }
-    Ok(values)
-}
-fn opml_has_folders(document: &str) -> Result<bool, ApiFailure> {
-    let tree = roxmltree::Document::parse(document)
-        .map_err(|_| ApiFailure::Validation("invalid OPML document"))?;
-    Ok(tree.descendants().any(|node| {
-        node.is_element()
-            && node.tag_name().name() == "outline"
-            && node.attribute("xmlUrl").is_none()
-            && node.descendants().any(|child| {
-                child.is_element()
-                    && child.tag_name().name() == "outline"
-                    && child.attribute("xmlUrl").is_some()
-            })
-    }))
-}
-fn xml(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
 fn workspace_view(value: &Workspace) -> WorkspaceView {
     let (reason, archive_reason_at) = match value.status() {
         WorkspaceStatus::Archived(event) => {
@@ -1542,6 +1494,7 @@ fn subscription_view(
         custom_name: value.custom_name().map(str::to_owned),
         personal_note: value.personal_note().to_owned(),
         source_url: value.source_url_exact().to_owned(),
+        icon_data_url: stats.icon_data_url.clone(),
         source_type: stats.source_type.clone(),
         created_at: value.created_at(),
         count: stats.article_count,
@@ -1751,6 +1704,18 @@ impl From<AuthError> for ApiFailure {
 impl From<RepositoryError> for ApiFailure {
     fn from(v: RepositoryError) -> Self {
         Self::Repository(v)
+    }
+}
+impl From<opml::Error> for ApiFailure {
+    fn from(error: opml::Error) -> Self {
+        Self::Validation(match error {
+            opml::Error::DeclarationsForbidden => "OPML document declarations are forbidden",
+            opml::Error::InvalidDocument => "invalid OPML document",
+            opml::Error::InvalidRoot => "root element must be opml",
+            opml::Error::InvalidUrl => "invalid OPML URL",
+            opml::Error::UnsupportedUrlScheme => "OPML URL must use HTTP or HTTPS",
+            opml::Error::InvalidTitle => "invalid name",
+        })
     }
 }
 impl IntoResponse for ApiFailure {

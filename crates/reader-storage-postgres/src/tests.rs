@@ -8,6 +8,12 @@ use chrono::Duration;
 use reader_core::{ArticleId, SourceId, SourceRecordId, SubscriptionId, WorkspaceId};
 use reader_ingest::{StoreError, WorkItem};
 use sqlx::postgres::PgPoolOptions;
+
+#[test]
+fn postgres_instrumentation_has_a_stable_credential_free_target() {
+    assert_eq!(crate::POSTGRES_LOG_TARGET, "sqlx::query");
+    assert!(!crate::POSTGRES_LOG_TARGET.contains(['@', '/', '?', '=']));
+}
 use uuid::Uuid;
 
 fn lazy_pool() -> sqlx::PgPool {
@@ -75,7 +81,7 @@ fn durable_job_ids_are_stable_and_include_the_complete_identity() {
 fn schema_has_one_concrete_source_of_truth() {
     assert_eq!(
         SCHEMA_SQL.matches("CREATE TABLE IF NOT EXISTS ").count(),
-        33
+        34
     );
     for obsolete in [
         "reader_documents",

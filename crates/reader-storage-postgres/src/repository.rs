@@ -15,8 +15,16 @@ use reader_ingest::{
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::{postgres::PgConnectOptions, PgPool, Postgres, Transaction};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
+
+type PresentationRow = (String, String, String, Option<String>, Option<String>);
+type PresentationOrigin = (
+    String,
+    Subscription,
+    Option<reader_ingest::ContentManifestPointer>,
+    Option<String>,
+);
 
 #[derive(Clone)]
 pub struct PostgresRepository {
@@ -30,7 +38,9 @@ impl PostgresRepository {
         reason_policy: ReasonPolicy,
         initial_scope: usize,
     ) -> Result<Self, RepositoryError> {
-        let pool = PgPool::connect_with(options).await.map_err(storage)?;
+        let pool = PgPool::connect_with(crate::instrument_postgres(options))
+            .await
+            .map_err(storage)?;
         crate::prepare_schema(&pool).await.map_err(storage)?;
         Self::new(pool, reason_policy, initial_scope)
     }
@@ -219,7 +229,7 @@ impl PostgresRepository {
             .iter()
             .map(|value| value.id.as_uuid().to_string())
             .collect();
-        let rows: Vec<(String, String, String, Option<String>, Option<String>)> = sqlx::query_as(
+        let rows: Vec<PresentationRow> = sqlx::query_as(
             "SELECT o.article_id,o.source_record_id,s.document,m.document,f.document FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2)",
         )
         .bind(workspace.as_uuid().to_string())
@@ -227,15 +237,7 @@ impl PostgresRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(storage)?;
-        let mut origins: HashMap<
-            String,
-            Vec<(
-                String,
-                Subscription,
-                Option<reader_ingest::ContentManifestPointer>,
-                Option<String>,
-            )>,
-        > = HashMap::new();
+        let mut origins: HashMap<String, Vec<PresentationOrigin>> = HashMap::new();
         for (article_id, record, subscription, manifest, failure) in rows {
             let subscription: Subscription =
                 serde_json::from_str(&subscription).map_err(storage)?;
@@ -1505,59 +1507,52 @@ impl ReaderRepository for PostgresRepository {
         if s.is_empty() {
             return Ok(result);
         }
-        let wanted = s
+        let wanted_ids = s
             .iter()
             .map(|v| v.id().as_uuid().to_string())
-            .collect::<HashSet<_>>();
-        let origin_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT subscription_id,article_id FROM library_origins WHERE workspace_id = $1",
+            .collect::<Vec<_>>();
+        type StatsRow = (
+            String,
+            Option<String>,
+            Option<String>,
+            bool,
+            Option<String>,
+            i64,
+            i64,
+        );
+        let rows: Vec<StatsRow> = sqlx::query_as(
+            r#"SELECT requested.subscription_id,
+                      health.document,
+                      source.document,
+                      recipe.id IS NOT NULL,
+                      icon.data_url,
+                      COUNT(DISTINCT origin.article_id)::bigint,
+                      COUNT(DISTINCT origin.article_id) FILTER (
+                          WHERE NOT COALESCE((article.document::jsonb #>> '{state,read}')::boolean, false)
+                      )::bigint
+               FROM unnest($1::text[]) AS requested(subscription_id)
+               LEFT JOIN subscription_sources mapping ON mapping.subscription_id=requested.subscription_id
+               LEFT JOIN sources source ON source.id=mapping.source_id
+               LEFT JOIN source_health health ON health.source_id=mapping.source_id
+               LEFT JOIN web_feed_recipes recipe ON recipe.id=requested.subscription_id
+               LEFT JOIN subscription_icons icon ON icon.subscription_id=requested.subscription_id
+               LEFT JOIN library_origins origin
+                 ON origin.workspace_id=$2 AND origin.subscription_id=requested.subscription_id
+               LEFT JOIN articles article ON article.id=$2 || '/' || origin.article_id
+               GROUP BY requested.subscription_id,health.document,source.document,recipe.id,icon.data_url"#,
         )
+        .bind(&wanted_ids)
         .bind(workspace.as_uuid().to_string())
         .fetch_all(&self.pool)
         .await
         .map_err(storage)?;
-        let mut articles = HashMap::<String, HashSet<String>>::new();
-        for (subscription, article) in origin_rows {
-            if wanted.contains(&subscription) {
-                articles.entry(subscription).or_default().insert(article);
-            }
-        }
-        let unread = self
-            .articles_by_workspace(workspace)
-            .await?
-            .into_iter()
-            .filter(|v| !v.state.read)
-            .map(|v| v.id.as_uuid().to_string())
-            .collect::<HashSet<_>>();
-        for subscription in s {
-            let id = subscription.id().as_uuid().to_string();
-            let Some(source): Option<String> = sqlx::query_scalar(
-                "SELECT source_id FROM subscription_sources WHERE subscription_id = $1",
-            )
-            .bind(&id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(storage)?
-            else {
-                continue;
-            };
-            let health: Option<String> =
-                sqlx::query_scalar("SELECT document FROM source_health WHERE source_id = $1")
-                    .bind(&source)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(storage)?;
+        for (id, health, definition, editable_web_feed, icon_data_url, count, unread_count) in rows
+        {
             let health = health
                 .as_deref()
                 .map(serde_json::from_str::<SourceHealth>)
                 .transpose()
                 .map_err(storage)?;
-            let definition: Option<String> =
-                sqlx::query_scalar("SELECT document FROM sources WHERE id = $1")
-                    .bind(&source)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(storage)?;
             let source_type = definition
                 .as_deref()
                 .map(serde_json::from_str::<SourceDefinition>)
@@ -1570,20 +1565,12 @@ impl ReaderRepository for PostgresRepository {
                 })
                 .unwrap_or("feed")
                 .to_owned();
-            let ids = articles.get(&id);
-            let count = ids.map_or(0, HashSet::len);
-            let unread_count = ids.map_or(0, |values| values.intersection(&unread).count());
-            let editable_web_feed: bool =
-                sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM web_feed_recipes WHERE id = $1)")
-                    .bind(&id)
-                    .fetch_one(&self.pool)
-                    .await
-                    .map_err(storage)?;
+            let subscription_id = SubscriptionId::from_uuid(Uuid::parse_str(&id).map_err(storage)?);
             result.insert(
-                subscription.id(),
+                subscription_id,
                 SubscriptionStats {
-                    article_count: count,
-                    unread_count,
+                    article_count: usize::try_from(count).map_err(storage)?,
+                    unread_count: usize::try_from(unread_count).map_err(storage)?,
                     last_success_at: health
                         .as_ref()
                         .and_then(|v| v.last_success_ms)
@@ -1600,6 +1587,7 @@ impl ReaderRepository for PostgresRepository {
                         .then(|| "A durable continuation is queued".to_owned()),
                     error: health.and_then(|v| v.error),
                     editable_web_feed,
+                    icon_data_url,
                     source_type,
                 },
             );

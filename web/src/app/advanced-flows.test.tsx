@@ -6,7 +6,7 @@ import { articles } from "../test/mockClient";
 
 function recordingClient(){
  const calls:{path:string;init?:RequestInit}[]=[];
- const bootstrap:Bootstrap={account:{displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"This Week in Rust",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles,total:articles.length,unreadTotal:articles.filter(a=>!a.read&&!a.trash).length}};
+ const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"This Week in Rust",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles,total:articles.length,unreadTotal:articles.filter(a=>!a.read&&!a.trash).length}};
  const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{
   calls.push({path,init}); if(path.startsWith("/api/bootstrap"))return bootstrap as T;
   if(path.startsWith("/api/articles?"))return {articles:[{...articles[0],id:"finance",title:"Finance workspace article"}],total:1,unreadTotal:1} as T;
@@ -20,7 +20,7 @@ function recordingClient(){
  return {client:new ApiClient(transport),calls};
 }
 
-beforeEach(()=>history.replaceState({},"","/"));
+beforeEach(()=>history.replaceState({},"","/reader"));
 
 describe("advanced API-backed flows",()=>{
  it("reloads articles when switching workspace",async()=>{const {client,calls}=recordingClient();const user=userEvent.setup();render(<App client={client}/>);await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:/Data engineering/}));await user.click(screen.getByRole("button",{name:/Финансы/}));expect(await screen.findByRole("heading",{name:"Finance workspace article",level:2})).toBeVisible();expect(calls.some(call=>call.path.includes("workspace_id=finance"))).toBe(true);});
@@ -32,7 +32,7 @@ describe("advanced API-backed flows",()=>{
 describe("workspace and subscription isolation",()=>{
  it("targets pause at the selected subscription and sends the exact reason",async()=>{
   const calls:{path:string;init?:RequestInit}[]=[];
-  const bootstrap:Bootstrap={account:{displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"first",name:"Same name",count:1,status:"active",lastUpdate:"now"},{id:"second",name:"Same name",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],subscriptionIds:["second"]}],total:1,unreadTotal:1}};
+  const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"first",name:"Same name",count:1,status:"active",lastUpdate:"now"},{id:"second",name:"Same name",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],subscriptionIds:["second"]}],total:1,unreadTotal:1}};
   const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{calls.push({path,init});if(path.startsWith("/api/bootstrap"))return bootstrap as T;if(path.startsWith("/api/articles?"))return bootstrap.articlePage as T;return undefined as T;};
   const user=userEvent.setup();render(<App client={new ApiClient(transport)}/>);await screen.findByRole("heading",{name:"All articles"});
   const sources=screen.getAllByRole("button",{name:/Same name/});await user.click(sources[1]);await user.click(screen.getByRole("button",{name:"Settings & shortcuts"}));await user.click(screen.getByRole("button",{name:"Pause Same name"}));
@@ -42,7 +42,7 @@ describe("workspace and subscription isolation",()=>{
 
  it("scopes mark-all to the selected subscription",async()=>{
   const calls:{path:string;init?:RequestInit}[]=[];
-  const bootstrap:Bootstrap={account:{displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"chosen",name:"Chosen feed",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],id:"chosen-article",subscriptionIds:["chosen"]},{...articles[1],id:"other-article",subscriptionIds:["other"]}],total:2,unreadTotal:2}};
+  const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"chosen",name:"Chosen feed",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],id:"chosen-article",subscriptionIds:["chosen"]},{...articles[1],id:"other-article",subscriptionIds:["other"]}],total:2,unreadTotal:2}};
   const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{calls.push({path,init});if(path.startsWith("/api/bootstrap"))return bootstrap as T;if(path.startsWith("/api/articles?"))return bootstrap.articlePage as T;return undefined as T;};
   const user=userEvent.setup();render(<App client={new ApiClient(transport)}/>);await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:/Chosen feed/}));await user.click(screen.getByRole("button",{name:"Mark all read"}));
   await waitFor(()=>{const call=calls.find(item=>item.path.includes("mark-all-read"));expect(JSON.parse(String(call?.init?.body))).toEqual({view:"all",subscription_id:"chosen"});});
@@ -52,7 +52,7 @@ describe("workspace and subscription isolation",()=>{
 
 describe("subscription lifecycle",()=>{
  it("only offers recipe editing for editable Web feeds",async()=>{
-  const bootstrap:Bootstrap={account:{displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"rss",name:"RSS",count:0,status:"active",editableWebFeed:false},{id:"web",name:"Web",count:0,status:"active",editableWebFeed:true}],articlePage:{articles:[],total:0,unreadTotal:0}};
+  const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"rss",name:"RSS",count:0,status:"active",editableWebFeed:false},{id:"web",name:"Web",count:0,status:"active",editableWebFeed:true}],articlePage:{articles:[],total:0,unreadTotal:0}};
   const transport:Transport=async<T,>(path:string)=>path.startsWith("/api/bootstrap")?bootstrap as T:path.startsWith("/api/articles?")?bootstrap.articlePage as T:undefined as T;
   const user=userEvent.setup();render(<App client={new ApiClient(transport)}/>);await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Settings & shortcuts"}));
   await user.selectOptions(screen.getByLabelText("Choose subscription"),"rss");expect(screen.queryByRole("button",{name:"Edit Web feed recipe"})).not.toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("subscription lifecycle",()=>{
  });
  it("renames and unsubscribes without removing archived articles, then exposes restore",async()=>{
   const calls:{path:string;init?:RequestInit}[]=[];
-  const bootstrap:Bootstrap={account:{displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"Original",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],subscriptionIds:["sub"]}],total:1,unreadTotal:1}};
+  const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"Original",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],subscriptionIds:["sub"]}],total:1,unreadTotal:1}};
   const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{calls.push({path,init});if(path.startsWith("/api/bootstrap"))return bootstrap as T;if(path.startsWith("/api/articles?"))return bootstrap.articlePage as T;if(path==="/api/subscriptions/sub"&&init?.method==="PATCH")return {...bootstrap.subscriptions[0],name:"Renamed"} as T;if(path==="/api/subscriptions/sub"&&init?.method==="DELETE")return {...bootstrap.subscriptions[0],name:"Renamed",status:"archived"} as T;if(path==="/api/subscriptions/sub/restore")return {...bootstrap.subscriptions[0],name:"Renamed",status:"active"} as T;return undefined as T;};
   const user=userEvent.setup();render(<App client={new ApiClient(transport)}/>);await screen.findByRole("heading",{name:"All articles"});await user.click(screen.getByRole("button",{name:"Settings & shortcuts"}));await user.selectOptions(screen.getByLabelText("Choose subscription"),"sub");const name=screen.getByLabelText("Custom name");await user.clear(name);await user.type(name,"Renamed");await user.click(screen.getByRole("button",{name:"Rename subscription"}));await waitFor(()=>expect(screen.getByRole("button",{name:"Unsubscribe"})).toBeEnabled());await user.click(screen.getByRole("button",{name:"Unsubscribe"}));await user.click(screen.getByRole("button",{name:"Confirm unsubscribe"}));await waitFor(()=>expect(calls.some(call=>call.path==="/api/subscriptions/sub"&&call.init?.method==="DELETE")).toBe(true));expect(await screen.findByText(/Existing articles and full text remain available/)).toBeVisible();expect(screen.getByRole("button",{name:"Restore subscription"})).toBeVisible();await user.click(screen.getByRole("button",{name:"Done"}));expect(screen.getByRole("heading",{name:"Async Rust without the hidden machinery",level:2})).toBeVisible();
  });

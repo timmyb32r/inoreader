@@ -24,7 +24,9 @@ impl PostgresIngestStore {
         per_origin_concurrency: usize,
         max_retry_age: chrono::Duration,
     ) -> Result<Self, StoreError> {
-        let pool = PgPool::connect_with(options).await.map_err(storage)?;
+        let pool = PgPool::connect_with(crate::instrument_postgres(options))
+            .await
+            .map_err(storage)?;
         crate::prepare_schema(&pool).await.map_err(storage)?;
         Self::new(pool, poll_interval, per_origin_concurrency, max_retry_age)
     }

@@ -2462,6 +2462,7 @@ impl<T: YdbTransport> ReaderRepository for YdbRepository<T> {
             result.insert(
                 subscription,
                 reader_application::SubscriptionStats {
+                    icon_data_url: None,
                     article_count: count,
                     unread_count,
                     last_success_at: last_success_ms

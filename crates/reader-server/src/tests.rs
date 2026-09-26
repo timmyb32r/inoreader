@@ -34,6 +34,20 @@ fn state(origin: &str) -> AppState<()> {
 }
 
 #[test]
+fn api_request_completion_uses_route_template_and_timing_fields() {
+    let completion = api_observability::Completion {
+        method: "GET",
+        operation: "/api/articles/{id}",
+        status: 200,
+        elapsed_ms: 17,
+    };
+    assert_eq!(
+        completion.to_string(),
+        "api_request method=GET operation=/api/articles/{id} status=200 elapsed_ms=17"
+    );
+}
+
+#[test]
 fn session_cookie_has_browser_security_attributes() {
     let value = session_cookie("opaque", 60)
         .unwrap()
@@ -49,7 +63,7 @@ fn session_cookie_has_browser_security_attributes() {
 #[test]
 fn opml_rejects_non_http_sources() {
     let document = r#"<opml><body><outline xmlUrl="file:///etc/passwd"/></body></opml>"#;
-    assert!(opml_outlines(document).is_err());
+    assert!(opml::outlines(document).is_err());
 }
 
 #[test]
@@ -102,11 +116,11 @@ fn cookie_parser_selects_the_named_cookie_without_prefix_confusion() {
 fn opml_parses_nested_outlines_and_preserves_authored_titles() {
     let document = r#"<?xml version="1.0"?><opml><body><outline text="Folder"><outline text=" Feed A " xmlUrl="https://example.test/a.xml"/><outline title="Feed B" xmlUrl="https://example.test/b.xml"/></outline></body></opml>"#;
     assert!(
-        opml_outlines(document).is_err(),
+        opml::outlines(document).is_err(),
         "whitespace-changing title must be rejected rather than trimmed"
     );
     let valid = document.replace(" Feed A ", "Feed A");
-    let values = opml_outlines(&valid).unwrap();
+    let values = opml::outlines(&valid).unwrap();
     assert_eq!(values.len(), 2);
     assert_eq!(values[0].0.as_str(), "https://example.test/a.xml");
     assert_eq!(values[0].1, "Feed A");
@@ -119,8 +133,16 @@ fn opml_rejects_entity_and_doctype_declarations() {
         r#"<!DOCTYPE opml><opml><body/></opml>"#,
         r#"<!ENTITY x "secret"><opml><body/></opml>"#,
     ] {
-        assert!(opml_outlines(document).is_err());
+        assert!(opml::outlines(document).is_err());
     }
+}
+
+#[test]
+fn opml_export_escapes_xml_text_and_attribute_delimiters() {
+    assert_eq!(
+        opml::escape_xml("A & <B> \"quoted\""),
+        "A &amp; &lt;B&gt; &quot;quoted&quot;"
+    );
 }
 
 #[test]

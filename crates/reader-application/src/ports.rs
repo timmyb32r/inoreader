@@ -117,6 +117,7 @@ pub struct SubscriptionStats {
     pub continuation: Option<String>,
     pub error: Option<String>,
     pub editable_web_feed: bool,
+    pub icon_data_url: Option<String>,
 
     pub source_type: String,
 }
@@ -132,6 +133,7 @@ impl Default for SubscriptionStats {
             continuation: None,
             error: None,
             editable_web_feed: false,
+            icon_data_url: None,
             source_type: "feed".into(),
         }
     }

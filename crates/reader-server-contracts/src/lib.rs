@@ -30,6 +30,7 @@ pub struct SubscriptionView {
     pub custom_name: Option<String>,
     pub personal_note: String,
     pub source_url: String,
+    pub icon_data_url: Option<String>,
     pub source_type: String,
     pub created_at: Option<DateTime<Utc>>,
     pub count: usize,
@@ -422,6 +423,7 @@ pub struct OpmlImportResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapAccount {
+    pub id: Uuid,
     pub display_name: String,
     pub initials: String,
 }

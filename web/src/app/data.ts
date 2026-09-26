@@ -19,5 +19,5 @@ export type Article = {
   originalUrl?: string;
 };
 
-export type Subscription = { id: string; name: string; sourceTitle?: string; customName?: string; sourceUrl?: string; personalNote?: string; sourceType?: "feed"|"web"|"built_in"; count: number; unreadCount?: number; status: "active" | "paused" | "archived"; lastUpdate?: string; lastErrorAt?:string; createdAt?:string; pollingInterval?:string; incomplete?:boolean; continuation?:string; error?:string; needsAttention?:boolean; attentionReason?:string; editableWebFeed?:boolean; reason?: string; reasonAt?: string };
+export type Subscription = { id: string; name: string; sourceTitle?: string; customName?: string; sourceUrl?: string; iconDataUrl?: string; personalNote?: string; sourceType?: "feed"|"web"|"built_in"; count: number; unreadCount?: number; status: "active" | "paused" | "archived"; lastUpdate?: string; lastErrorAt?:string; createdAt?:string; pollingInterval?:string; incomplete?:boolean; continuation?:string; error?:string; needsAttention?:boolean; attentionReason?:string; editableWebFeed?:boolean; reason?: string; reasonAt?: string };
 export type Workspace = { id: string; name: string; archived: boolean; archiveReason?: string; archiveReasonAt?: string };
