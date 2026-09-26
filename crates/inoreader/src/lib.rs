@@ -40,6 +40,7 @@ pub struct Ydb {
     pub request_timeout_seconds: u64,
     pub max_concurrency: usize,
     pub retry_attempts: u32,
+    pub retry_initial_backoff_milliseconds: u64,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,6 +68,7 @@ pub struct Http {
 #[serde(deny_unknown_fields)]
 pub struct Scheduler {
     pub polling_interval_seconds: u64,
+    pub queue_poll_interval_seconds: u64,
     pub lease_seconds: u64,
     pub renew_seconds: u64,
     pub workers: usize,
@@ -237,6 +239,10 @@ impl Config {
                 self.database.ydb.request_timeout_seconds,
             ),
             (
+                "database.ydb.retry_initial_backoff_milliseconds",
+                self.database.ydb.retry_initial_backoff_milliseconds,
+            ),
+            (
                 "auth.session_lifetime_seconds",
                 self.auth.session_lifetime_seconds,
             ),
@@ -259,6 +265,10 @@ impl Config {
             (
                 "scheduler.polling_interval_seconds",
                 self.scheduler.polling_interval_seconds,
+            ),
+            (
+                "scheduler.queue_poll_interval_seconds",
+                self.scheduler.queue_poll_interval_seconds,
             ),
             ("scheduler.lease_seconds", self.scheduler.lease_seconds),
             ("scheduler.renew_seconds", self.scheduler.renew_seconds),

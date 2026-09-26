@@ -246,7 +246,7 @@ async fn connect_when_ready(connection: &str) -> Result<Arc<ProductionYdbTranspo
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     let mut last_error = "YDB did not accept a connection".to_owned();
     while Instant::now() < deadline {
-        let limits = YdbClientLimits::new(Duration::from_secs(5), 8, 2)?;
+        let limits = YdbClientLimits::new(Duration::from_secs(5), 8, 2, Duration::from_millis(50))?;
         let attempt = tokio::time::timeout(
             Duration::from_secs(10),
             ProductionYdbTransport::connect_from_environment(connection, limits),

@@ -3,15 +3,17 @@ use std::time::Duration;
 
 #[test]
 fn production_client_limits_reject_unbounded_or_disabled_values() {
-    assert!(YdbClientLimits::new(Duration::ZERO, 1, 1).is_err());
-    assert!(YdbClientLimits::new(Duration::from_secs(1), 0, 1).is_err());
-    assert!(YdbClientLimits::new(Duration::from_secs(1), 1, 0).is_err());
+    assert!(YdbClientLimits::new(Duration::ZERO, 1, 1, Duration::from_millis(1)).is_err());
+    assert!(YdbClientLimits::new(Duration::from_secs(1), 0, 1, Duration::from_millis(1)).is_err());
+    assert!(YdbClientLimits::new(Duration::from_secs(1), 1, 0, Duration::from_millis(1)).is_err());
+    assert!(YdbClientLimits::new(Duration::from_secs(1), 1, 1, Duration::ZERO).is_err());
     assert_eq!(
-        YdbClientLimits::new(Duration::from_secs(15), 32, 5).unwrap(),
+        YdbClientLimits::new(Duration::from_secs(15), 32, 5, Duration::from_millis(200)).unwrap(),
         YdbClientLimits {
             request_timeout: Duration::from_secs(15),
             max_concurrency: 32,
-            retry_attempts: 5
+            retry_attempts: 5,
+            retry_initial_backoff: Duration::from_millis(200),
         }
     );
 }

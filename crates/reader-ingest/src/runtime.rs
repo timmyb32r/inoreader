@@ -30,7 +30,14 @@ pub async fn run_until_shutdown<S, F, X, B, Q>(
                 if *stop.borrow() { break; }
                 match worker.run_one(&identity, chrono::Utc::now()).await {
                     Ok(true) => continue,
-                    Ok(false) | Err(_) => {
+                    Ok(false) => {
+                        tokio::select! {
+                            _ = tokio::time::sleep(idle_poll) => {},
+                            changed = stop.changed() => { if changed.is_err() || *stop.borrow() { break; } }
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("ingest worker {identity} failed: {error}");
                         tokio::select! {
                             _ = tokio::time::sleep(idle_poll) => {},
                             changed = stop.changed() => { if changed.is_err() || *stop.borrow() { break; } }

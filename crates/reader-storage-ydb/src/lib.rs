@@ -455,12 +455,14 @@ pub struct YdbClientLimits {
     request_timeout: Duration,
     max_concurrency: usize,
     retry_attempts: u32,
+    retry_initial_backoff: Duration,
 }
 impl YdbClientLimits {
     pub fn new(
         request_timeout: Duration,
         max_concurrency: usize,
         retry_attempts: u32,
+        retry_initial_backoff: Duration,
     ) -> Result<Self, String> {
         if request_timeout.is_zero() {
             return Err("YDB request timeout must be positive".into());
@@ -471,22 +473,38 @@ impl YdbClientLimits {
         if retry_attempts == 0 {
             return Err("YDB retry attempts must be positive".into());
         }
+        if retry_initial_backoff.is_zero() {
+            return Err("YDB retry initial backoff must be positive".into());
+        }
         Ok(Self {
             request_timeout,
             max_concurrency,
             retry_attempts,
+            retry_initial_backoff,
         })
     }
 }
 #[derive(Debug)]
-struct MaximumAttempts(u32);
+struct MaximumAttempts {
+    attempts: u32,
+    initial_backoff: Duration,
+    maximum_backoff: Duration,
+}
 impl RetryStrategy for MaximumAttempts {
     async fn wait_retry(&self, state: &RetryState) -> ControlFlow<()> {
-        if state.attempt.saturating_add(1) < self.0 as usize {
-            ControlFlow::Continue(())
-        } else {
-            ControlFlow::Break(())
+        if state.attempt.saturating_add(1) >= self.attempts as usize {
+            return ControlFlow::Break(());
         }
+        let multiplier = 1_u32
+            .checked_shl(state.attempt.min(16) as u32)
+            .unwrap_or(u32::MAX);
+        let delay = self
+            .initial_backoff
+            .checked_mul(multiplier)
+            .unwrap_or(self.maximum_backoff)
+            .min(self.maximum_backoff);
+        tokio::time::sleep(delay).await;
+        ControlFlow::Continue(())
     }
 }
 
@@ -604,7 +622,11 @@ impl ProductionYdbTransport {
     ) -> Result<Self, String> {
         let credentials = FromEnvCredentials::new().map_err(|e| e.to_string())?;
         let retry = RetrySettings::with_default_backoff()
-            .with(MaximumAttempts(limits.retry_attempts))
+            .with(MaximumAttempts {
+                attempts: limits.retry_attempts,
+                initial_backoff: limits.retry_initial_backoff,
+                maximum_backoff: limits.request_timeout,
+            })
             .with_deadline(limits.request_timeout);
         let client = ClientBuilder::new_from_connection_string(connection_string)
             .map_err(|e| e.to_string())?

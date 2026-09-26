@@ -106,6 +106,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_secs(config.database.ydb.request_timeout_seconds),
         config.database.ydb.max_concurrency,
         config.database.ydb.retry_attempts,
+        Duration::from_millis(config.database.ydb.retry_initial_backoff_milliseconds),
     )?;
     let transport =
         Arc::new(ProductionYdbTransport::connect_from_environment(&connection, ydb_limits).await?);
@@ -404,7 +405,7 @@ async fn serve(
     let scheduler = tokio::spawn(run_until_shutdown(
         worker,
         config.scheduler.workers,
-        Duration::from_secs(config.scheduler.polling_interval_seconds),
+        Duration::from_secs(config.scheduler.queue_poll_interval_seconds),
         async {
             let _ = worker_stop_rx.await;
         },

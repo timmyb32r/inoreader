@@ -1,10 +1,10 @@
-use crate::{enqueue_work, ProductionYdbTransport, YdbTransport};
+use crate::{enqueue_work, source_origin, ProductionYdbTransport, YdbTransport};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reader_core::*;
 use reader_ingest::*;
 use std::sync::Arc;
-use ydb::Transaction;
+use ydb::{Transaction, Value};
 
 pub struct YdbIngestStore {
     transport: Arc<ProductionYdbTransport>,
@@ -186,7 +186,7 @@ impl YdbIngestStore {
         let diagnostic = diagnostic.map(str::to_owned);
         let changed=self.transport.client.query_client().retry_tx(ydb::closure!([id,token,status,diagnostic],async |tx:&mut Transaction|{
    let row=tx.query_row("SELECT lease_token,revision,item FROM ingest_jobs WHERE id=$id AND status='leased'").param("$id",id.clone()).optional().await?;let Some(mut row)=row else{return Ok::<_,ydb::YdbOrCustomerError>(false)};let current:Option<String>=row.remove_field_by_name("lease_token")?.try_into()?;let revision:u64=row.remove_field_by_name("revision")?.try_into()?;let item:String=row.remove_field_by_name("item")?.try_into()?;if current.as_deref()!=Some(token.as_str()){return Ok(false)}
-   tx.exec("UPDATE ingest_jobs SET status=$status,lease_deadline_ms=$deadline,run_at_ms=COALESCE($run_at,run_at_ms),diagnostic=$diagnostic,attempt=CASE WHEN $status='ready' THEN attempt+1 ELSE attempt END,revision=$next WHERE id=$id AND revision=$revision").param("$status",status.clone()).param("$deadline",deadline).param("$run_at",run_at).param("$diagnostic",diagnostic.clone()).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;if let Some(diagnostic)=diagnostic.clone(){let item:WorkItem=serde_json::from_str(&item).map_err(customer)?;if let WorkItem::PollSource{source_id}|WorkItem::RefreshSource{source_id}|WorkItem::CollectWebFeed{source_id}=item{let key=source_id.as_uuid().to_string();let current=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",key.clone()).optional().await?;let mut health=current.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.unwrap_or(SourceHealth{last_success_ms:None,incomplete:false,error:None,last_error_ms:None,consecutive_failures:0});health.error=Some(diagnostic.clone());health.last_error_ms=Some(Utc::now().timestamp_millis());health.consecutive_failures=health.consecutive_failures.saturating_add(1);tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",key).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;record_subscription_activity(tx,source_id,false,None,None,Some(diagnostic),Utc::now()).await?;}}Ok(true)
+   tx.exec("UPDATE ingest_jobs SET status=$status,lease_deadline_ms=$deadline,run_at_ms=COALESCE($run_at,run_at_ms),diagnostic=$diagnostic,attempt=CASE WHEN $status='ready' THEN attempt+$one ELSE attempt END,revision=$next WHERE id=$id AND revision=$revision").param("$status",status.clone()).param("$deadline",deadline).param("$run_at",run_at).param("$diagnostic",diagnostic.clone()).param("$one",1_u32).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;if let Some(diagnostic)=diagnostic.clone(){let item:WorkItem=serde_json::from_str(&item).map_err(customer)?;if let WorkItem::PollSource{source_id}|WorkItem::RefreshSource{source_id}|WorkItem::CollectWebFeed{source_id}=item{let key=source_id.as_uuid().to_string();let current=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",key.clone()).optional().await?;let mut health=current.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.unwrap_or(SourceHealth{last_success_ms:None,incomplete:false,error:None,last_error_ms:None,consecutive_failures:0});health.error=Some(diagnostic.clone());health.last_error_ms=Some(Utc::now().timestamp_millis());health.consecutive_failures=health.consecutive_failures.saturating_add(1);tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",key).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;record_subscription_activity(tx,source_id,false,None,None,Some(diagnostic),Utc::now()).await?;}}Ok(true)
   })).await.map_err(storage)?;
         if changed {
             Ok(())
@@ -216,12 +216,35 @@ impl YdbIngestStore {
         let records = RecordBatch(records);
         self.transport.client.query_client().retry_tx(ydb::closure!([job,token,records,validators,state_key],async |tx:&mut Transaction|{
    assert_lease(tx,&job,&token).await?;
-   for record in &records{
-    let document=serde_json::to_string(record).map_err(customer)?;
-    tx.exec("UPSERT INTO source_records (id,revision,document) VALUES ($id,$revision,$document)").param("$id",record.id().as_uuid().to_string()).param("$revision",record.revision()).param("$document",document.clone()).await?;
-    tx.exec("UPSERT INTO source_record_identity (source_id,upstream_id,record_id,observed_at_ms,revision,document) VALUES ($source,$upstream,$record,$observed,$revision,$document)").param("$source",record.source_id().as_uuid().to_string()).param("$upstream",record.upstream_id().to_owned()).param("$record",record.id().as_uuid().to_string()).param("$observed",observed_at_ms).param("$revision",record.revision()).param("$document",document).await?;
-    if matches!(record.action,PollAction::Deliver|PollAction::Regroup){let item=WorkItem::FanOut{source_id:record.source_id(),record_id:record.id(),after_subscription:None};enqueue_work(tx,record_job("fanout",record.id(),record.revision()).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}
-    if let Some(url)=record.key().location.fetch_url(){let item=WorkItem::ExtractFullText{record_id:record.id(),source_revision:record.revision(),url:url.clone(),manual:false};enqueue_work(tx,record_job("fulltext",record.id(),record.revision()).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}
+   if !records.0.is_empty(){
+    let source_origin_key=source_origin(tx,source_id).await?;
+    let mut source_rows=Vec::with_capacity(records.0.len());
+    let mut identity_rows=Vec::with_capacity(records.0.len());
+    let mut job_rows=Vec::with_capacity(records.0.len().saturating_mul(2));
+    let first_attempt_ms=Utc::now().timestamp_millis();
+    for record in &records{
+     let document=serde_json::to_string(record).map_err(customer)?;
+     source_rows.push(ydb::ydb_struct!("id"=>record.id().as_uuid().to_string(),"revision"=>record.revision(),"document"=>document.clone()));
+     identity_rows.push(ydb::ydb_struct!("source_id"=>record.source_id().as_uuid().to_string(),"upstream_id"=>record.upstream_id().to_owned(),"record_id"=>record.id().as_uuid().to_string(),"observed_at_ms"=>observed_at_ms,"revision"=>record.revision(),"document"=>document));
+     if matches!(record.action,PollAction::Deliver|PollAction::Regroup){
+      let item=WorkItem::FanOut{source_id:record.source_id(),record_id:record.id(),after_subscription:None};
+      job_rows.push(ydb::ydb_struct!("id"=>record_job("fanout",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>0_i64,"first_attempt_ms"=>first_attempt_ms,"origin_key"=>source_origin_key.clone(),"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
+     }
+     if let Some(url)=record.key().location.fetch_url(){
+      let item=WorkItem::ExtractFullText{record_id:record.id(),source_revision:record.revision(),url:url.clone(),manual:false};
+      job_rows.push(ydb::ydb_struct!("id"=>record_job("fulltext",record.id(),record.revision()).as_uuid().to_string(),"status"=>"ready".to_owned(),"run_at_ms"=>0_i64,"first_attempt_ms"=>first_attempt_ms,"origin_key"=>crate::http_origin(url)?,"attempt"=>0_u32,"item"=>serde_json::to_string(&item).map_err(customer)?,"revision"=>0_u64));
+     }
+    }
+    let source_values=Value::list_from(ydb::ydb_struct!("id"=>String::new(),"revision"=>0_u64,"document"=>String::new()),source_rows).map_err(customer)?;
+    tx.exec("UPSERT INTO source_records SELECT id,revision,document FROM AS_TABLE($rows)").param("$rows",source_values).await?;
+    let identity_values=Value::list_from(ydb::ydb_struct!("source_id"=>String::new(),"upstream_id"=>String::new(),"record_id"=>String::new(),"observed_at_ms"=>0_i64,"revision"=>0_u64,"document"=>String::new()),identity_rows).map_err(customer)?;
+    tx.exec("UPSERT INTO source_record_identity SELECT source_id,upstream_id,record_id,observed_at_ms,revision,document FROM AS_TABLE($rows)").param("$rows",identity_values).await?;
+    if !job_rows.is_empty(){
+     let job_values=Value::list_from(ydb::ydb_struct!("id"=>String::new(),"status"=>String::new(),"run_at_ms"=>0_i64,"first_attempt_ms"=>0_i64,"origin_key"=>String::new(),"attempt"=>0_u32,"item"=>String::new(),"revision"=>0_u64),job_rows).map_err(customer)?;
+     let existing=tx.query_result_set("SELECT j.id,j.item FROM ingest_jobs AS j INNER JOIN AS_TABLE($rows) AS incoming ON j.id=incoming.id").param("$rows",job_values.clone()).await?;
+     for mut row in existing{let id:String=row.remove_field_by_name("id")?.try_into()?;let item:String=row.remove_field_by_name("item")?.try_into()?;let incoming=job_values.clone();let mut matched=tx.query_row("SELECT item FROM AS_TABLE($rows) WHERE id=$id").param("$rows",incoming).param("$id",id).await?;let expected:String=matched.remove_field_by_name("item")?.try_into()?;if item!=expected{return Err(ydb::YdbOrCustomerError::from_err(std::io::Error::other("durable job identity collision")))}}
+     tx.exec("UPSERT INTO ingest_jobs SELECT id,status,run_at_ms,first_attempt_ms,origin_key,attempt,item,revision FROM AS_TABLE($rows)").param("$rows",job_values).await?;
+    }
    }
    tx.exec("UPSERT INTO content_refresh_state (id,revision,document) VALUES ($id,0,$document)").param("$id",state_key.clone()).param("$document",validators.clone()).await?;let health_key=source_id.as_uuid().to_string();let prior=tx.query_row("SELECT document FROM source_health WHERE source_id=$id").param("$id",health_key.clone()).optional().await?;let last_error_ms=prior.map(|mut row|->Result<SourceHealth,ydb::YdbOrCustomerError>{let raw:String=row.remove_field_by_name("document")?.try_into()?;serde_json::from_str(&raw).map_err(customer)}).transpose()?.and_then(|health|health.last_error_ms);let health=SourceHealth{last_success_ms:Some(observed_at_ms),incomplete,error:None,last_error_ms,consecutive_failures:0};tx.exec("UPSERT INTO source_health (source_id,document) VALUES ($id,$document)").param("$id",source_id.as_uuid().to_string()).param("$document",serde_json::to_string(&health).map_err(customer)?).await?;record_subscription_activity(tx,source_id,true,Some(duration_ms),Some(discovered_items),None,Utc::now()).await?;if incomplete{let item=WorkItem::RefreshSource{source_id};enqueue_work(tx,source_job(source_id,9).as_uuid().to_string(),&item,Utc::now().timestamp_millis()).await?;}Ok::<(),ydb::YdbOrCustomerError>(())
   })).await.map_err(storage)
@@ -489,22 +512,33 @@ impl IngestStore for YdbIngestStore {
         let oldest_ms = millis(now - self.max_retry_age);
         let origin_limit = self.per_origin_concurrency as u64;
         self.transport.client.query_client().retry_tx(ydb::closure!([worker,token_text],async |tx:&mut Transaction|{
-   let mut cursor_run=i64::MIN;let mut cursor_id=String::new();
-   loop{
-    let rows=tx.query_result_set("SELECT id,item,attempt,revision,first_attempt_ms,origin_key,run_at_ms FROM ingest_jobs WHERE ((status='ready' AND run_at_ms <= $now) OR (status='leased' AND lease_deadline_ms < $now)) AND (run_at_ms > $cursor_run OR (run_at_ms = $cursor_run AND id > $cursor_id)) ORDER BY run_at_ms,id LIMIT 128").param("$now",now_ms).param("$cursor_run",cursor_run).param("$cursor_id",cursor_id.clone()).await?;
-    let mut page_count=0usize;
-    for mut row in rows{
-     page_count+=1;let id:String=row.remove_field_by_name("id")?.try_into()?;let item:String=row.remove_field_by_name("item")?.try_into()?;let attempt:u32=row.remove_field_by_name("attempt")?.try_into()?;let revision:u64=row.remove_field_by_name("revision")?.try_into()?;let first_attempt_ms:i64=row.remove_field_by_name("first_attempt_ms")?.try_into()?;let origin_key:String=row.remove_field_by_name("origin_key")?.try_into()?;cursor_run=row.remove_field_by_name("run_at_ms")?.try_into()?;cursor_id=id.clone();
-     if retry_age_exceeded(first_attempt_ms,oldest_ms){tx.exec("UPDATE ingest_jobs SET status='failed',lease_token=NULL,lease_deadline_ms=NULL,diagnostic='maximum retry age exceeded',revision=$next WHERE id=$id AND revision=$revision").param("$next",revision+1).param("$id",id).param("$revision",revision).await?;continue}
-     let active=tx.query_result_set("SELECT id FROM ingest_jobs WHERE status='leased' AND origin_key=$origin AND lease_deadline_ms >= $now LIMIT $limit").param("$origin",origin_key).param("$now",now_ms).param("$limit",origin_limit).await?.into_iter().count();
-     if !origin_has_capacity(active,origin_limit as usize){continue}
-     tx.exec("UPDATE ingest_jobs SET status='leased',lease_token=$token,lease_deadline_ms=$deadline,revision=$next WHERE id=$id AND revision=$revision").param("$token",token_text.clone()).param("$deadline",deadline).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;
-     return Ok(Some((id,item,attempt)))
-    }
-    if page_count<128{break}
-   }
-   Ok::<_,ydb::YdbOrCustomerError>(None)
-  })).await.map_err(storage)?.map(|(id,item,attempt)|Ok(LeasedWork{job_id:JobId::from_uuid(uuid::Uuid::parse_str(&id).map_err(storage)?),item:serde_json::from_str(&item).map_err(storage)?,token,deadline:lease_until,attempt})).transpose()
+            let _worker = &worker;
+            let mut rows: Vec<_> = tx.query_result_set(
+                "SELECT id,item,attempt,revision,first_attempt_ms,origin_key FROM ingest_jobs VIEW ready_jobs WHERE status='ready' AND run_at_ms <= $now ORDER BY status,run_at_ms LIMIT 128"
+            ).param("$now",now_ms).await?.into_iter().collect();
+            if rows.is_empty() {
+                rows = tx.query_result_set(
+                    "SELECT id,item,attempt,revision,first_attempt_ms,origin_key FROM ingest_jobs WHERE status='leased' AND lease_deadline_ms < $now LIMIT 128"
+                ).param("$now",now_ms).await?.into_iter().collect();
+            }
+            for mut row in rows {
+                let id:String=row.remove_field_by_name("id")?.try_into()?;
+                let item:String=row.remove_field_by_name("item")?.try_into()?;
+                let attempt:u32=row.remove_field_by_name("attempt")?.try_into()?;
+                let revision:u64=row.remove_field_by_name("revision")?.try_into()?;
+                let first_attempt_ms:i64=row.remove_field_by_name("first_attempt_ms")?.try_into()?;
+                let origin_key:String=row.remove_field_by_name("origin_key")?.try_into()?;
+                if retry_age_exceeded(first_attempt_ms,oldest_ms) {
+                    tx.exec("UPDATE ingest_jobs SET status='failed',lease_token=NULL,lease_deadline_ms=NULL,diagnostic='maximum retry age exceeded',revision=$next WHERE id=$id AND revision=$revision").param("$next",revision+1).param("$id",id).param("$revision",revision).await?;
+                    continue;
+                }
+                let active=tx.query_result_set("SELECT id FROM ingest_jobs VIEW leased_by_origin WHERE status='leased' AND origin_key=$origin AND lease_deadline_ms >= $now LIMIT $limit").param("$origin",origin_key).param("$now",now_ms).param("$limit",origin_limit).await?.into_iter().count();
+                if !origin_has_capacity(active,origin_limit as usize) { continue; }
+                tx.exec("UPDATE ingest_jobs SET status='leased',lease_token=$token,lease_deadline_ms=$deadline,revision=$next WHERE id=$id AND revision=$revision").param("$token",token_text.clone()).param("$deadline",deadline).param("$next",revision+1).param("$id",id.clone()).param("$revision",revision).await?;
+                return Ok(Some((id,item,attempt)));
+            }
+            Ok::<_,ydb::YdbOrCustomerError>(None)
+        })).await.map_err(storage)?.map(|(id,item,attempt)|Ok(LeasedWork{job_id:JobId::from_uuid(uuid::Uuid::parse_str(&id).map_err(storage)?),item:serde_json::from_str(&item).map_err(storage)?,token,deadline:lease_until,attempt})).transpose()
     }
     async fn renew(
         &self,
