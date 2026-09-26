@@ -32,6 +32,29 @@ struct Transport {
     responses: Mutex<VecDeque<TransportResponse>>,
     requests: Mutex<Vec<PreparedRequest>>,
 }
+
+struct FirstAddressFails {
+    first: IpAddr,
+    attempts: Mutex<Vec<IpAddr>>,
+}
+#[async_trait]
+impl OutboundTransport for FirstAddressFails {
+    async fn execute(
+        &self,
+        _: &PreparedRequest,
+        authorization: &ConnectionAuthorization,
+        _: Duration,
+        _: Duration,
+    ) -> Result<TransportResponse, TransportError> {
+        self.attempts.lock().unwrap().push(authorization.address());
+        if authorization.address() == self.first {
+            return Err(TransportError { kind: "request" });
+        }
+        let mut value = response(StatusCode::OK, None, b"ok");
+        value.connected_peer = authorization.address();
+        Ok(value)
+    }
+}
 #[async_trait]
 impl OutboundTransport for Transport {
     async fn execute(
@@ -242,5 +265,47 @@ async fn configured_user_agent_is_applied_at_the_shared_outbound_boundary() {
             .headers
             .get(header::USER_AGENT),
         Some(&HeaderValue::from_static("inoreader/0.1"))
+    );
+}
+
+#[tokio::test]
+async fn connection_retries_each_authorized_dns_address_within_the_deadline() {
+    let first: IpAddr = "2001:4860:4860::8888".parse().unwrap();
+    let second: IpAddr = "93.184.216.34".parse().unwrap();
+    let transport = FirstAddressFails {
+        first,
+        attempts: Mutex::new(vec![]),
+    };
+    let client = OutboundHttpClient::new(
+        OutboundPolicy::new(
+            false,
+            OutboundLimits {
+                connect_timeout: Duration::from_secs(1),
+                request_deadline: Duration::from_secs(5),
+                max_redirect_hops: 1,
+                max_response_body_bytes: 10,
+            },
+        ),
+        Resolver {
+            answers: Mutex::new(VecDeque::from([vec![first, second]])),
+        },
+        transport,
+        Arc::new(Observer::default()),
+    );
+
+    let result = client
+        .execute(PreparedRequest {
+            method: Method::GET,
+            url: Url::parse("https://publisher.test/feed").unwrap(),
+            headers: HeaderMap::new(),
+            body: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(result.body, b"ok");
+    assert_eq!(
+        *client.transport.attempts.lock().unwrap(),
+        vec![first, second]
     );
 }

@@ -160,24 +160,34 @@ where
                 .await
                 .map_err(|_| OutboundError::Transport { kind: "dns" })?;
             let resolved = self.policy.authorize_resolution(&request.url, addresses)?;
-            // A transport may choose another authorized address on a retry, but it
-            // never resolves the name itself. That closes the validation/connect gap.
-            let address = *resolved
-                .addresses()
-                .first()
-                .ok_or(OutboundError::DnsNoAddresses)?;
-            let authorization = resolved.connection(address)?;
-            let remaining = deadline.remaining()?;
-            let response = self
-                .transport
-                .execute(
-                    request,
-                    &authorization,
-                    self.policy.limits().connect_timeout.min(remaining),
-                    remaining,
-                )
-                .await
-                .map_err(|error| OutboundError::Transport { kind: error.kind })?;
+            // Try every address from the authorized DNS answer. Hosts commonly
+            // publish IPv6 before IPv4 even when the caller has no IPv6 route.
+            // The overall deadline remains shared across all attempts.
+            let mut response = None;
+            let mut last_transport_error = None;
+            for address in resolved.addresses() {
+                let authorization = resolved.connection(*address)?;
+                let remaining = deadline.remaining()?;
+                match self
+                    .transport
+                    .execute(
+                        request,
+                        &authorization,
+                        self.policy.limits().connect_timeout.min(remaining),
+                        remaining,
+                    )
+                    .await
+                {
+                    Ok(value) => {
+                        response = Some((value, authorization));
+                        break;
+                    }
+                    Err(error) => last_transport_error = Some(error.kind),
+                }
+            }
+            let (response, authorization) = response.ok_or(OutboundError::Transport {
+                kind: last_transport_error.unwrap_or("no_authorized_address"),
+            })?;
             authorization.verify_connected_peer(response.connected_peer)?;
 
             if follows_location(response.status) {
