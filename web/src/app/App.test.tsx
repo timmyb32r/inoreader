@@ -1,12 +1,21 @@
 import { fireEvent, render, screen, within } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
-import { App } from "./App";
+import { App, formatArticleDate } from "./App";
 import { articles, mockClient } from "../test/mockClient";
 import { ApiClient, ApiError } from "../api/client";
 
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  it("formats article timestamps in stable UTC and omits relative age and missing authors", async () => {
+    expect(formatArticleDate("2026-09-26T14:06:26.316789727+00:00")).toBe("2026-sep-26 14:06:26");
+    const timestamped={...articles[0],age:"2026-09-26T14:06:26.316789727+00:00",author:undefined};
+    const client=mockClient();
+    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articles:[timestamped],newArticleCount:0});
+    render(<App client={client}/>);
+    expect((await screen.findAllByText("2026-sep-26 14:06:26")).length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(/Unknown author| ago/)).not.toBeInTheDocument();
+  });
   it("opens a failed subscription's update log from the sidebar", async () => {
     history.replaceState({}, "", "/");
     const client = mockClient();
