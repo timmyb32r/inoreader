@@ -6,6 +6,7 @@ members = [
   "crates/reader-application",
   "crates/reader-collectors",
   "crates/reader-ingest",
+  "crates/reader-storage-postgres",
   "crates/reader-storage-ydb",
   "crates/reader-server-contracts",
   "crates/reader-server",
@@ -31,6 +32,7 @@ murmur3 = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 rand = "0.8"
 rpassword = "7"
 roxmltree = "0.20"

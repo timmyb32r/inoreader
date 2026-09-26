@@ -1,0 +1,24 @@
+[package]
+name = "reader-storage-postgres"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+murmur3.workspace = true
+reader-application = { path = "../reader-application" }
+reader-core = { path = "../reader-core" }
+reader-ingest = { path = "../reader-ingest" }
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+testcontainers = "0.25"
+testcontainers-modules = { version = "0.13", features = ["postgres"] }
