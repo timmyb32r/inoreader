@@ -511,7 +511,8 @@ Chromium не публикует CDP-порт наружу, работает б�
 | Группа конфига | Что задаётся |
 |---|---|
 | `server` | bind address, внешний origin, trust policy reverse proxy, сроки запросов и graceful shutdown |
-| `database.ydb` | endpoint, database path, credential provider/secret reference, deadlines, concurrency/retry budgets |
+| `database.postgres` | host, port, database, user, password-file reference, connection-pool size and acquire deadline |
+| `database.migration_source_ydb` | read-only source endpoint, database path, credential reference and bounded retry settings used only by the one-way migration command |
 | `auth` | параметры password hashing, session lifetime, invite/reset lifetime, лимиты попыток |
 | `http` | user agent, connect/request deadlines, redirect hops, body/decompression limits, допустимая политика HTTP |
 | `scheduler` | polling intervals, lease/renewal, workers, per-origin limits, очередь retry и максимальный возраст попытки |
@@ -525,7 +526,7 @@ Chromium не публикует CDP-порт наружу, работает б�
 
 `content.version_policy` обязателен без неявного значения по умолчанию: `latest_successful` явно закрепляет согласованную замену и удаление прежних редакций. Политика документируется в конфиге и диагностике; её отсутствие или неподдерживаемое значение отклоняются до запуска workers.
 
-Секреты передаются через environment/file/provider references, не входят в репозиторий и не показываются целиком в диагностике. Настройки пространства, подписки, рецепты и правила живут в YDB и меняются через UI; YAML не превращается во второй конфликтующий источник их истины. Изменение операторского конфига в v1 требует перезапуска; hot reload не обещается.
+Секреты передаются через environment/file/provider references, не входят в репозиторий и не показываются целиком в диагностике. Настройки пространства, подписки, рецепты и правила живут в PostgreSQL и меняются через UI; YAML не превращается во второй конфликтующий источник их истины. YDB остаётся только источником проверяемой одноразовой миграции и резервным снимком на период отката. Изменение операторского конфига в v1 требует перезапуска; hot reload не обещается.
 
 ### 12.2. Один бинарь
 

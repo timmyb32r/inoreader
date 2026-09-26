@@ -29,7 +29,19 @@ pub struct Server {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Database {
-    pub ydb: Ydb,
+    pub postgres: Postgres,
+    pub migration_source_ydb: Ydb,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Postgres {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub username: String,
+    pub password_file_env: String,
+    pub max_connections: u32,
+    pub acquire_timeout_seconds: u64,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -167,14 +179,33 @@ impl Config {
                 "server.external_origin",
                 self.server.external_origin.as_str(),
             ),
-            ("database.ydb.endpoint", self.database.ydb.endpoint.as_str()),
             (
-                "database.ydb.database_path",
-                self.database.ydb.database_path.as_str(),
+                "database.postgres.host",
+                self.database.postgres.host.as_str(),
             ),
             (
-                "database.ydb.credentials_env",
-                self.database.ydb.credentials_env.as_str(),
+                "database.postgres.database",
+                self.database.postgres.database.as_str(),
+            ),
+            (
+                "database.postgres.username",
+                self.database.postgres.username.as_str(),
+            ),
+            (
+                "database.postgres.password_file_env",
+                self.database.postgres.password_file_env.as_str(),
+            ),
+            (
+                "database.migration_source_ydb.endpoint",
+                self.database.migration_source_ydb.endpoint.as_str(),
+            ),
+            (
+                "database.migration_source_ydb.database_path",
+                self.database.migration_source_ydb.database_path.as_str(),
+            ),
+            (
+                "database.migration_source_ydb.credentials_env",
+                self.database.migration_source_ydb.credentials_env.as_str(),
             ),
             ("http.user_agent", self.http.user_agent.as_str()),
             ("browser.cdp_endpoint", self.browser.cdp_endpoint.as_str()),
@@ -215,7 +246,7 @@ impl Config {
         }
         if !self
             .database
-            .ydb
+            .migration_source_ydb
             .credentials_env
             .bytes()
             .enumerate()
@@ -223,7 +254,9 @@ impl Config {
                 byte == b'_' || byte.is_ascii_uppercase() || index > 0 && byte.is_ascii_digit()
             })
         {
-            return Err(ConfigError::Invalid("database.ydb.credentials_env"));
+            return Err(ConfigError::Invalid(
+                "database.migration_source_ydb.credentials_env",
+            ));
         }
         let values = [
             (
@@ -235,12 +268,18 @@ impl Config {
                 self.server.graceful_shutdown_seconds,
             ),
             (
-                "database.ydb.request_timeout_seconds",
-                self.database.ydb.request_timeout_seconds,
+                "database.postgres.acquire_timeout_seconds",
+                self.database.postgres.acquire_timeout_seconds,
             ),
             (
-                "database.ydb.retry_initial_backoff_milliseconds",
-                self.database.ydb.retry_initial_backoff_milliseconds,
+                "database.migration_source_ydb.request_timeout_seconds",
+                self.database.migration_source_ydb.request_timeout_seconds,
+            ),
+            (
+                "database.migration_source_ydb.retry_initial_backoff_milliseconds",
+                self.database
+                    .migration_source_ydb
+                    .retry_initial_backoff_milliseconds,
             ),
             (
                 "auth.session_lifetime_seconds",
@@ -292,8 +331,8 @@ impl Config {
                 self.server.max_request_body_bytes,
             ),
             (
-                "database.ydb.max_concurrency",
-                self.database.ydb.max_concurrency,
+                "database.migration_source_ydb.max_concurrency",
+                self.database.migration_source_ydb.max_concurrency,
             ),
             (
                 "subscriptions.pause_reason_max_bytes",
@@ -331,7 +370,9 @@ impl Config {
         }
         if self.http.redirect_hops == 0
             || self.scheduler.retry_attempts == 0
-            || self.database.ydb.retry_attempts == 0
+            || self.database.migration_source_ydb.retry_attempts == 0
+            || self.database.postgres.max_connections == 0
+            || self.database.postgres.port == 0
             || self.auth.login_attempts_per_minute == 0
         {
             return Err(ConfigError::Invalid("attempt and redirect limits"));
@@ -351,8 +392,8 @@ impl Config {
         {
             return Err(ConfigError::Invalid("server.external_origin"));
         }
-        let endpoint = url::Url::parse(&self.database.ydb.endpoint)
-            .map_err(|_| ConfigError::Invalid("database.ydb.endpoint"))?;
+        let endpoint = url::Url::parse(&self.database.migration_source_ydb.endpoint)
+            .map_err(|_| ConfigError::Invalid("database.migration_source_ydb.endpoint"))?;
         if !matches!(endpoint.scheme(), "grpc" | "grpcs")
             || endpoint.host_str().is_none()
             || !endpoint.username().is_empty()
@@ -361,21 +402,58 @@ impl Config {
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
         {
-            return Err(ConfigError::Invalid("database.ydb.endpoint"));
+            return Err(ConfigError::Invalid(
+                "database.migration_source_ydb.endpoint",
+            ));
         }
-        if !self.database.ydb.database_path.starts_with('/')
-            || self.database.ydb.database_path == "/"
-            || self.database.ydb.database_path.contains(['\n', '\r'])
+        if !self
+            .database
+            .migration_source_ydb
+            .database_path
+            .starts_with('/')
+            || self.database.migration_source_ydb.database_path == "/"
+            || self
+                .database
+                .migration_source_ydb
+                .database_path
+                .contains(['\n', '\r'])
         {
-            return Err(ConfigError::Invalid("database.ydb.database_path"));
+            return Err(ConfigError::Invalid(
+                "database.migration_source_ydb.database_path",
+            ));
         }
-        let mut env = self.database.ydb.credentials_env.bytes();
+        let mut env = self.database.migration_source_ydb.credentials_env.bytes();
         if !env
             .next()
             .is_some_and(|v| v == b'_' || v.is_ascii_alphabetic())
             || !env.all(|v| v == b'_' || v.is_ascii_alphanumeric())
         {
-            return Err(ConfigError::Invalid("database.ydb.credentials_env"));
+            return Err(ConfigError::Invalid(
+                "database.migration_source_ydb.credentials_env",
+            ));
+        }
+        let mut postgres_env = self.database.postgres.password_file_env.bytes();
+        if !postgres_env
+            .next()
+            .is_some_and(|v| v == b'_' || v.is_ascii_alphabetic())
+            || !postgres_env.all(|v| v == b'_' || v.is_ascii_alphanumeric())
+        {
+            return Err(ConfigError::Invalid("database.postgres.password_file_env"));
+        }
+        for (name, value) in [
+            ("database.postgres.host", &self.database.postgres.host),
+            (
+                "database.postgres.database",
+                &self.database.postgres.database,
+            ),
+            (
+                "database.postgres.username",
+                &self.database.postgres.username,
+            ),
+        ] {
+            if value.contains(['\0', '\n', '\r']) {
+                return Err(ConfigError::Invalid(name));
+            }
         }
         if self.http.user_agent.bytes().any(|v| v < 0x20 || v == 0x7f) {
             return Err(ConfigError::Invalid("http.user_agent"));

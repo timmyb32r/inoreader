@@ -52,25 +52,29 @@ fn malformed_listener_and_non_origin_public_url_fail_before_startup() {
 #[test]
 fn credentials_reference_must_be_a_portable_environment_name() {
     let mut value = example();
-    value.database.ydb.credentials_env = "bad-name".into();
+    value.database.postgres.password_file_env = "bad-name".into();
     assert!(matches!(
         Config::validate(&value),
-        Err(ConfigError::Invalid("database.ydb.credentials_env"))
+        Err(ConfigError::Invalid("database.postgres.password_file_env"))
     ))
 }
 #[test]
 fn operator_endpoints_and_paths_are_validated_before_io() {
     let mut value = example();
-    value.database.ydb.endpoint = "https://ydb.example.test".into();
+    value.database.migration_source_ydb.endpoint = "https://ydb.example.test".into();
     assert!(matches!(
         Config::validate(&value),
-        Err(ConfigError::Invalid("database.ydb.endpoint"))
+        Err(ConfigError::Invalid(
+            "database.migration_source_ydb.endpoint"
+        ))
     ));
     let mut value = example();
-    value.database.ydb.database_path = "relative".into();
+    value.database.migration_source_ydb.database_path = "relative".into();
     assert!(matches!(
         Config::validate(&value),
-        Err(ConfigError::Invalid("database.ydb.database_path"))
+        Err(ConfigError::Invalid(
+            "database.migration_source_ydb.database_path"
+        ))
     ));
     let mut value = example();
     value.browser.cdp_endpoint = "http://user@chromium:9222/path".into();

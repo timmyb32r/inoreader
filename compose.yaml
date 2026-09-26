@@ -23,15 +23,20 @@ services:
     command: ["--config", "/etc/inoreader/config.yaml", "serve"]
     environment:
       YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS: /run/secrets/ydb-key.json
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
     volumes:
       - ./config.yaml:/etc/inoreader/config.yaml:ro
     secrets:
       - source: ydb-key
         target: ydb-key.json
+      - source: postgres-password
+        target: postgres-password
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       chromium:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/live"]
@@ -52,6 +57,27 @@ services:
     networks:
       - public-egress
       - browser-control
+      - database
+  postgres:
+    image: postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3
+    environment:
+      POSTGRES_DB: inoreader
+      POSTGRES_USER: inoreader
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - source: postgres-password
+        target: postgres-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inoreader -d inoreader"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      - database
   chromium:
     image: chromedp/headless-shell@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
     command: ["--remote-allow-origins=*"]
@@ -84,14 +110,20 @@ services:
 secrets:
   ydb-key:
     file: ./secrets/ydb-key.json
+  postgres-password:
+    file: ./secrets/postgres-password
 
 volumes:
   caddy-data:
   caddy-config:
+  postgres-data:
 
 networks:
   public-egress:
     name: inoreader-public-egress
   browser-control:
     name: inoreader-browser-control
+    internal: true
+  database:
+    name: inoreader-database
     internal: true

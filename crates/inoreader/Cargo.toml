@@ -13,6 +13,7 @@ reader-application = { path = "../reader-application" }
 reader-server-ui = { path = "../reader-server-ui" }
 reader-server = { path = "../reader-server" }
 reader-storage-ydb = { path = "../reader-storage-ydb" }
+reader-storage-postgres = { path = "../reader-storage-postgres" }
 reader-core = { path = "../reader-core" }
 reader-collectors = { path = "../reader-collectors" }
 reader-ingest = { path = "../reader-ingest" }
@@ -28,3 +29,4 @@ tokio.workspace = true
 tower-http.workspace = true
 toml.workspace = true
 url.workspace = true
+sqlx.workspace = true

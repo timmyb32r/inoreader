@@ -16,7 +16,8 @@ use std::{
 };
 use uuid::Uuid;
 
-const POSTGRES_IMAGE: &str = "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
+const POSTGRES_IMAGE: &str =
+    "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 
 struct PostgresContainer {

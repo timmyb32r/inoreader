@@ -3,21 +3,22 @@
 ## Production topology
 
 The release artifact is one Linux `inoreader` binary containing the compiled
-Preact application. Runtime dependencies are an external YDB Serverless database
-and the Chromium sidecar in `compose.yaml`. The app joins the public-egress and
-internal browser-control networks. Chromium joins only browser-control, which is
+Preact application. Runtime dependencies are the PostgreSQL and Chromium
+containers in `compose.yaml`. PostgreSQL uses a persistent volume and is reachable
+only through the internal database network. The app joins the database,
+public-egress, and internal browser-control networks. Chromium joins only browser-control, which is
 declared `internal: true`, so it has no direct public or host-network route. The
 CDP port is available only on that network. Browser HTTP(S) is fulfilled through
 the app's shared outbound policy; a context-level black-hole proxy is a second
 fail-closed barrier. Neither container receives the Docker socket or a host
 directory containing browser state.
 
-Copy `config.example.yaml` to `config.yaml`, set the public origin and YDB
-endpoint/database, and place the service-account key at
-`secrets/ydb-key.json`. Keep both files outside version control. Validate the
-document and its credential reference before preparing schema or starting
-workers. `check-config` rejects an absent or empty credential environment
-variable but does not connect to or mutate YDB:
+Copy `config.example.yaml` to `config.yaml`, set the public origin, and create a
+random single-line PostgreSQL password in `secrets/postgres-password` with mode
+`0600`. The YDB endpoint and `secrets/ydb-key.json` are required only while the
+one-way migration is available. Keep configuration and secrets outside version
+control. `check-config` validates the PostgreSQL password-file reference without
+connecting to the database:
 
 ```sh
 docker compose run --rm app --config /etc/inoreader/config.yaml check-config
@@ -43,9 +44,9 @@ these caches and makes the next build cold. `.dockerignore` keeps local build
 artifacts, repository history, runtime configuration, and credentials out of
 the build context.
 
-The YDB `request_timeout_seconds`, `max_concurrency`, and `retry_attempts`
-settings configure the official SDK's retry deadline, query-session pool, and
-retry budget. All three must be positive before a connection is attempted.
+The PostgreSQL pool size and acquire deadline are explicit validated settings.
+The YDB request, concurrency, and retry settings apply only to migration-source
+reads. All values must be positive before a connection is attempted.
 Authentication exposes the Argon2id memory, time, and parallelism costs; invalid
 combinations fail startup validation and the chosen costs are embedded in every
 new password hash.

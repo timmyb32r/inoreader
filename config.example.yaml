@@ -5,7 +5,15 @@ server:
   graceful_shutdown_seconds: 20
   max_request_body_bytes: 2097152
 database:
-  ydb:
+  postgres:
+    host: "postgres"
+    port: 5432
+    database: "inoreader"
+    username: "inoreader"
+    password_file_env: "POSTGRES_PASSWORD_FILE"
+    max_connections: 16
+    acquire_timeout_seconds: 10
+  migration_source_ydb:
     endpoint: "grpcs://ydb.example.net:2135"
     database_path: "/region/project/database"
     credentials_env: "YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS"

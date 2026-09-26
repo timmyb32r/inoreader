@@ -640,11 +640,7 @@ async fn provision_subscription_tx(
     recipe: Option<&str>,
 ) -> Result<(), RepositoryError> {
     if reserve_workspace_url {
-        let key = format!(
-            "{}\0{}",
-            value.workspace_id().as_uuid(),
-            value.source_url_exact()
-        );
+        let key = workspace_feed_url_key(value.workspace_id(), value.source_url_exact());
         let result = sqlx::query("INSERT INTO workspace_feed_urls (id,subscription_id) VALUES ($1,$2) ON CONFLICT DO NOTHING")
             .bind(key).bind(value.id().as_uuid().to_string()).execute(&mut **tx).await.map_err(storage)?;
         if result.rows_affected() != 1 {
@@ -731,6 +727,13 @@ async fn provision_subscription_tx(
 fn storage(e: impl std::fmt::Display) -> RepositoryError {
     RepositoryError::Storage(e.to_string())
 }
+
+pub(crate) fn workspace_feed_url_key(workspace: WorkspaceId, source_url_exact: &str) -> String {
+    // Workspace UUIDs have a fixed textual width, so this delimiter is
+    // unambiguous while remaining valid PostgreSQL UTF-8 text.
+    format!("{}/{}", workspace.as_uuid(), source_url_exact)
+}
+
 fn table(kind: &str) -> Result<&'static str, RepositoryError> {
     match kind {
         "schema_metadata" => Ok("schema_metadata"),
@@ -1344,7 +1347,7 @@ impl ReaderRepository for PostgresRepository {
             v.workspace_id().as_uuid(),
             current.source_url_exact()
         );
-        let new_key = format!("{}\0{}", v.workspace_id().as_uuid(), v.source_url_exact());
+        let new_key = workspace_feed_url_key(v.workspace_id(), v.source_url_exact());
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT subscription_id FROM workspace_feed_urls WHERE id = $1 FOR UPDATE",
         )

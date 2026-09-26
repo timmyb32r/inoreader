@@ -2,9 +2,10 @@ use crate::ingest_store::{
     article_rule_job, cleanup_job, is_recurring, origin_has_capacity, record_job,
     retry_age_exceeded, PostgresIngestStore,
 };
+use crate::repository::workspace_feed_url_key;
 use crate::schema::SCHEMA_SQL;
 use chrono::Duration;
-use reader_core::{ArticleId, SourceId, SourceRecordId, SubscriptionId};
+use reader_core::{ArticleId, SourceId, SourceRecordId, SubscriptionId, WorkspaceId};
 use reader_ingest::{StoreError, WorkItem};
 use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
@@ -98,4 +99,14 @@ fn schema_has_one_concrete_source_of_truth() {
             "missing concrete table {table}"
         );
     }
+}
+
+#[test]
+fn workspace_feed_url_identity_is_valid_utf8_text_and_keeps_exact_url_spelling() {
+    let workspace = WorkspaceId::new();
+    let first = workspace_feed_url_key(workspace, "https://example.test/feed?a=1#x");
+    let second = workspace_feed_url_key(workspace, "https://example.test/feed?a=1#X");
+    assert!(!first.contains('\0'));
+    assert!(first.ends_with("https://example.test/feed?a=1#x"));
+    assert_ne!(first, second);
 }

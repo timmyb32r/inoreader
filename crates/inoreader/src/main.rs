@@ -24,15 +24,16 @@ use reader_server_contracts::{
     VisualRect as VisualRectView, VisualSelectionRequest, VisualSelectionResponse,
     WebFeedRecipeDraft,
 };
-use reader_storage_ydb::{
-    prepare_schema, ProductionYdbTransport, YdbClientLimits, YdbIngestStore, YdbRepository,
-};
+use reader_storage_postgres::{prepare_schema, PostgresIngestStore, PostgresRepository};
+use reader_storage_ydb::{export_migration_snapshot, ProductionYdbTransport, YdbClientLimits};
 use reader_web_runtime::{
     ExternalRequestCompletion, ExternalRequestObserver, OutboundHttpClient, OutboundLimits,
     OutboundPolicy, RawOutboundLimits, ReqwestPinnedTransport, TokioDnsResolver,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use url::Url;
+
+mod migration;
 
 #[derive(Parser)]
 struct Cli {
@@ -50,6 +51,7 @@ enum Command {
     BenchmarkLibrary {
         workspace_id: uuid::Uuid,
     },
+    MigrateYdbToPostgres,
     BootstrapAdmin {
         username: String,
     },
@@ -100,33 +102,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("seed manifest is valid: {} selected sources for account {} workspace {}; no changes applied",seed.items.iter().filter(|v|v.selected).count(),seed.owner_account_id,seed.workspace_id);
         return Ok(());
     }
-    require_database_credentials(&config)?;
-    let connection = format!(
-        "{}/{}",
-        config.database.ydb.endpoint.trim_end_matches('/'),
-        config.database.ydb.database_path.trim_start_matches('/')
-    );
-    let ydb_limits = YdbClientLimits::new(
-        Duration::from_secs(config.database.ydb.request_timeout_seconds),
-        config.database.ydb.max_concurrency,
-        config.database.ydb.retry_attempts,
-        Duration::from_millis(config.database.ydb.retry_initial_backoff_milliseconds),
-    )?;
-    let transport =
-        Arc::new(ProductionYdbTransport::connect_from_environment(&connection, ydb_limits).await?);
+    let pool = postgres_pool(&config).await?;
     match cli.command {
         Command::CheckConfig | Command::Seed { apply: false, .. } => unreachable!(),
         Command::Health => {
-            transport.health().await?;
-            println!("YDB connection is healthy");
+            sqlx::query("SELECT 1").execute(&pool).await?;
+            println!("PostgreSQL connection is healthy");
         }
         Command::PrepareSchema => {
-            prepare_schema(transport.as_ref()).await?;
-            println!("YDB schema prepared");
+            prepare_schema(&pool).await?;
+            println!("PostgreSQL schema prepared");
         }
         Command::PrioritizeJobs => {
-            let store = YdbIngestStore::new(
-                transport,
+            let store = PostgresIngestStore::new(
+                pool,
                 chrono::Duration::seconds(config.scheduler.polling_interval_seconds as i64),
                 config.scheduler.per_origin_concurrency,
                 chrono::Duration::seconds(config.scheduler.max_retry_age_seconds as i64),
@@ -135,8 +124,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("reprioritized {count} ready ingest jobs");
         }
         Command::BenchmarkLibrary { workspace_id } => {
-            let repository = YdbRepository::new(
-                transport,
+            let repository = PostgresRepository::new(
+                pool,
                 ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?,
                 config.ingest.initial_feed_items,
             )?;
@@ -165,8 +154,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if password != confirmation {
                 return Err("password confirmation does not match".into());
             }
-            let repository = Arc::new(YdbRepository::new(
-                transport.clone(),
+            let repository = Arc::new(PostgresRepository::new(
+                pool.clone(),
                 ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?,
                 config.ingest.initial_feed_items,
             )?);
@@ -182,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let seed = load_seed(&manifest)?;
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
             let repository =
-                YdbRepository::new(transport.clone(), policy, config.ingest.initial_feed_items)?;
+                PostgresRepository::new(pool.clone(), policy, config.ingest.initial_feed_items)?;
             repository
                 .account(AccountId::from_uuid(seed.owner_account_id))
                 .await?;
@@ -197,17 +186,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             repository.apply_seed_atomic(workspace.id(), values).await?;
             println!("seed applied atomically: {count} selected sources");
         }
+        Command::MigrateYdbToPostgres => {
+            require_ydb_credentials(&config)?;
+            let source = connect_ydb_migration_source(&config).await?;
+            let snapshot = export_migration_snapshot(source.as_ref()).await?;
+            migration::import_snapshot(&pool, &snapshot).await?;
+            for table in &snapshot.tables {
+                println!(
+                    "migrated {} rows={} utf8_bytes={} fingerprint={:032x}",
+                    table.table.name, table.row_count, table.utf8_bytes, table.fingerprint
+                );
+            }
+            println!("YDB to PostgreSQL migration verified");
+        }
         Command::Serve => {
-            transport.health().await?;
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
-            serve(&config, transport, policy).await?;
+            serve(&config, pool, policy).await?;
         }
     }
     Ok(())
 }
 
-fn require_database_credentials(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
-    let name = &config.database.ydb.credentials_env;
+fn require_ydb_credentials(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    let name = &config.database.migration_source_ydb.credentials_env;
     let value = std::env::var(name)
         .map_err(|_| format!("missing credentials environment variable {name}"))?;
     if value.trim().is_empty() {
@@ -225,6 +226,68 @@ fn require_database_credentials(config: &Config) -> Result<(), Box<dyn std::erro
         }
     }
     Ok(())
+}
+
+fn require_database_credentials(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = postgres_password(config)?;
+    Ok(())
+}
+
+fn postgres_password(config: &Config) -> Result<String, Box<dyn std::error::Error>> {
+    let name = &config.database.postgres.password_file_env;
+    let path = std::env::var(name)
+        .map_err(|_| format!("missing PostgreSQL password-file environment variable {name}"))?;
+    let raw = std::fs::read_to_string(&path).map_err(|error| {
+        format!("PostgreSQL password file referenced by {name} is unavailable: {error}")
+    })?;
+    let password = raw
+        .strip_suffix("\r\n")
+        .or_else(|| raw.strip_suffix('\n'))
+        .unwrap_or(&raw);
+    if password.is_empty() || password.contains(['\n', '\r', '\0']) {
+        return Err("PostgreSQL password file must contain exactly one non-empty line".into());
+    }
+    Ok(password.to_owned())
+}
+
+async fn postgres_pool(config: &Config) -> Result<sqlx::PgPool, Box<dyn std::error::Error>> {
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+    let password = postgres_password(config)?;
+    let options = PgConnectOptions::new()
+        .host(&config.database.postgres.host)
+        .port(config.database.postgres.port)
+        .database(&config.database.postgres.database)
+        .username(&config.database.postgres.username)
+        .password(&password);
+    let pool = PgPoolOptions::new()
+        .max_connections(config.database.postgres.max_connections)
+        .acquire_timeout(Duration::from_secs(
+            config.database.postgres.acquire_timeout_seconds,
+        ))
+        .connect_with(options)
+        .await?;
+    prepare_schema(&pool).await?;
+    Ok(pool)
+}
+
+async fn connect_ydb_migration_source(
+    config: &Config,
+) -> Result<Arc<ProductionYdbTransport>, Box<dyn std::error::Error>> {
+    let source = &config.database.migration_source_ydb;
+    let connection = format!(
+        "{}/{}",
+        source.endpoint.trim_end_matches('/'),
+        source.database_path.trim_start_matches('/')
+    );
+    let limits = YdbClientLimits::new(
+        Duration::from_secs(source.request_timeout_seconds),
+        source.max_concurrency,
+        source.retry_attempts,
+        Duration::from_millis(source.retry_initial_backoff_milliseconds),
+    )?;
+    Ok(Arc::new(
+        ProductionYdbTransport::connect_from_environment(&connection, limits).await?,
+    ))
 }
 
 fn load_seed(path: &std::path::Path) -> Result<SeedManifest, Box<dyn std::error::Error>> {
@@ -324,15 +387,15 @@ fn seed_values(seed: SeedManifest) -> Result<Vec<PreparedSeed>, Box<dyn std::err
 
 async fn serve(
     config: &Config,
-    transport: Arc<ProductionYdbTransport>,
+    pool: sqlx::PgPool,
     reason_policy: ReasonPolicy,
 ) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "archive_budget_bytes={} policy=telemetry_only",
         config.observability.archive_budget_bytes
     );
-    let repository = Arc::new(YdbRepository::new(
-        transport.clone(),
+    let repository = Arc::new(PostgresRepository::new(
+        pool.clone(),
         reason_policy,
         config.ingest.initial_feed_items,
     )?);
@@ -409,8 +472,8 @@ async fn serve(
         StatusCode::REQUEST_TIMEOUT,
         Duration::from_secs(config.server.request_timeout_seconds),
     ));
-    let ingest_store = Arc::new(YdbIngestStore::new(
-        transport,
+    let ingest_store = Arc::new(PostgresIngestStore::new(
+        pool,
         chrono::Duration::seconds(config.scheduler.polling_interval_seconds as i64),
         config.scheduler.per_origin_concurrency,
         chrono::Duration::seconds(config.scheduler.max_retry_age_seconds as i64),
