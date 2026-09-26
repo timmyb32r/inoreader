@@ -26,7 +26,13 @@ use ydb::{
     SessionPoolSettings, Transaction, Value,
 };
 mod ingest_store;
+mod migration;
 pub use ingest_store::YdbIngestStore;
+pub use migration::{
+    export_migration_snapshot, MigrationCell, MigrationColumn, MigrationColumnType,
+    MigrationSnapshot, MigrationSnapshotSource, MigrationTable, MigrationTableSnapshot,
+    MIGRATION_TABLES,
+};
 
 const SCHEMA_VERSION: u64 = 7;
 fn activity_retention_complete(deleted: usize) -> bool {

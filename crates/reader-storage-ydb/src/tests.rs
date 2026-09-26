@@ -80,6 +80,148 @@ use std::{collections::HashMap, sync::Mutex};
 use url::Url;
 
 #[derive(Default)]
+struct MigrationSource {
+    rows: HashMap<&'static str, Vec<Vec<MigrationCell>>>,
+}
+
+#[async_trait]
+impl MigrationSnapshotSource for MigrationSource {
+    async fn migration_rows(
+        &self,
+        table: MigrationTable,
+    ) -> Result<Vec<Vec<MigrationCell>>, String> {
+        Ok(self.rows.get(table.name).cloned().unwrap_or_default())
+    }
+}
+
+fn migration_source(version: u64) -> MigrationSource {
+    let mut source = MigrationSource::default();
+    source.rows.insert(
+        "schema_metadata",
+        vec![vec![
+            MigrationCell::Text("schema".into()),
+            MigrationCell::Uint64(version),
+            MigrationCell::Text(format!(r#"{{"version":{version}}}"#)),
+        ]],
+    );
+    source
+}
+
+#[tokio::test]
+async fn migration_snapshot_covers_every_table_and_preserves_exact_values() {
+    let mut source = migration_source(SCHEMA_VERSION);
+    source.rows.insert(
+        "ingest_jobs",
+        vec![vec![
+            MigrationCell::Text("job".into()),
+            MigrationCell::Text("leased".into()),
+            MigrationCell::Int64(-7),
+            MigrationCell::Int64(11),
+            MigrationCell::Text("origin".into()),
+            MigrationCell::Uint32(u32::MAX),
+            MigrationCell::Text("lease\n\0token".into()),
+            MigrationCell::Null,
+            MigrationCell::Text("{\"raw\":\"\\u0061\"}".into()),
+            MigrationCell::Uint64(u64::MAX),
+            MigrationCell::Null,
+        ]],
+    );
+    let snapshot = export_migration_snapshot(&source).await.unwrap();
+    assert_eq!(snapshot.source_schema_version, SCHEMA_VERSION);
+    assert_eq!(snapshot.tables.len(), 33);
+    let jobs = snapshot
+        .tables
+        .iter()
+        .find(|v| v.table.name == "ingest_jobs")
+        .unwrap();
+    assert_eq!(jobs.row_count, 1);
+    assert_eq!(jobs.rows, source.rows["ingest_jobs"]);
+    assert!(jobs.utf8_bytes > 0);
+    assert_ne!(jobs.fingerprint, 0);
+}
+
+#[tokio::test]
+async fn migration_snapshot_rejects_wrong_schema_and_invalid_or_duplicate_rows() {
+    assert!(
+        export_migration_snapshot(&migration_source(SCHEMA_VERSION - 1))
+            .await
+            .is_err()
+    );
+    let mut invalid = migration_source(SCHEMA_VERSION);
+    invalid
+        .rows
+        .insert("source_urls", vec![vec![MigrationCell::Text("url".into())]]);
+    assert!(export_migration_snapshot(&invalid).await.is_err());
+    let mut duplicate = migration_source(SCHEMA_VERSION);
+    let row = vec![
+        MigrationCell::Text("url".into()),
+        MigrationCell::Text("source".into()),
+    ];
+    duplicate.rows.insert("source_urls", vec![row.clone(), row]);
+    assert!(export_migration_snapshot(&duplicate).await.is_err());
+}
+
+#[tokio::test]
+async fn migration_verification_metadata_changes_for_type_null_and_exact_text_bytes() {
+    async fn fingerprint(cell: MigrationCell) -> u128 {
+        let mut source = migration_source(SCHEMA_VERSION);
+        source.rows.insert(
+            "source_health",
+            vec![vec![MigrationCell::Text("source".into()), cell]],
+        );
+        export_migration_snapshot(&source)
+            .await
+            .unwrap()
+            .tables
+            .into_iter()
+            .find(|v| v.table.name == "source_health")
+            .unwrap()
+            .fingerprint
+    }
+    assert_ne!(
+        fingerprint(MigrationCell::Text("a".into())).await,
+        fingerprint(MigrationCell::Text("A".into())).await
+    );
+    assert_ne!(
+        fingerprint(MigrationCell::Text("a".into())).await,
+        fingerprint(MigrationCell::Text("a\n".into())).await
+    );
+}
+
+#[tokio::test]
+async fn migration_rows_and_fingerprint_are_canonical_by_primary_key() {
+    let first = vec![
+        MigrationCell::Text("first".into()),
+        MigrationCell::Text("source-a".into()),
+    ];
+    let second = vec![
+        MigrationCell::Text("second".into()),
+        MigrationCell::Text("source-b".into()),
+    ];
+    let mut forward = migration_source(SCHEMA_VERSION);
+    forward
+        .rows
+        .insert("source_urls", vec![first.clone(), second.clone()]);
+    let mut reverse = migration_source(SCHEMA_VERSION);
+    reverse
+        .rows
+        .insert("source_urls", vec![second.clone(), first.clone()]);
+    let forward = export_migration_snapshot(&forward).await.unwrap();
+    let reverse = export_migration_snapshot(&reverse).await.unwrap();
+    let table = |snapshot: MigrationSnapshot| {
+        snapshot
+            .tables
+            .into_iter()
+            .find(|value| value.table.name == "source_urls")
+            .unwrap()
+    };
+    let forward = table(forward);
+    let reverse = table(reverse);
+    assert_eq!(forward.rows, vec![first, second]);
+    assert_eq!(forward.fingerprint, reverse.fingerprint);
+}
+
+#[derive(Default)]
 struct Transport {
     rows: Mutex<HashMap<(&'static str, String), Vec<u8>>>,
     scans: Mutex<HashMap<&'static str, Vec<Vec<u8>>>>,
