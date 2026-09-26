@@ -81,8 +81,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .reader-grid--home{grid-template-columns:244px minmax(0,1fr)}
 .reader-grid--collapsed{grid-template-columns:58px minmax(340px,410px) minmax(440px,1fr)}
 .reader-grid--home.reader-grid--collapsed{grid-template-columns:58px minmax(0,1fr)}
-.sidebar{position:relative}.sidebar-toggle{position:absolute;z-index:3;top:20px;right:-18px;width:30px;height:30px;border-color:var(--line);background:var(--surface);box-shadow:0 3px 10px rgba(23,35,52,.1)}
-.sidebar--collapsed .sidebar-toggle svg{transform:rotate(180deg)}
+.sidebar{position:relative}.sidebar__footer{padding-bottom:52px}.sidebar-toggle{position:absolute;z-index:3;bottom:12px;left:14px;width:34px;height:34px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:var(--text-muted);cursor:pointer}.sidebar-toggle:hover,.sidebar-toggle:focus-visible{background:var(--line);color:var(--text)}.sidebar-toggle:active{transform:scale(.94)}.sidebar-toggle__arrow{width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;border-right:13px solid currentColor;transition:transform .15s ease}.sidebar--collapsed .sidebar-toggle__arrow{transform:rotate(180deg)}
 .sidebar--collapsed .workspace-button{width:40px;padding:4px}.sidebar--collapsed .workspace-button>span:not(.workspace-glyph){display:none}
 .sidebar--collapsed .nav-item{justify-content:center;padding:0}.sidebar--collapsed .nav-item>span,.sidebar--collapsed .nav-item>em,.sidebar--collapsed .nav-item>small{display:none}
 .sidebar--collapsed .sidebar__section-title{justify-content:center;padding:0}.sidebar--collapsed .sidebar__section-link,.sidebar--collapsed .sidebar__section-title>.icon-button,.sidebar--collapsed .source-list{display:none}

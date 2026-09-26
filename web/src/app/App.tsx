@@ -198,7 +198,7 @@ export function App({ client }: { client: ApiClient }) {
     <main class={`reader-grid${locationPath==="/"?" reader-grid--home":""}${sidebarCollapsed?" reader-grid--collapsed":""}`}>
       <>
       <aside class={`sidebar${sidebarCollapsed?" sidebar--collapsed":""} panel-mobile-${mobilePanel === "nav" ? "show" : "hide"}`} aria-label="Reader navigation">
-        <button class="sidebar-toggle icon-button toolbar-tooltip" data-tooltip={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}><Icon name="collapse"/></button>
+        <button class="sidebar-toggle toolbar-tooltip" data-tooltip={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} aria-label={sidebarCollapsed?"Expand sidebar":"Collapse sidebar"} aria-expanded={!sidebarCollapsed} onClick={toggleSidebar}><span class="sidebar-toggle__arrow" aria-hidden="true"/></button>
         <WorkspacePicker value={workspace} workspaces={workspaces} archived={archived} pending={switchingWorkspace} onChange={switchWorkspace} onArchive={() => setModal("archive")} />
         <nav class="nav-block" aria-label="Library">
           <button class={locationPath==="/"?"nav-item active":"nav-item"} onClick={goHome}><Icon name="home"/><span>Home</span></button>
