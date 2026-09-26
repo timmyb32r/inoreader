@@ -508,6 +508,12 @@ fn durable_job_id(identity: &str) -> JobId {
     JobId::from_uuid(uuid::Uuid::from_u128(hash))
 }
 
+pub(crate) fn dedup_fingerprint(dedup_key: &str) -> String {
+    let hash = murmur3::murmur3_x64_128(&mut std::io::Cursor::new(dedup_key.as_bytes()), 0)
+        .expect("in-memory hashing cannot fail");
+    format!("{hash:032x}")
+}
+
 pub(crate) fn record_job(kind: &str, record: SourceRecordId, revision: u64) -> JobId {
     durable_job_id(&format!("{kind}/{}/{revision}", record.as_uuid()))
 }
@@ -1065,30 +1071,41 @@ impl IngestStore for PostgresIngestStore {
                     .execute(&mut *tx)
                     .await
                     .map_err(storage)?;
-                sqlx::query("DELETE FROM library_dedup WHERE workspace_id = $1 AND dedup_key = $2")
-                    .bind(&workspace)
-                    .bind(old_dedup)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(storage)?;
+                sqlx::query(
+                    "DELETE FROM library_dedup \
+                     WHERE workspace_id = $1 AND dedup_hash = $2 AND dedup_key = $3",
+                )
+                .bind(&workspace)
+                .bind(dedup_fingerprint(&old_dedup))
+                .bind(old_dedup)
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
             } else {
                 upsert_article(&mut tx, &workspace, &old, &old_dedup).await?;
             }
         }
 
         let dedup_key = encode(record.key())?;
-        let found = sqlx::query_scalar::<_, String>(
-            "SELECT document FROM library_dedup
-             WHERE workspace_id = $1 AND dedup_key = $2 FOR UPDATE",
+        let dedup_hash = dedup_fingerprint(&dedup_key);
+        let found = sqlx::query_as::<_, (String, String)>(
+            "SELECT dedup_key, document FROM library_dedup
+             WHERE workspace_id = $1 AND dedup_hash = $2 FOR UPDATE",
         )
         .bind(&workspace)
-        .bind(&dedup_key)
+        .bind(&dedup_hash)
         .fetch_optional(&mut *tx)
         .await
-        .map_err(storage)?
-        .as_deref()
-        .map(decode::<Article>)
-        .transpose()?;
+        .map_err(storage)?;
+        let found = match found {
+            Some((stored_key, _)) if stored_key != dedup_key => {
+                return Err(StoreError::Unavailable(format!(
+                    "dedup fingerprint collision in workspace {workspace}"
+                )));
+            }
+            Some((_, document)) => Some(decode::<Article>(&document)?),
+            None => None,
+        };
         let inherited_time = inherited.iter().map(|(_, time)| *time).min();
         let inherited_state = ArticleState::merge(inherited.into_iter().map(|(state, _)| state));
         let found = match (found, inherited_state) {
@@ -1586,6 +1603,7 @@ async fn upsert_article(
 ) -> Result<(), StoreError> {
     let document = encode(article)?;
     let revision = to_i64(article.revision, "article revision")?;
+    let dedup_hash = dedup_fingerprint(dedup_key);
     sqlx::query(
         "INSERT INTO articles (id, revision, document) VALUES ($1, $2, $3)
          ON CONFLICT (id) DO UPDATE
@@ -1597,22 +1615,30 @@ async fn upsert_article(
     .execute(&mut **tx)
     .await
     .map_err(storage)?;
-    sqlx::query(
+    let result = sqlx::query(
         "INSERT INTO library_dedup
-         (workspace_id, dedup_key, article_id, revision, document)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (workspace_id, dedup_key) DO UPDATE
+         (workspace_id, dedup_hash, dedup_key, article_id, revision, document)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (workspace_id, dedup_hash) DO UPDATE
          SET article_id = EXCLUDED.article_id, revision = EXCLUDED.revision,
-             document = EXCLUDED.document",
+             document = EXCLUDED.document
+         WHERE library_dedup.dedup_key = EXCLUDED.dedup_key",
     )
     .bind(workspace)
+    .bind(dedup_hash)
     .bind(dedup_key)
     .bind(article.id.as_uuid().to_string())
     .bind(revision)
     .bind(document)
     .execute(&mut **tx)
     .await
-    .map_err(storage)?;
+    .map_err(storage)?
+    .rows_affected();
+    if result == 0 {
+        return Err(StoreError::Unavailable(format!(
+            "dedup fingerprint collision in workspace {workspace}"
+        )));
+    }
     Ok(())
 }
 

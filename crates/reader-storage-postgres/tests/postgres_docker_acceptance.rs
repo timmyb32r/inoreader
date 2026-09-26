@@ -124,12 +124,63 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
             )
         });
 
+    sqlx::query(
+        "CREATE TABLE library_dedup (\
+            workspace_id TEXT NOT NULL, dedup_key TEXT NOT NULL, article_id TEXT NOT NULL,\
+            revision BIGINT NOT NULL, document TEXT NOT NULL,\
+            PRIMARY KEY (workspace_id, dedup_key))",
+    )
+    .execute(&pool)
+    .await
+    .expect("create legacy dedup table");
+    sqlx::query(
+        "INSERT INTO library_dedup \
+         (workspace_id, dedup_key, article_id, revision, document) \
+         VALUES ('legacy-workspace', 'legacy-key', 'legacy-article', 0, '{}')",
+    )
+    .execute(&pool)
+    .await
+    .expect("insert legacy dedup row");
+
     prepare_schema(&pool)
         .await
         .expect("prepare PostgreSQL schema");
     prepare_schema(&pool)
         .await
         .expect("prepare PostgreSQL schema a second time");
+
+    let migrated_key: String = sqlx::query_scalar(
+        "SELECT dedup_key FROM library_dedup \
+         WHERE workspace_id = 'legacy-workspace' AND dedup_hash IS NOT NULL",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read migrated dedup row");
+    assert_eq!(migrated_key, "legacy-key");
+
+    let oversized_key = "x".repeat(20_000);
+    sqlx::query(
+        "INSERT INTO library_dedup \
+         (workspace_id, dedup_hash, dedup_key, article_id, revision, document) \
+         VALUES ($1, $2, $3, $4, 0, '{}')",
+    )
+    .bind("large-workspace")
+    .bind("00000000000000000000000000000000")
+    .bind(&oversized_key)
+    .bind("large-article")
+    .execute(&pool)
+    .await
+    .expect("store an unbounded full dedup key outside the B-tree index");
+    let stored_key: String = sqlx::query_scalar(
+        "SELECT dedup_key FROM library_dedup \
+         WHERE workspace_id = $1 AND dedup_hash = $2",
+    )
+    .bind("large-workspace")
+    .bind("00000000000000000000000000000000")
+    .fetch_one(&pool)
+    .await
+    .expect("read the full oversized dedup key");
+    assert_eq!(stored_key, oversized_key);
 
     let table_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM information_schema.tables \
