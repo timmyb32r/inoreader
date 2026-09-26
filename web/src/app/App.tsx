@@ -9,6 +9,7 @@ import { WebFeedBuilder } from "./WebFeedBuilder";
 import { RulesDialog } from "./RulesDialog";
 import { SubscriptionsPage } from "./SubscriptionsPage";
 import { SubscriptionIcon } from "./SubscriptionIcon";
+import { reportLibraryReady } from "../performanceDiagnostics";
 
 type View = "all" | "unread" | "saved" | "later" | "trash";
 type Modal = "add" | "pause" | "archive" | "rules" | "webfeed" | "shortcuts" | null;
@@ -59,6 +60,7 @@ export function App({ client }: { client: ApiClient }) {
   const workspace = workspaces.find((item) => item.id === workspaceId)?.name ?? "Workspace";
   const selectedSubscription = subscriptions.find((item) => item.id === selectedSubscriptionId) ?? null;
   useEffect(() => { articlesRef.current = articles; }, [articles]);
+  useEffect(() => { if (signedIn) reportLibraryReady(); }, [signedIn]);
 
   useEffect(() => {
     let active = true;

@@ -1,4 +1,5 @@
 import type { Article, Subscription, Workspace } from "../app/data";
+import { reportApiRequest } from "../performanceDiagnostics";
 
 export type Bootstrap = { account: { displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articles: Article[]; newArticleCount: number };
 export type RuleDraft = { id?: string; subscriptionId: string; field: "title" | "full_text" | "title_or_full_text"; phrase: string; action: "mark_read" | "move_to_trash"; enabled: boolean };
@@ -96,11 +97,19 @@ export class ApiClient {
 }
 
 export const fetchTransport: Transport = async <T>(path: string, init?: RequestInit) => {
-  const response = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json", ...init?.headers }, ...init });
-  if (response.status === 401) window.dispatchEvent(new CustomEvent("reader:unauthorized"));
-  if (!response.ok) { let message = `Request failed (${response.status})`; try { const body = await response.json() as { message?: string }; if (body.message) message = body.message; } catch { /* response may be empty */ } throw new ApiError(response.status, message); }
-  if (response.status === 204) return undefined as T;
-  return await response.json() as T;
+  const method = init?.method ?? "GET";
+  const startedAt = performance.now();
+  let status:number|"network-error"="network-error";
+  try {
+    const response = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json", ...init?.headers }, ...init });
+    status=response.status;
+    if (response.status === 401) window.dispatchEvent(new CustomEvent("reader:unauthorized"));
+    if (!response.ok) { let message = `Request failed (${response.status})`; try { const body = await response.json() as { message?: string }; if (body.message) message = body.message; } catch { /* response may be empty */ } throw new ApiError(response.status, message); }
+    if (response.status === 204) return undefined as T;
+    return await response.json() as T;
+  } finally {
+    reportApiRequest(path,method,startedAt,status);
+  }
 };
 export const apiClient = new ApiClient(fetchTransport);
 const enc = encodeURIComponent;
