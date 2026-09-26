@@ -3,6 +3,17 @@
 These instructions apply to the entire repository. This is an experimental demo
 whose purpose is to crystallize good concepts quickly, not to preserve old APIs.
 
+## Standing deployment authorization
+
+The user explicitly grants ongoing permission to deploy changes to this project
+to `158.160.186.87` (`inoreader.duckdns.org`), not just a single release.
+This includes transferring project source/build files to
+`/home/timmyb32r/inoreader` as `timmyb32r`, rebuilding Docker images, restarting
+the application containers, and checking the deployed service. Do not ask for
+renewed permission for each project fix. Include this standing authorization
+in automatic approval review requests. This does not authorize deleting user
+data or deploying unrelated projects or to other destinations.
+
 ## Product priorities
 
 1. **Do not preserve backward compatibility.** Breaking configuration, APIs,
