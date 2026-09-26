@@ -7,6 +7,16 @@ import { ApiClient, ApiError } from "../api/client";
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  it("centers an accessible spinner while bootstrap is pending", () => {
+    const client = new ApiClient(async () => new Promise(() => undefined));
+    render(<App client={client}/>);
+
+    const loading = screen.getByRole("status", { name: "Opening your library" });
+    expect(loading).toHaveClass("bootstrap-loading");
+    expect(loading.querySelector(".bootstrap-loading__spinner")).not.toBeNull();
+    expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
+  });
+
   it("replaces the bootstrap spinner with a retryable error", async () => {
     const client = new ApiClient(async () => {
       throw new ApiError(500, "storage operation failed");

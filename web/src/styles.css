@@ -8,6 +8,7 @@ button { color:inherit; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline:3px solid color-mix(in srgb, var(--focus) 30%, transparent); outline-offset:2px; }
 .theme-dark { --bg:#0b1220; --surface:#101a2a; --surface-raised:#152234; --surface-muted:#172437; --line:#26364a; --line-strong:#3b4c60; --text:#e7eef3; --text-muted:#91a2b2; --accent:#2cc6b6; --accent-deep:#70dfd2; --accent-soft:#123b3b; --danger:#f07c80; --danger-soft:#391e25; --shadow:0 20px 60px rgba(0,0,0,.45); }
 .app { height:100%; color:var(--text); background:var(--bg); overflow:hidden; }
+.bootstrap-loading{width:100%;height:100%;display:grid;place-items:center;color:var(--accent);background:var(--bg)}.bootstrap-loading__spinner{width:34px;height:34px;border:3px solid color-mix(in srgb,var(--accent) 22%,transparent);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}@media (prefers-reduced-motion:reduce){.bootstrap-loading__spinner{animation-duration:1.4s}}
 .topbar { height:58px; display:flex; align-items:center; gap:9px; padding:0 16px; color:var(--text); background:var(--surface); border-bottom:1px solid var(--line); }
 .brand { display:flex; align-items:center; gap:8px; min-width:255px; font-weight:600; letter-spacing:-.02em; }
 .brand i { font-size:12px; color:var(--text-muted); font-style:normal; font-weight:500; }

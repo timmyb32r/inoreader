@@ -147,7 +147,7 @@ export function App({ client }: { client: ApiClient }) {
   }, []);
 
   if (loadError) return <main class="fatal-state"><h1>Reader is unavailable</h1><p>{loadError}</p><button class="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
-  if (signedIn === null) return <main class="fatal-state" aria-busy="true"><span class="spinner"/><p>Opening your library…</p></main>;
+  if (signedIn === null) return <main class="bootstrap-loading" role="status" aria-label="Opening your library" aria-busy="true"><span class="bootstrap-loading__spinner" aria-hidden="true"/></main>;
   if (!signedIn || /\/(invite|reset-password|change-password)/.test(window.location.pathname)) return <AuthScreen client={client} onSignedIn={() => setSignedIn(null)} />;
   return <div class={`app theme-${theme}`} data-theme={theme}>
     <header class="topbar">
