@@ -13,7 +13,10 @@ export function Dialog({ title, description, children, onClose, width = "520px" 
     const dialog = ref.current;
     (dialog?.querySelector<HTMLElement>("[autofocus]") ?? dialog)?.focus();
     const keyboard = (event: KeyboardEvent) => {
-      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); return; }
+      if (dialog?.closest("[hidden]") || event.defaultPrevented) return;
+      const dialogs = [...document.querySelectorAll('[role="dialog"]')].filter(item => !item.closest("[hidden]"));
+      if (dialogs.at(-1) !== dialog) return;
+      if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeRef.current(); return; }
       if (event.key !== "Tab" || !dialog) return;
       const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),textarea:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])')];
       if (focusable.length === 0) { event.preventDefault(); dialog.focus(); return; }

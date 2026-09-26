@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/preact";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { App, formatArticleDate } from "./App";
 import { articles, mockClient } from "../test/mockClient";
@@ -30,6 +30,44 @@ describe("reader application", () => {
     await user.click(link);
     expect(await screen.findByRole("dialog", { name: "Subscription details" })).toBeVisible();
     expect(window.location.pathname).toBe("/subscriptions/sub");
+    await user.click(screen.getByRole("button", { name: "Close subscriptions" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(location.pathname).toBe("/reader");
+    expect(location.search).toContain("subscription=sub");
+    expect(link).toBeVisible();
+  });
+  it("returns from details to the actual catalog with its search intact, then to Home", async () => {
+    const user=userEvent.setup();
+    history.replaceState({},"","/");
+    renderApp();
+    await user.click(await screen.findByRole("button",{name:"Subscriptions 1"}));
+    await user.type(screen.getByRole("searchbox",{name:"Search subscriptions"}),"Rust");
+    await user.click(screen.getByRole("link",{name:"This Week in Rust"}));
+    await user.click(screen.getByRole("button",{name:"Close subscriptions"}));
+    await waitFor(()=>expect(location.pathname).toBe("/subscriptions"));
+    expect(screen.getByRole("searchbox",{name:"Search subscriptions"})).toHaveValue("Rust");
+    await user.keyboard("{Escape}");
+    await waitFor(()=>expect(location.pathname).toBe("/"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button",{name:"Home"})).toHaveClass("active");
+  });
+  it("closes a direct details link to the reader without inventing a catalog parent", async () => {
+    history.replaceState({},"","/subscriptions/sub");
+    renderApp();
+    await userEvent.setup().click(await screen.findByRole("button",{name:"Close subscriptions"}));
+    expect(location.pathname).toBe("/reader");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+  it("returns from the web feed builder to the add dialog with its draft preserved", async () => {
+    const user=userEvent.setup();renderApp();
+    await user.click(await screen.findByRole("button",{name:"Add subscription"}));
+    await user.type(screen.getByRole("textbox",{name:"Feed or website URL"}),"https://example.com/feed");
+    await user.click(screen.getByRole("button",{name:"Build a Web feed"}));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog",{name:"Add a subscription"})).toBeVisible();
+    expect(screen.getByRole("textbox",{name:"Feed or website URL"})).toHaveValue("https://example.com/feed");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("replaces the visible batch through stable cursors and preserves the position in the URL", async () => {
     const client=mockClient();
@@ -242,7 +280,7 @@ describe("reader application", () => {
     const client=mockClient({"/api/subscriptions/sub":subscription});const signOut=vi.spyOn(client,"signOut");
     const view=render(<App client={client}/>);
     await user.type(await screen.findByRole("textbox",{name:"Personal note"}),"keep me");
-    await user.click(screen.getByRole("button",{name:"← Back to subscriptions"}));
+    await user.click(screen.getByRole("button",{name:"← Back"}));
     expect(window.location.pathname).toBe("/subscriptions/sub");
     history.pushState({},"","/");window.dispatchEvent(new PopStateEvent("popstate"));
     expect(window.location.pathname).toBe("/subscriptions/sub");
