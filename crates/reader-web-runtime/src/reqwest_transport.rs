@@ -93,10 +93,17 @@ impl OutboundTransport for ReqwestPinnedTransport {
         if let Some(body) = &request.body {
             builder = builder.body(body.clone());
         }
-        let response = builder
-            .send()
-            .await
-            .map_err(|_| TransportError { kind: "request" })?;
+        let response = builder.send().await.map_err(|error| TransportError {
+            kind: if error.is_timeout() {
+                "request_timeout"
+            } else if error.is_connect() {
+                "connect"
+            } else if error.is_body() {
+                "request_body"
+            } else {
+                "request"
+            },
+        })?;
         let connected_peer = response
             .remote_addr()
             .ok_or(TransportError {
