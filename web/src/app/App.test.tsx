@@ -7,6 +7,28 @@ import { ApiClient, ApiError } from "../api/client";
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  it("opens a failed subscription's update log from the sidebar", async () => {
+    history.replaceState({}, "", "/");
+    const client = mockClient();
+    const failed = { id:"failed",name:"Broken feed",sourceType:"feed" as const,count:0,status:"active" as const,error:"outbound request timed out" };
+    vi.spyOn(client, "bootstrap").mockResolvedValue({
+      account: { displayName: "Test", initials: "TB" },
+      workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
+      activeWorkspaceId: "ws", subscriptions: [failed], articles: [], newArticleCount: 0,
+    });
+    vi.spyOn(client, "getSubscription").mockResolvedValue(failed);
+    const activity = vi.spyOn(client, "subscriptionActivity").mockResolvedValue([{
+      id:"attempt",occurredAt:"2026-09-26T10:00:00Z",successful:false,diagnostic:"connection refused",
+    }]);
+    const user = userEvent.setup();
+    render(<App client={client}/>);
+
+    await user.click(await screen.findByRole("button", { name: "Open update log for Broken feed" }));
+    expect(window.location.pathname).toBe("/subscriptions/failed/activity");
+    expect(await screen.findByText("connection refused")).toBeVisible();
+    expect(activity).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the brand as a link back to the main library", async () => {
     history.replaceState({}, "", "/subscriptions");
     const user = userEvent.setup();

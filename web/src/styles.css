@@ -49,3 +49,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 /* Final subscription overrides live after the legacy reader rules. */
 @media (min-width:761px){.subscription-table{table-layout:fixed;font-size:11px}.subscription-table th{font-size:9px}.subscription-table td{max-width:none;font-size:11px}.subscription-table col{min-width:0}.subscription-table th:last-child,.subscription-table td.row-link{text-align:right}}
 .subscriptions-page .entity-header h1{font-size:30px;line-height:1.12}.subscriptions-page .entity-header p:not(.eyebrow){font-size:12px;line-height:1.5}.subscriptions-page .text-button{font-size:11px}.entity-name small,.attention-reason{font-size:9px;line-height:1.35}.status-pill{font-size:9px}.column-option{min-height:40px;display:grid;grid-template-columns:1fr auto 88px;align-items:center;gap:7px;border-top:1px solid var(--line)}.column-option label{font-size:11px}.column-option select{height:28px;margin:0;font-size:9px}.column-order{display:flex;gap:2px}.column-order button{width:25px;height:25px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--text);cursor:pointer}.column-order button:disabled{opacity:.35}.detail-card h2{font-size:16px}.detail-card dl{font-size:11px;line-height:1.45}.detail-single>p,.recent-card article,.activity-list article{font-size:11px}.bulk-result{display:block;margin-top:3px;font-size:9px}.bulk-result.pending{color:var(--text-muted)}.bulk-result.success{color:var(--accent-deep)}.bulk-result.error{color:var(--danger)}
+
+/* Failed feeds expose their retained update history without changing row height. */
+.source-entry--error>.source{padding-right:65px}
+.source-error-log{position:absolute;z-index:2;right:34px;bottom:7px;height:18px;padding:0 6px;border:1px solid color-mix(in srgb,var(--danger) 35%,var(--line));border-radius:9px;background:var(--danger-soft);color:var(--danger);font-size:8px;font-weight:700;line-height:16px;cursor:pointer}
+.source-error-log:hover{border-color:var(--danger)}
+.source-error-log:active{transform:translateY(1px)}
+.source-error-log:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.activity-list article{padding:9px 0;row-gap:4px}
+.activity-list .activity-diagnostic{margin:0;padding:8px 10px;border-left:2px solid var(--danger);border-radius:0 6px 6px 0;background:var(--danger-soft);font-family:"IBM Plex Mono",ui-monospace,monospace;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
+.detail-single .card-heading>div>p{margin:-8px 0 14px;color:var(--text-muted);font-size:10px}
