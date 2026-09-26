@@ -109,6 +109,88 @@ impl PostgresRepository {
         }
     }
 
+    async fn presentation(
+        &self,
+        workspace: WorkspaceId,
+        article: Article,
+        include_content: bool,
+    ) -> Result<ArticlePresentation, RepositoryError> {
+        let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT o.source_record_id,s.document,m.document,f.document FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2",
+        ).bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).fetch_all(&self.pool).await.map_err(storage)?;
+        let mut subscription_ids = Vec::new();
+        let mut subscription_titles = Vec::new();
+        let mut manifests = Vec::new();
+        let mut failure_reason = None;
+        for (record, subscription, manifest, failure) in rows {
+            let subscription: Subscription =
+                serde_json::from_str(&subscription).map_err(storage)?;
+            subscription.validate(self.reason_policy).map_err(storage)?;
+            if subscription.workspace_id() != workspace {
+                return Err(storage("article origin crosses workspace ownership"));
+            }
+            if !subscription_ids.contains(&subscription.id()) {
+                subscription_ids.push(subscription.id());
+            }
+            if !subscription_titles
+                .iter()
+                .any(|v| v == subscription.title())
+            {
+                subscription_titles.push(subscription.title().to_owned());
+            }
+            if let Some(manifest) = manifest {
+                manifests.push((
+                    record,
+                    serde_json::from_str::<reader_ingest::ContentManifestPointer>(&manifest)
+                        .map_err(storage)?,
+                ));
+            }
+            if let Some(failure) = failure {
+                failure_reason = serde_json::from_str::<serde_json::Value>(&failure)
+                    .ok()
+                    .and_then(|v| {
+                        v.get("diagnostic")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                    });
+            }
+        }
+        let latest = manifests.into_iter().max_by_key(|(_, v)| v.fetched_at);
+        let safe_html = if include_content {
+            if let Some((record, pointer)) = latest.as_ref() {
+                let chunks = sqlx::query_scalar::<_, String>("SELECT bytes FROM staged_content_chunks WHERE record_id=$1 AND refresh_id=$2 AND representation='safe' ORDER BY ordinal")
+                    .bind(record).bind(pointer.refresh_id.to_string()).fetch_all(&self.pool).await.map_err(storage)?;
+                let mut bytes = Vec::new();
+                for chunk in chunks {
+                    bytes.extend(serde_json::from_str::<Vec<u8>>(&chunk).map_err(storage)?);
+                }
+                Some(
+                    String::from_utf8(bytes)
+                        .map_err(|_| storage("safe HTML content is not UTF-8"))?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let full_text_status = if latest.is_some() {
+            "ready"
+        } else if failure_reason.is_some() {
+            "failed"
+        } else {
+            "pending"
+        };
+        Ok(ArticlePresentation {
+            article,
+            subscription_ids,
+            subscription_titles,
+            safe_html,
+            full_text_status,
+            failure_reason,
+        })
+    }
+
     async fn presentations(
         &self,
         workspace: WorkspaceId,
@@ -117,80 +199,10 @@ impl PostgresRepository {
         let articles = self.articles_by_workspace(workspace).await?;
         let mut result = Vec::with_capacity(articles.len());
         for article in articles {
-            let rows: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-                "SELECT o.source_record_id,s.document,m.document,f.document FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2",
-            ).bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).fetch_all(&self.pool).await.map_err(storage)?;
-            let mut subscription_ids = Vec::new();
-            let mut subscription_titles = Vec::new();
-            let mut manifests = Vec::new();
-            let mut failure_reason = None;
-            for (record, subscription, manifest, failure) in rows {
-                let subscription: Subscription =
-                    serde_json::from_str(&subscription).map_err(storage)?;
-                subscription.validate(self.reason_policy).map_err(storage)?;
-                if subscription.workspace_id() != workspace {
-                    return Err(storage("article origin crosses workspace ownership"));
-                }
-                if !subscription_ids.contains(&subscription.id()) {
-                    subscription_ids.push(subscription.id());
-                }
-                if !subscription_titles
-                    .iter()
-                    .any(|v| v == subscription.title())
-                {
-                    subscription_titles.push(subscription.title().to_owned());
-                }
-                if let Some(manifest) = manifest {
-                    manifests.push((
-                        record,
-                        serde_json::from_str::<reader_ingest::ContentManifestPointer>(&manifest)
-                            .map_err(storage)?,
-                    ));
-                }
-                if let Some(failure) = failure {
-                    failure_reason = serde_json::from_str::<serde_json::Value>(&failure)
-                        .ok()
-                        .and_then(|v| {
-                            v.get("diagnostic")
-                                .and_then(|v| v.as_str())
-                                .map(str::to_owned)
-                        });
-                }
-            }
-            let latest = manifests.into_iter().max_by_key(|(_, v)| v.fetched_at);
-            let safe_html = if include_content {
-                if let Some((record, pointer)) = latest.as_ref() {
-                    let chunks = sqlx::query_scalar::<_, String>("SELECT bytes FROM staged_content_chunks WHERE record_id=$1 AND refresh_id=$2 AND representation='safe' ORDER BY ordinal")
-                        .bind(record).bind(pointer.refresh_id.to_string()).fetch_all(&self.pool).await.map_err(storage)?;
-                    let mut bytes = Vec::new();
-                    for chunk in chunks {
-                        bytes.extend(serde_json::from_str::<Vec<u8>>(&chunk).map_err(storage)?);
-                    }
-                    Some(
-                        String::from_utf8(bytes)
-                            .map_err(|_| storage("safe HTML content is not UTF-8"))?,
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            let full_text_status = if latest.is_some() {
-                "ready"
-            } else if failure_reason.is_some() {
-                "failed"
-            } else {
-                "pending"
-            };
-            result.push(ArticlePresentation {
-                article,
-                subscription_ids,
-                subscription_titles,
-                safe_html,
-                full_text_status,
-                failure_reason,
-            });
+            result.push(
+                self.presentation(workspace, article, include_content)
+                    .await?,
+            );
         }
         Ok(result)
     }
@@ -1844,11 +1856,8 @@ impl ReaderRepository for PostgresRepository {
         workspace: WorkspaceId,
         id: ArticleId,
     ) -> Result<ArticlePresentation, RepositoryError> {
-        self.presentations(workspace, true)
-            .await?
-            .into_iter()
-            .find(|v| v.article.id == id)
-            .ok_or(RepositoryError::NotFound)
+        let article = self.article(workspace, id).await?;
+        self.presentation(workspace, article, true).await
     }
     async fn save_article(
         &self,

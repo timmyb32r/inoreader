@@ -464,6 +464,23 @@ async fn verify_repository_isolation(pool: &PgPool) {
             .expect("read owned article"),
         article
     );
+    let unrelated_id = format!("{}/{}", workspace_a.id().as_uuid(), Uuid::new_v4());
+    sqlx::query("INSERT INTO articles (id, revision, document) VALUES ($1, 0, $2)")
+        .bind(&unrelated_id)
+        .bind("not valid article JSON")
+        .execute(pool)
+        .await
+        .expect("insert an unrelated article sentinel");
+    let presentation = repository
+        .article_presentation(workspace_a.id(), article_id)
+        .await
+        .expect("load one article without scanning unrelated workspace articles");
+    assert_eq!(presentation.article, article);
+    sqlx::query("DELETE FROM articles WHERE id = $1")
+        .bind(unrelated_id)
+        .execute(pool)
+        .await
+        .expect("remove unrelated article sentinel");
     assert!(matches!(
         repository.article(workspace_b.id(), article_id).await,
         Err(RepositoryError::NotFound)
