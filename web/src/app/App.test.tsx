@@ -92,6 +92,27 @@ describe("reader application", () => {
     expect(screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article")).toBe(row);
   });
 
+  it("renders sanitized article markup as structured content", async () => {
+    const client = mockClient();
+    const formatted = {
+      ...articles[0],
+      body: [],
+      bodyHtml: '<h2>Benefits</h2><p>Use <strong>structured data</strong>.</p><ul><li>Fast</li></ul><img src="https://example.com/diagram.png" alt="CSV diagram">',
+    };
+    vi.spyOn(client, "bootstrap").mockResolvedValue({
+      account: { displayName: "Test", initials: "TB" },
+      workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
+      activeWorkspaceId: "ws", subscriptions: [], articles: [formatted], newArticleCount: 0,
+    });
+    render(<App client={client}/>);
+
+    const reader = await screen.findByRole("article", { name: "Article reader" });
+    expect(within(reader).getByRole("heading", { name: "Benefits", level: 2 })).toBeVisible();
+    expect(within(reader).getByText("structured data").tagName).toBe("STRONG");
+    expect(within(reader).getByText("Fast").closest("li")).not.toBeNull();
+    expect(within(reader).getByRole("img", { name: "CSV diagram" })).toHaveAttribute("src", "https://example.com/diagram.png");
+  });
+
   it("opens an account menu before an explicit sign out", async () => {
     const user = userEvent.setup();
     const client = mockClient();

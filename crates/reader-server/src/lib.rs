@@ -1581,7 +1581,12 @@ fn article_view(value: &reader_application::ArticlePresentation) -> ArticleView 
         .cloned()
         .unwrap_or_else(|| "Unknown source".to_owned());
     if let Some(content) = &value.safe_html {
-        view.body = html_text_paragraphs(content)
+        let rendered = reader_web_runtime::SafeRenderedContent::from_untrusted_html_with_base(
+            content,
+            Some(&view.url),
+        );
+        view.body_html = Some(rendered.html().to_owned());
+        view.body.clear();
     }
     view.full_text = value.full_text_status.to_owned();
     view.full_text_reason = value.failure_reason.clone();
@@ -1608,6 +1613,7 @@ fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         } else {
             vec![excerpt]
         },
+        body_html: None,
         author: None,
         age: value.first_arrived_at.to_rfc3339(),
         read: value.state.read,
@@ -1618,6 +1624,7 @@ fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         full_text_reason: None,
     }
 }
+
 fn html_text_paragraphs(value: &str) -> Vec<String> {
     let normalized = value
         .replace("</p>", "\n")

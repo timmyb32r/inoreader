@@ -7,6 +7,7 @@ export type Article = {
   title: string;
   excerpt: string;
   body: string[];
+  bodyHtml?: string;
   author?: string;
   age: string;
   read: boolean;

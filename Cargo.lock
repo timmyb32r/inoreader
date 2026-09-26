@@ -3206,6 +3206,7 @@ dependencies = [
  "reader-application",
  "reader-core",
  "reader-server-contracts",
+ "reader-web-runtime",
  "roxmltree",
  "serde",
  "serde_json",

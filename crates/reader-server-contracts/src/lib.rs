@@ -58,6 +58,7 @@ pub struct ArticleView {
     pub title: String,
     pub excerpt: String,
     pub body: Vec<String>,
+    pub body_html: Option<String>,
     pub author: Option<String>,
     pub age: String,
     pub read: bool,

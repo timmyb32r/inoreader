@@ -11,6 +11,7 @@ url.workspace = true
 reader-application = { path = "../reader-application" }
 reader-core = { path = "../reader-core" }
 reader-server-contracts = { path = "../reader-server-contracts" }
+reader-web-runtime = { path = "../reader-web-runtime" }
 roxmltree.workspace = true
 serde.workspace = true
 serde_json.workspace = true

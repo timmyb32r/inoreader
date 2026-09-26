@@ -288,7 +288,7 @@ fn rule_wire_mapping_increments_version_and_rejects_ambiguous_phrases() {
 }
 
 #[test]
-fn article_dto_keeps_url_sources_failure_reason_and_plain_paragraphs() {
+fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
     let article = reader_core::Article {
         id: ArticleId::new(),
         key: reader_core::DedupKey {
@@ -315,9 +315,10 @@ fn article_dto_keeps_url_sources_failure_reason_and_plain_paragraphs() {
     assert_eq!(json["url"], "https://example.test/post");
     assert_eq!(json["source"], "Feed A");
     assert_eq!(json["sources"], serde_json::json!(["Feed A", "Feed B"]));
+    assert_eq!(json["body"], serde_json::json!([]));
     assert_eq!(
-        json["body"],
-        serde_json::json!(["First", "Second paragraph"])
+        json["bodyHtml"],
+        "<p>First</p><p>Second <strong>paragraph</strong></p>"
     );
     assert_eq!(json["fullText"], "failed");
     assert_eq!(json["fullTextReason"], "upstream timeout");
