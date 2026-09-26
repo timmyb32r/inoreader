@@ -2434,6 +2434,30 @@ impl ReaderRepository for PostgresRepository {
             }
         }
         for row in prepared {
+            let workspace = row.value.workspace_id().as_uuid().to_string();
+            let exact_url = row.value.source_url_exact();
+            let url_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM subscriptions \
+                 WHERE document::jsonb ->> 'workspace_id'=$1 \
+                   AND document::jsonb ->> 'source_url'=$2)",
+            )
+            .bind(workspace)
+            .bind(exact_url)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(storage)?;
+            if url_exists {
+                sqlx::query(
+                    "INSERT INTO seed_items(id,revision,document) VALUES($1,0,$2) \
+                     ON CONFLICT(id) DO NOTHING",
+                )
+                .bind(row.key)
+                .bind(row.configuration)
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
+                continue;
+            }
             let exists: bool =
                 sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM subscriptions WHERE id=$1)")
                     .bind(row.value.id().as_uuid().to_string())

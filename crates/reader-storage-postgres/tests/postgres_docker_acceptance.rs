@@ -503,6 +503,16 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .save_subscription(None, legacy.clone())
         .await
         .expect("create legacy personal_feed subscription");
+    let duplicate_url = Subscription::new(
+        SubscriptionId::new(),
+        workspace_a.id(),
+        legacy.source_url().clone(),
+        "Duplicate legacy title".into(),
+    );
+    assert!(repository
+        .save_subscription(None, duplicate_url)
+        .await
+        .is_err());
     let canonical = url::Url::parse("https://publisher.example/blog").expect("valid publisher URL");
     let preexisting_id = SourceId::from_uuid(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,

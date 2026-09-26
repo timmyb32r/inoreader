@@ -254,6 +254,12 @@ CREATE TABLE IF NOT EXISTS rule_evaluations (
 pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
     execute_schema(&mut transaction).await?;
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_by_workspace_exact_url \
+         ON subscriptions ((document::jsonb ->> 'workspace_id'), (document::jsonb ->> 'source_url'))",
+    )
+    .execute(&mut *transaction)
+    .await?;
     transaction.commit().await
 }
 
