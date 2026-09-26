@@ -99,9 +99,10 @@ where
                 Ok(true)
             }
             Err(error) => {
+                let diagnostic = error.diagnostic();
                 if lease.attempt.saturating_add(1) >= self.retry_attempts {
                     self.store
-                        .fail(lease.job_id, lease.token, error.diagnostic())
+                        .fail(lease.job_id, lease.token, &diagnostic)
                         .await?;
                     return Err(error);
                 }
@@ -111,7 +112,7 @@ where
                         lease.job_id,
                         lease.token,
                         now + Duration::seconds(delay_seconds),
-                        error.diagnostic(),
+                        &diagnostic,
                     )
                     .await?;
                 Err(error)
@@ -410,8 +411,9 @@ where
             // Every failure after claiming the refresh is visible, including
             // decoding and configured-size failures. Recording it never clears
             // the previous complete manifest.
+            let diagnostic = error.diagnostic();
             self.store
-                .record_refresh_failure(lease, record_id, error.diagnostic())
+                .record_refresh_failure(lease, record_id, &diagnostic)
                 .await?;
         }
         result
@@ -502,17 +504,17 @@ where
 }
 
 impl IngestError {
-    fn diagnostic(&self) -> &'static str {
+    fn diagnostic(&self) -> String {
         match self {
-            Self::Store(_) => "storage",
-            Self::Fetch(FetchError::Http(_)) => "remote_http_status",
-            Self::Fetch(FetchError::Rejected(_)) => "outbound_rejected",
-            Self::Parse(value) if value == "web_feed_empty_after_success" => {
-                "web_feed_empty_after_success"
+            Self::Store(error) => format!("storage: {error}"),
+            Self::Fetch(FetchError::Http(status)) => format!("remote_http_status: {status}"),
+            Self::Fetch(FetchError::Rejected(reason)) => {
+                format!("outbound_rejected: {reason}")
             }
-            Self::Parse(_) => "feed_parse",
-            Self::BrowserDegraded => "browser_degraded",
-            Self::InvalidLeaseDuration => "invalid_lease_duration",
+            Self::Parse(value) if value == "web_feed_empty_after_success" => value.clone(),
+            Self::Parse(reason) => format!("feed_parse: {reason}"),
+            Self::BrowserDegraded => "browser_degraded".into(),
+            Self::InvalidLeaseDuration => "invalid_lease_duration".into(),
         }
     }
 }
