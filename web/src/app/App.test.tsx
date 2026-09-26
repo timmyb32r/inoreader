@@ -178,6 +178,17 @@ describe("reader application", () => {
 
   it("uses a generic accessible name for every subscription options menu",async()=>{renderApp();expect(await screen.findAllByRole("button",{name:"More options"})).not.toHaveLength(0);expect(screen.queryByRole("button",{name:"Subscription actions"})).not.toBeInTheDocument()});
 
+  it("labels every article toolbar action with a stable hover tooltip",async()=>{
+    renderApp();
+    const reader=await screen.findByRole("article",{name:"Article reader"});
+    const actions=[...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip")];
+    expect(actions).toHaveLength(5);
+    for(const action of actions){
+      expect(action.dataset.tooltip).toBe(action.getAttribute("aria-label"));
+    }
+    expect(actions.map(action=>action.dataset.tooltip)).toEqual(["Mark read","Unsave","Read later","Move to trash","Open original"]);
+  });
+
   it("preserves the discovered source title when adding a subscription", async () => {
     const calls:{path:string;body?:Record<string,unknown>}[]=[];
     const base=mockClient();
