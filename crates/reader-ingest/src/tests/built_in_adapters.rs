@@ -11,17 +11,23 @@ use url::Url;
 
 struct MockHttp {
     responses: Mutex<VecDeque<Vec<u8>>>,
+    requests: Mutex<Vec<Url>>,
 }
 impl MockHttp {
     fn new(values: &[&str]) -> Arc<Self> {
         Arc::new(Self {
             responses: Mutex::new(values.iter().map(|v| v.as_bytes().to_vec()).collect()),
+            requests: Mutex::new(Vec::new()),
         })
+    }
+    fn requests(&self) -> Vec<Url> {
+        self.requests.lock().unwrap().clone()
     }
 }
 #[async_trait]
 impl BrowserHttpClient for MockHttp {
     async fn execute(&self, request: PreparedRequest) -> Result<BrowserHttpResponse, FetchError> {
+        self.requests.lock().unwrap().push(request.url.clone());
         let body = self
             .responses
             .lock()
@@ -145,10 +151,28 @@ async fn mirrorship_requires_listing_detail_title_identity() {
         r#"<a class="blog" href="/zh-CN/blog/d/a"><span class="title">Article A</span></a>"#;
     let detail = r#"<h1 class="title">Article A</h1><div class="ck-content content"><span>new Date(1789516800000)</span><p>A complete article body with enough independently meaningful words for the archived content contract.</p></div>"#;
     let http = MockHttp::new(&[listing, listing, listing, listing, detail]);
-    let values = BuiltInAdapterCollector::new(http)
-        .collect(&source(BuiltInAdapter::Mirrorship))
+    let source = SourceDefinition::new(
+        reader_core::SourceId::new(),
+        Url::parse("https://publisher.example/zh-CN/blog").unwrap(),
+        SourceKind::BuiltIn(BuiltInAdapter::Mirrorship),
+    )
+    .unwrap();
+    let values = BuiltInAdapterCollector::new(http.clone())
+        .collect(&source)
         .await
         .unwrap();
     assert_eq!(values.len(), 1);
     assert_eq!(values[0].key().title, "Article A");
+    assert_eq!(
+        http.requests()[..4]
+            .iter()
+            .map(Url::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "https://publisher.example/zh-CN/blog/",
+            "https://publisher.example/zh-CN/blog/Comparison/",
+            "https://publisher.example/zh-CN/blog/technical/",
+            "https://publisher.example/zh-CN/blog/product/",
+        ]
+    );
 }

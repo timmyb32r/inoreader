@@ -2,6 +2,7 @@ use crate::{
     BrowserHttpClient, BuiltInAdapter, FetchError, SourceDefinition, SourceKind, SourceRecord,
 };
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use futures_util::{stream, StreamExt, TryStreamExt};
 use http::{HeaderMap, HeaderValue, Method};
 use reader_collectors::ParsedRecord;
 use reader_web_runtime::PreparedRequest;
@@ -75,7 +76,10 @@ impl BuiltInAdapterCollector {
             })
             .await?;
         if !(200..300).contains(&response.status) {
-            return Err(rejected("publisher_api_http_error"));
+            return Err(rejected(&format!(
+                "publisher_api_http_status_{}",
+                response.status
+            )));
         }
         Ok(response.body)
     }
@@ -379,11 +383,18 @@ impl BuiltInAdapterCollector {
         let mut cards = Vec::new();
         let selector = Selector::parse("a.blog[href]").unwrap();
         let title_selector = Selector::parse(".title").unwrap();
+        let mut listing_base = source.url().clone();
+        if !listing_base.path().ends_with('/') {
+            listing_base.set_path(&format!("{}/", listing_base.path()));
+        }
         for suffix in ["", "Comparison", "technical", "product"] {
-            let url = source
-                .url()
-                .join(&format!("{}/", suffix))
-                .map_err(|_| rejected("mirrorship_invalid_category"))?;
+            let url = if suffix.is_empty() {
+                listing_base.clone()
+            } else {
+                listing_base
+                    .join(&format!("{suffix}/"))
+                    .map_err(|_| rejected("mirrorship_invalid_category"))?
+            };
             let body = self.request(Method::GET, url.clone(), None, None).await?;
             let html =
                 std::str::from_utf8(&body).map_err(|_| rejected("mirrorship_invalid_utf8"))?;
@@ -413,15 +424,17 @@ impl BuiltInAdapterCollector {
         if cards.len() > 120 {
             return Err(rejected("mirrorship_article_limit"));
         }
-        let mut out = Vec::new();
-        let h1 = Selector::parse("h1.title").unwrap();
-        let content = Selector::parse(".ck-content.content").unwrap();
-        let date_pattern = regex::Regex::new(r"new Date\(\s*(\d{13})\s*\)").unwrap();
-        for (url, listed_title) in cards {
+        // The publisher currently exposes about eighty cards. Fetching every
+        // detail serially makes one collection take minutes and amplifies any
+        // transient response into a failed source. Preserve listing order while
+        // bounding concurrency at the shared client's per-origin limit.
+        let out = stream::iter(cards.into_iter().map(|(url, listed_title)| async move {
             let body = self.request(Method::GET, url.clone(), None, None).await?;
             let html =
                 std::str::from_utf8(&body).map_err(|_| rejected("mirrorship_invalid_utf8"))?;
             let document = Html::parse_document(html);
+            let h1 = Selector::parse("h1.title").unwrap();
+            let content_selector = Selector::parse(".ck-content.content").unwrap();
             let title = document
                 .select(&h1)
                 .next()
@@ -430,24 +443,21 @@ impl BuiltInAdapterCollector {
             if title != listed_title {
                 return Err(rejected("mirrorship_title_mismatch"));
             }
-            let Some(content) = document.select(&content).next() else {
+            let Some(content) = document.select(&content_selector).next() else {
                 return Err(rejected("mirrorship_missing_content"));
             };
             let raw_date = content.text().collect::<String>();
+            let date_pattern = regex::Regex::new(r"new Date\(\s*(\d{13})\s*\)").unwrap();
             let published = date_pattern
                 .captures(&raw_date)
                 .and_then(|v| v.get(1))
                 .and_then(|v| v.as_str().parse::<i64>().ok())
                 .and_then(DateTime::from_timestamp_millis);
-            out.push(record(
-                source,
-                url,
-                title,
-                None,
-                published,
-                Some(content.html()),
-            )?)
-        }
+            record(source, url, title, None, published, Some(content.html()))
+        }))
+        .buffered(2)
+        .try_collect::<Vec<_>>()
+        .await?;
         nonempty(out, "mirrorship_no_articles")
     }
 }
