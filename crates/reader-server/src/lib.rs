@@ -388,7 +388,7 @@ async fn bootstrap<R: ReaderRepository + 'static>(
         .article_summary_page(
             active_id,
             article_page_request(
-                query.view.as_deref().unwrap_or("all"),
+                query.view.as_deref().unwrap_or("feed"),
                 query.subscription_id.map(SubscriptionId::from_uuid),
                 query.cursor.as_deref(),
                 query.direction.as_deref(),
@@ -982,7 +982,7 @@ async fn list_articles<R: ReaderRepository + 'static>(
         .article_summary_page(
             workspace,
             article_page_request(
-                query.view.as_deref().unwrap_or("all"),
+                query.view.as_deref().unwrap_or("feed"),
                 query.subscription_id.map(SubscriptionId::from_uuid),
                 query.cursor.as_deref(),
                 query.direction.as_deref(),
@@ -1026,17 +1026,8 @@ async fn update_article<R: ReaderRepository + 'static>(
             value.state.protect_unread = true
         }
     }
-    if let Some(v) = body.saved {
-        value.state.saved = v
-    }
     if let Some(v) = body.later {
         value.state.later = v
-    }
-    if let Some(v) = body.trash {
-        value.state.trashed = v;
-        if !v {
-            value.state.protect_restored = true
-        }
     }
     value.revision += 1;
     s.repository
@@ -1084,6 +1075,7 @@ async fn mark_all_read<R: ReaderRepository + 'static>(
             return Err(ApiFailure::Forbidden);
         }
     }
+    article_page_request(&body.view, subscription, None, None)?;
     let mut selected = Vec::new();
     for presentation in s
         .repository
@@ -1097,11 +1089,9 @@ async fn mark_all_read<R: ReaderRepository + 'static>(
         }
         let mut value = presentation.article;
         let matches = match body.view.as_str() {
-            "unread" => !value.state.read && !value.state.trashed,
-            "all" => !value.state.trashed,
-            "saved" => value.state.saved && !value.state.trashed,
-            "later" => value.state.later && !value.state.trashed,
-            "trash" => value.state.trashed,
+            "feed" => !value.state.read,
+            "subscription" => true,
+            "later" => value.state.later,
             _ => return Err(ApiFailure::Validation("unknown article view")),
         };
         if matches && !value.state.read {
@@ -1411,7 +1401,6 @@ fn parse_rule(identity: Option<(RuleId, u64)>, body: &RuleDraft) -> Result<Rule,
     };
     let action = match body.action.as_str() {
         "mark_read" => RuleAction::MarkRead,
-        "move_to_trash" => RuleAction::MoveToTrash,
         _ => return Err(ApiFailure::Validation("invalid rule action")),
     };
     let (id, version) = identity.unwrap_or((RuleId::new(), 0));
@@ -1438,7 +1427,6 @@ fn rule_draft(value: Rule) -> RuleDraft {
         phrase: value.needles.into_iter().next().unwrap_or_default(),
         action: match value.action {
             RuleAction::MarkRead => "mark_read",
-            RuleAction::MoveToTrash => "move_to_trash",
         }
         .into(),
         enabled: value.enabled,
@@ -1570,8 +1558,13 @@ fn article_page_request(
     cursor: Option<&str>,
     direction: Option<&str>,
 ) -> Result<ArticlePageRequest, ApiFailure> {
-    if !matches!(view, "all" | "unread" | "saved" | "later" | "trash") {
+    if !matches!(view, "feed" | "subscription" | "later") {
         return Err(ApiFailure::Validation("invalid article view"));
+    }
+    if (view == "subscription") != subscription_id.is_some() {
+        return Err(ApiFailure::Validation(
+            "subscription history requires a subscription; Feed and Read later are workspace views",
+        ));
     }
     let direction = match direction.unwrap_or("older") {
         "older" => ArticlePageDirection::Older,
@@ -1659,9 +1652,7 @@ fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         author: None,
         age: value.first_arrived_at.to_rfc3339(),
         read: value.state.read,
-        saved: value.state.saved,
         later: value.state.later,
-        trash: value.state.trashed,
         full_text: "pending".to_owned(),
         full_text_reason: None,
     }

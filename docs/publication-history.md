@@ -12,7 +12,7 @@ subscription owner. PostgreSQL joins only delivered origins for that subscriptio
 and workspace to their source records, using the existing `by_subscription` and
 source-record primary-key indexes. The response contains sparse UTC day/count
 buckets, `undated`, and `conflicting`; it never downloads article bodies. Counts
-include collected read, unread, and trashed articles, irrespective of the current
+include collected read and unread articles, irrespective of the current
 reader page. No publications are inferred before collection began.
 
 Each logical article contributes once. Matching origins on the same UTC day count

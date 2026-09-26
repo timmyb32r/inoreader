@@ -43,20 +43,13 @@ fn operational_rule_rejects_empty_multiple_or_space_padded_phrases() {
 }
 
 #[test]
-fn manual_unread_and_restore_guards_win_over_automatic_rules() {
+fn manual_unread_guard_wins_over_automatic_rules() {
     let mut unread = ArticleState {
         protect_unread: true,
         ..ArticleState::default()
     };
     rule(RuleField::Both, RuleAction::MarkRead).apply(&mut unread);
     assert!(!unread.read);
-
-    let mut restored = ArticleState {
-        protect_restored: true,
-        ..ArticleState::default()
-    };
-    rule(RuleField::Both, RuleAction::MoveToTrash).apply(&mut restored);
-    assert!(!restored.trashed);
 }
 
 #[test]

@@ -252,6 +252,82 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
 
     verify_lease_fencing(&pool).await;
     verify_repository_isolation(&pool).await;
+    verify_article_state_conversion(&pool).await;
+}
+
+async fn verify_article_state_conversion(pool: &PgPool) {
+    let workspace = WorkspaceId::new();
+    let article = Article {
+        id: ArticleId::new(),
+        key: DedupKey {
+            location: ArticleLocation::from(url::Url::parse("https://example.test/state").unwrap()),
+            title: "Keep exactly".into(),
+            description: Some("Preserve body and identity".into()),
+        },
+        state: ArticleState::default(),
+        first_arrived_at: Utc::now(),
+        origins: vec![],
+        revision: 0,
+    };
+    let mut document = serde_json::to_value(&article).unwrap();
+    document["state"]["saved"] = true.into();
+    document["state"]["trashed"] = true.into();
+    document["state"]["protect_restored"] = false.into();
+    sqlx::query("INSERT INTO articles(id,revision,document) VALUES($1,0,$2)")
+        .bind(format!("{}/{}", workspace.as_uuid(), article.id.as_uuid()))
+        .bind(document.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO library_dedup(workspace_id,dedup_hash,dedup_key,article_id,revision,document) VALUES($1,'state-conversion','key',$2,0,$3)")
+        .bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).bind(document.to_string()).execute(pool).await.unwrap();
+    sqlx::raw_sql(include_str!("../../../tools/simplify_article_state.sql"))
+        .execute(pool)
+        .await
+        .unwrap();
+    let repository =
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap();
+    let converted = repository.article(workspace, article.id).await.unwrap();
+    assert!(converted.state.read && converted.state.later);
+    assert_eq!(converted.key, article.key);
+    assert_eq!(converted.first_arrived_at, article.first_arrived_at);
+    let copy: String =
+        sqlx::query_scalar("SELECT document FROM library_dedup WHERE workspace_id=$1")
+            .bind(workspace.as_uuid().to_string())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(serde_json::from_str::<Article>(&copy).unwrap(), converted);
+    let request = |view: &str| reader_application::ArticlePageRequest {
+        view: view.into(),
+        subscription_id: None,
+        cursor: None,
+        direction: reader_application::ArticlePageDirection::Older,
+        limit: 50,
+    };
+    assert!(repository
+        .article_summary_page(workspace, request("feed"))
+        .await
+        .unwrap()
+        .articles
+        .is_empty());
+    assert_eq!(
+        repository
+            .article_summary_page(workspace, request("later"))
+            .await
+            .unwrap()
+            .articles
+            .len(),
+        1
+    );
+    sqlx::raw_sql(include_str!("../../../tools/simplify_article_state.sql"))
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        repository.article(workspace, article.id).await.unwrap(),
+        converted
+    );
 }
 
 async fn verify_repository_isolation(pool: &PgPool) {

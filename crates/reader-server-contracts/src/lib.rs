@@ -63,9 +63,7 @@ pub struct ArticleView {
     pub author: Option<String>,
     pub age: String,
     pub read: bool,
-    pub saved: bool,
     pub later: bool,
-    pub trash: bool,
     pub full_text: String,
     pub full_text_reason: Option<String>,
 }
@@ -233,14 +231,7 @@ pub struct WorkspaceQuery {
 #[serde(deny_unknown_fields)]
 pub struct ArticleStatePatch {
     pub read: Option<bool>,
-    pub saved: Option<bool>,
     pub later: Option<bool>,
-    pub trash: Option<bool>,
-}
-#[derive(Debug, Deserialize)]
-pub struct TrashCommand {
-    pub workspace_id: Uuid,
-    pub trashed: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

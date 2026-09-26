@@ -48,13 +48,11 @@ pub struct DedupKey {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ArticleState {
     pub read: bool,
-    pub saved: bool,
     pub later: bool,
-    pub trashed: bool,
     pub protect_unread: bool,
-    pub protect_restored: bool,
 }
 
 impl ArticleState {
@@ -65,11 +63,8 @@ impl ArticleState {
         }
         Some(Self {
             read: values.iter().all(|s| s.read),
-            saved: values.iter().any(|s| s.saved),
             later: values.iter().any(|s| s.later),
-            trashed: values.iter().all(|s| s.trashed),
             protect_unread: values.iter().any(|s| s.protect_unread),
-            protect_restored: values.iter().any(|s| s.protect_restored),
         })
     }
 }

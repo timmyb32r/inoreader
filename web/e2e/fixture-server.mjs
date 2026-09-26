@@ -4,8 +4,8 @@ import { extname, join, normalize } from "node:path";
 
 const root = join(process.cwd(), "dist");
 const articles = [
-  { id:"1",url:"https://example.test/rust",source:"This Week in Rust",sources:["This Week in Rust"],subscriptionIds:["sub"],title:"Async Rust without the hidden machinery",excerpt:"Structured concurrency.",body:["A deterministic fixture article."],age:"12 min",read:false,saved:true,later:false,trash:false,fullText:"ready" },
-  { id:"2",url:"https://example.test/queue",source:"Database Internals",title:"The durable queue is the product",excerpt:"Retries and intent.",body:["A second deterministic fixture."],age:"43 min",read:false,saved:false,later:false,trash:false,fullText:"failed" },
+  { id:"1",url:"https://example.test/rust",source:"This Week in Rust",sources:["This Week in Rust"],subscriptionIds:["sub"],title:"Async Rust without the hidden machinery",excerpt:"Structured concurrency.",body:["A deterministic fixture article."],age:"12 min",read:false,later:false,fullText:"ready" },
+  { id:"2",url:"https://example.test/queue",source:"Database Internals",title:"The durable queue is the product",excerpt:"Retries and intent.",body:["A second deterministic fixture."],age:"43 min",read:false,later:false,fullText:"failed" },
 ];
 const workspaces=[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}];
 let rules=[];

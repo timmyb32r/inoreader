@@ -11,9 +11,7 @@ export type Article = {
   author?: string;
   age: string;
   read: boolean;
-  saved: boolean;
   later: boolean;
-  trash: boolean;
   fullText: "ready" | "pending" | "failed";
   fullTextReason?: string;
   originalUrl?: string;

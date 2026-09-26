@@ -11,7 +11,6 @@ pub enum RuleField {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RuleAction {
     MarkRead,
-    MoveToTrash,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -60,7 +59,6 @@ impl Rule {
     pub fn apply(&self, state: &mut ArticleState) {
         match self.action {
             RuleAction::MarkRead if !state.protect_unread => state.read = true,
-            RuleAction::MoveToTrash if !state.protect_restored => state.trashed = true,
             _ => {}
         }
     }

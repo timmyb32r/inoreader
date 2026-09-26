@@ -1972,7 +1972,7 @@ impl ReaderRepository for PostgresRepository {
             .cursor
             .as_ref()
             .map(|value| article_key(workspace, value.article_id));
-        let predicate = "split_part(a.id,'/',1)=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=split_part(a.id,'/',2) AND o.subscription_id=$2)) AND CASE $3 WHEN 'unread' THEN NOT (a.document::jsonb #>> '{state,read}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'saved' THEN (a.document::jsonb #>> '{state,saved}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'later' THEN (a.document::jsonb #>> '{state,later}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'trash' THEN (a.document::jsonb #>> '{state,trashed}')::boolean ELSE NOT (a.document::jsonb #>> '{state,trashed}')::boolean END";
+        let predicate = "split_part(a.id,'/',1)=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=split_part(a.id,'/',2) AND o.subscription_id=$2)) AND CASE $3 WHEN 'feed' THEN NOT (a.document::jsonb #>> '{state,read}')::boolean WHEN 'later' THEN (a.document::jsonb #>> '{state,later}')::boolean WHEN 'subscription' THEN true ELSE false END";
         let total_sql = format!("SELECT COUNT(*) FROM articles a WHERE {predicate}");
         let total: i64 = sqlx::query_scalar(&total_sql)
             .bind(&workspace_id)
@@ -1981,7 +1981,7 @@ impl ReaderRepository for PostgresRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(storage)?;
-        let unread_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM articles a WHERE split_part(a.id,'/',1)=$1 AND NOT (a.document::jsonb #>> '{state,read}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean")
+        let unread_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM articles a WHERE split_part(a.id,'/',1)=$1 AND NOT (a.document::jsonb #>> '{state,read}')::boolean")
             .bind(&workspace_id).fetch_one(&self.pool).await.map_err(storage)?;
         let comparison = match request.direction {
             ArticlePageDirection::Older => "<",

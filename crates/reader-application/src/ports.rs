@@ -365,20 +365,15 @@ pub trait ReaderRepository: Send + Sync {
         request: ArticlePageRequest,
     ) -> Result<ArticlePage, RepositoryError> {
         let mut all = self.article_summaries_by_workspace(workspace).await?;
-        let unread_total = all
-            .iter()
-            .filter(|value| !value.article.state.read && !value.article.state.trashed)
-            .count();
+        let unread_total = all.iter().filter(|value| !value.article.state.read).count();
         all.retain(|value| {
             request
                 .subscription_id
                 .is_none_or(|subscription| value.subscription_ids.contains(&subscription))
                 && match request.view.as_str() {
-                    "unread" => !value.article.state.read && !value.article.state.trashed,
-                    "saved" => value.article.state.saved && !value.article.state.trashed,
-                    "later" => value.article.state.later && !value.article.state.trashed,
-                    "trash" => value.article.state.trashed,
-                    _ => !value.article.state.trashed,
+                    "feed" => !value.article.state.read,
+                    "later" => value.article.state.later,
+                    _ => true,
                 }
         });
         all.sort_by_key(|value| {

@@ -79,7 +79,7 @@ describe("reader application", () => {
     expect(screen.getByRole("heading", {name:"Feed (75)"})).toBeVisible();
     await userEvent.setup().click(screen.getByRole("button",{name:"Older →"}));
     expect(await screen.findByRole("heading",{name:articles[1].title,level:2})).toBeVisible();
-    expect(list).toHaveBeenCalledWith("ws","all",undefined,"older-1","older");
+    expect(list).toHaveBeenCalledWith("ws","feed",undefined,"older-1","older");
     expect(window.location.search).toContain("cursor=older-1");
     expect(window.location.search).toContain("batch=2");
     expect(screen.getByRole("navigation",{name:"Article pages"})).toHaveClass("article-pager");
@@ -245,24 +245,24 @@ describe("reader application", () => {
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 
-  it("opens an article and marks it read without changing saved state", async () => {
+  it("opens an article and marks it read without moving its row or changing Read later", async () => {
     const user = userEvent.setup(); renderApp();
     const row = (await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 })).closest("article")!;
     expect(row).not.toHaveClass("read");
-    expect(within(row).getByRole("button", { name: "Remove from saved" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Read article later" })).toBeInTheDocument();
     await user.click(within(row).getByRole("button", { name: /Async Rust without/ }));
     expect(row).toHaveClass("read");
-    expect(within(row).getByRole("button", { name: "Remove from saved" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Read article later" })).toBeInTheDocument();
   });
 
-  it("keeps saved and later independent", async () => {
+  it("keeps reading and Read later independent", async () => {
     const user = userEvent.setup(); renderApp();
     await screen.findByRole("heading",{name:"Async Rust without the hidden machinery",level:1});
     const reader=screen.getByRole("article",{name:"Article reader"});
-    expect(within(reader).getByRole("button", { name: "Unsave" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(reader).getByRole("button", { name: "Mark read" })).toHaveAttribute("aria-pressed", "true");
     expect(within(reader).getByRole("button", { name: "Read later" })).toHaveAttribute("aria-pressed", "false");
     await user.click(within(reader).getByRole("button", { name: "Read later" }));
-    expect(within(reader).getByRole("button", { name: "Unsave" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(reader).getByRole("button", { name: "Mark read" })).toHaveAttribute("aria-pressed", "true");
     expect(within(reader).getByRole("button", { name: "Remove from later" })).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -297,11 +297,11 @@ describe("reader application", () => {
     renderApp();
     const reader=await screen.findByRole("article",{name:"Article reader"});
     const actions=[...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip")];
-    expect(actions).toHaveLength(5);
+    expect(actions).toHaveLength(3);
     for(const action of actions){
       expect(action.dataset.tooltip).toBe(action.getAttribute("aria-label"));
     }
-    expect(actions.map(action=>action.dataset.tooltip)).toEqual(["Mark read","Unsave","Read later","Move to trash","Open original"]);
+    expect(actions.map(action=>action.dataset.tooltip)).toEqual(["Mark read","Read later","Open original"]);
   });
 
   it("preserves the discovered source title when adding a subscription", async () => {
@@ -343,8 +343,6 @@ describe("reader application", () => {
     await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 });
     fireEvent.keyDown(window,{key:"j"});
     expect(await screen.findByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
-    fireEvent.keyDown(window,{key:"s"});
-    expect(await screen.findByRole("button", { name: "Unsave" })).toBeVisible();
     fireEvent.keyDown(window,{key:"l"});
     expect(await screen.findByRole("button", { name: "Remove from later" })).toBeVisible();
     fireEvent.keyDown(window,{key:"k"});

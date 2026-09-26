@@ -5,8 +5,6 @@ test("reader navigation and article states", async ({ page }) => {
   await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
   await page.getByRole("heading", { name: "The durable queue is the product", level: 2 }).click();
   await expect(page.getByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
-  await page.getByRole("article", { name: "Article reader" }).getByRole("button", { name: "Save" }).click();
-  await expect(page.getByRole("button", { name: "Unsave" })).toHaveAttribute("aria-pressed", "true");
   const reader = page.getByRole("article", { name: "Article reader" });
   await reader.getByRole("button", { name: "Read later" }).click();
   await expect(reader.getByRole("button", { name: "Remove from later" })).toBeVisible();

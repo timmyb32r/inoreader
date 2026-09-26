@@ -2,7 +2,7 @@
 
 A self-hosted, multi-account feed reader built as a modular Rust application with
 a Preact interface. It supports isolated workspaces, RSS/Atom/JSON Feed sources,
-exact article deduplication, saved/later/trash state, subscription rules, full-text
+exact article deduplication, an unread-only Feed and Read later, subscription rules, full-text
 archival, OPML, and browser-backed Web feeds. Search is intentionally an inert
 placeholder in v1.
 

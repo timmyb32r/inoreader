@@ -28,7 +28,7 @@ function setup(options: SetupOptions = {}) {
 async function previewRule(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("New literal phrase"), "career");
   await user.selectOptions(screen.getByLabelText("Match field"), "title");
-  await user.selectOptions(screen.getByLabelText("Action"), "move_to_trash");
+  await user.selectOptions(screen.getByLabelText("Action"), "mark_read");
   await user.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText("7");
 }
@@ -39,7 +39,7 @@ describe("RulesDialog", () => {
     expect(screen.getByText("3")).toBeVisible(); expect(screen.getByText("12")).toBeVisible();
     expect(screen.getByText(/shared with linked subscriptions/)).toBeVisible();
     await user.click(screen.getByText("Sample article IDs (2)")); expect(screen.getByText("article-a")).toBeVisible();
-    expect(calls.find(call => call.path.startsWith("/api/rules/preview"))?.body).toMatchObject({ subscriptionId: "subscription", field: "title", phrase: "career", action: "move_to_trash", enabled: true });
+    expect(calls.find(call => call.path.startsWith("/api/rules/preview"))?.body).toMatchObject({ subscriptionId: "subscription", field: "title", phrase: "career", action: "mark_read", enabled: true });
     expect(screen.getByRole("button", { name: "Save & apply existing" })).toBeEnabled();
     await user.type(screen.getByLabelText("New literal phrase"), "s");
     expect(screen.getByText(/rule changed/i)).toBeVisible(); expect(screen.getByRole("button", { name: "Save & apply existing" })).toBeDisabled();

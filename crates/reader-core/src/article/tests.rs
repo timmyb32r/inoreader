@@ -7,58 +7,52 @@ use url::Url;
 fn merge_follows_conservative_state_contract() {
     let a = ArticleState {
         read: true,
-        saved: true,
-        trashed: true,
         ..Default::default()
     };
     let b = ArticleState {
         read: false,
         later: true,
         protect_unread: true,
-        ..Default::default()
     };
     assert_eq!(
         ArticleState::merge([a, b]).unwrap(),
         ArticleState {
             read: false,
-            saved: true,
             later: true,
-            trashed: false,
             protect_unread: true,
-            protect_restored: false
         }
     );
+}
+
+#[test]
+fn obsolete_article_flags_require_explicit_conversion() {
+    for name in ["saved", "trashed", "protect_restored"] {
+        let mut value = serde_json::to_value(ArticleState::default()).unwrap();
+        value[name] = true.into();
+        assert!(serde_json::from_value::<ArticleState>(value).is_err());
+    }
 }
 
 fn state(bits: u8) -> ArticleState {
     ArticleState {
         read: bits & 1 != 0,
-        saved: bits & 2 != 0,
-        later: bits & 4 != 0,
-        trashed: bits & 8 != 0,
-        protect_unread: bits & 16 != 0,
-        protect_restored: bits & 32 != 0,
+        later: bits & 2 != 0,
+        protect_unread: bits & 4 != 0,
     }
 }
 
 #[test]
 fn every_pair_of_state_combinations_obeys_merge_truth_table() {
-    for left_bits in 0..64 {
-        for right_bits in 0..64 {
+    for left_bits in 0..8 {
+        for right_bits in 0..8 {
             let left = state(left_bits);
             let right = state(right_bits);
             let merged = ArticleState::merge([left, right]).expect("two values");
             assert_eq!(merged.read, left.read && right.read);
-            assert_eq!(merged.saved, left.saved || right.saved);
             assert_eq!(merged.later, left.later || right.later);
-            assert_eq!(merged.trashed, left.trashed && right.trashed);
             assert_eq!(
                 merged.protect_unread,
                 left.protect_unread || right.protect_unread
-            );
-            assert_eq!(
-                merged.protect_restored,
-                left.protect_restored || right.protect_restored
             );
         }
     }
@@ -68,11 +62,8 @@ fn every_pair_of_state_combinations_obeys_merge_truth_table() {
 fn split_copies_state_and_first_arrival_then_becomes_independent() {
     let original_state = ArticleState {
         read: true,
-        saved: true,
         later: true,
-        trashed: true,
         protect_unread: true,
-        protect_restored: true,
     };
     let first_arrived_at = Utc.with_ymd_and_hms(2026, 9, 25, 1, 2, 3).unwrap();
     let key = DedupKey {

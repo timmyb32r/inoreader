@@ -3,6 +3,22 @@ use reader_application::Argon2idPolicy;
 use reader_core::{StateEvent, WorkspaceStateEvent};
 
 struct NoDiscovery;
+
+#[test]
+fn feed_is_unread_only_and_complete_history_requires_a_subscription() {
+    for removed in ["all", "unread", "saved", "trash"] {
+        assert!(article_page_request(removed, None, None, None).is_err());
+    }
+    assert!(article_page_request("feed", None, None, None).is_ok());
+    assert!(article_page_request("later", None, None, None).is_ok());
+    assert!(article_page_request("subscription", None, None, None).is_err());
+    let id = SubscriptionId::new();
+    assert!(article_page_request("subscription", Some(id), None, None).is_ok());
+    assert!(article_page_request("feed", Some(id), None, None).is_err());
+    for patch in [r#"{"saved":true}"#, r#"{"trash":true}"#] {
+        assert!(serde_json::from_str::<ArticleStatePatch>(patch).is_err());
+    }
+}
 #[async_trait::async_trait]
 impl FeedDiscovery for NoDiscovery {
     async fn discover(&self, _: Url) -> Result<FeedPreviewResponse, String> {

@@ -6,7 +6,7 @@ import { articles } from "../test/mockClient";
 
 function recordingClient(){
  const calls:{path:string;init?:RequestInit}[]=[];
- const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"This Week in Rust",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles,total:articles.length,unreadTotal:articles.filter(a=>!a.read&&!a.trash).length}};
+ const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"sub",name:"This Week in Rust",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles,total:articles.length,unreadTotal:articles.filter(a=>!a.read).length}};
  const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{
   calls.push({path,init}); if(path.startsWith("/api/bootstrap"))return bootstrap as T;
   if(path.startsWith("/api/articles?"))return {articles:[{...articles[0],id:"finance",title:"Finance workspace article"}],total:1,unreadTotal:1} as T;
@@ -45,7 +45,7 @@ describe("workspace and subscription isolation",()=>{
   const bootstrap:Bootstrap={account:{id:"account",displayName:"Test",initials:"T"},workspaces:[{id:"ws",name:"Data",archived:false}],activeWorkspaceId:"ws",subscriptions:[{id:"chosen",name:"Chosen feed",count:1,status:"active",lastUpdate:"now"}],articlePage:{articles:[{...articles[0],id:"chosen-article",subscriptionIds:["chosen"]},{...articles[1],id:"other-article",subscriptionIds:["other"]}],total:2,unreadTotal:2}};
   const transport:Transport=async<T,>(path:string,init?:RequestInit)=>{calls.push({path,init});if(path.startsWith("/api/bootstrap"))return bootstrap as T;if(path.startsWith("/api/articles?"))return bootstrap.articlePage as T;return undefined as T;};
   const user=userEvent.setup();render(<App client={new ApiClient(transport)}/>);await screen.findByRole("heading",{name:/^Feed \(\d+\)$/});await user.click(screen.getByRole("button",{name:/Chosen feed/}));await user.click(screen.getByRole("button",{name:"Mark all read"}));
-  await waitFor(()=>{const call=calls.find(item=>item.path.includes("mark-all-read"));expect(JSON.parse(String(call?.init?.body))).toEqual({view:"all",subscription_id:"chosen"});});
+  await waitFor(()=>{const call=calls.find(item=>item.path.includes("mark-all-read"));expect(JSON.parse(String(call?.init?.body))).toEqual({view:"subscription",subscription_id:"chosen"});});
   await user.click(screen.getByRole("button",{name:/^Feed \(\d+\)$/}));expect(screen.getByText("The durable queue is the product").closest("article")).not.toHaveClass("read");
  });
 });

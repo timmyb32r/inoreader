@@ -4,7 +4,7 @@ import { reportApiRequest } from "../performanceDiagnostics";
 export type ArticlePage = { articles:Article[]; total:number; unreadTotal:number; newerCursor?:string; olderCursor?:string };
 export type ArticlePagePosition = { view?:string; subscriptionId?:string|null; cursor?:string; direction?:"older"|"newer" };
 export type Bootstrap = { account: { id: string; displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articlePage:ArticlePage };
-export type RuleDraft = { id?: string; subscriptionId: string; field: "title" | "full_text" | "title_or_full_text"; phrase: string; action: "mark_read" | "move_to_trash"; enabled: boolean };
+export type RuleDraft = { id?: string; subscriptionId: string; field: "title" | "full_text" | "title_or_full_text"; phrase: string; action: "mark_read"; enabled: boolean };
 export type RulePreview = { matchedArticles:number; sharedArticles:number; totalSubscriptionArticles:number; sampleArticleIds:string[] };
 export type RuleApplicationStatusName = "queued"|"running"|"completed"|"cancelled"|"failed";
 export type RuleApplicationAccepted = { operationId:string; status:RuleApplicationStatusName };
@@ -67,7 +67,7 @@ export class ApiClient {
   subscriptionExtraction = (id:string) => this.transport<SubscriptionExtraction>(`/api/subscriptions/${enc(id)}/extraction`);
   previewSubscriptionSourceUrl = (id:string,url:string) => this.transport<SourceUrlPreview>(`/api/subscriptions/${enc(id)}/source-url/preview`,json("POST",{url}));
   commitSubscriptionSourceUrl = (id:string,previewToken:string) => this.transport<Subscription>(`/api/subscriptions/${enc(id)}/source-url`,json("PUT",{previewToken}));
-  updateArticle = (workspaceId: string, articleId: string, state: Partial<Pick<Article,"read"|"saved"|"later"|"trash">>) => this.transport<Article>(`/api/articles/${enc(articleId)}/state?workspace_id=${enc(workspaceId)}`, json("POST", state));
+  updateArticle = (workspaceId: string, articleId: string, state: Partial<Pick<Article,"read"|"later">>) => this.transport<Article>(`/api/articles/${enc(articleId)}/state?workspace_id=${enc(workspaceId)}`, json("POST", state));
   markAllRead = (workspaceId: string, view: string, subscriptionId?: string) => this.transport<void>(`/api/workspaces/${enc(workspaceId)}/articles/mark-all-read`, json("POST", { view, subscription_id: subscriptionId }));
   renameWorkspace = (id: string, name: string) => this.transport<Workspace>(`/api/workspaces/${enc(id)}`, json("PATCH", { name }));
   createWorkspace = (name: string) => this.transport<Workspace>("/api/workspaces", json("POST", { name }));
