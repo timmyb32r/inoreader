@@ -422,6 +422,68 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .await
         .expect("list second workspace articles")
         .is_empty());
+
+    let mut legacy = Subscription::new(
+        SubscriptionId::new(),
+        workspace_a.id(),
+        url::Url::parse("http://china-radio-international.duckdns.org:8080/example.xml")
+            .expect("valid legacy URL"),
+        "Legacy title".into(),
+    );
+    legacy.set_personal_note("private retained note".into());
+    repository
+        .save_subscription(None, legacy.clone())
+        .await
+        .expect("create legacy personal_feed subscription");
+    let canonical = url::Url::parse("https://publisher.example/blog").expect("valid publisher URL");
+    let preexisting_id = SourceId::from_uuid(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        canonical.as_str().as_bytes(),
+    ));
+    let preexisting = SourceDefinition::new(preexisting_id, canonical, SourceKind::Auto)
+        .expect("valid preexisting automatic source");
+    sqlx::query("INSERT INTO sources(id,revision,document) VALUES($1,0,$2)")
+        .bind(preexisting_id.as_uuid().to_string())
+        .bind(serde_json::to_string(&preexisting).expect("serialize preexisting source"))
+        .execute(pool)
+        .await
+        .expect("insert preexisting source without URL index");
+    let migrated = repository
+        .migrate_personal_feed_links_atomic(
+            workspace_a.id(),
+            vec![(
+                "example".into(),
+                serde_json::json!({
+                    "id":"example",
+                    "name":"Original publisher",
+                    "url":"https://publisher.example/blog",
+                    "link_selector":"article a[href]",
+                    "url_pattern":"^https://publisher\\.example/posts/"
+                }),
+            )],
+        )
+        .await
+        .expect("migrate legacy subscription atomically");
+    assert_eq!(migrated, 1);
+    let migrated = repository
+        .subscription(legacy.id())
+        .await
+        .expect("read migrated subscription");
+    assert_eq!(migrated.personal_note(), "private retained note");
+    assert_eq!(
+        migrated.source_url_exact(),
+        "https://publisher.example/blog"
+    );
+    let source_document: String = sqlx::query_scalar(
+        "SELECT s.document FROM sources s JOIN subscription_sources x ON x.source_id=s.id WHERE x.subscription_id=$1",
+    )
+    .bind(legacy.id().as_uuid().to_string())
+    .fetch_one(pool)
+    .await
+    .expect("read migrated collector");
+    let source: SourceDefinition =
+        serde_json::from_str(&source_document).expect("deserialize migrated collector");
+    assert!(matches!(source.kind(), SourceKind::WebPage(_)));
 }
 
 async fn verify_lease_fencing(pool: &PgPool) {

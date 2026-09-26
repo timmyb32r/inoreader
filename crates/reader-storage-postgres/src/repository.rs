@@ -758,6 +758,220 @@ fn table(kind: &str) -> Result<&'static str, RepositoryError> {
     }
 }
 
+impl PostgresRepository {
+    /// Replaces legacy `personal_feed` proxy URLs with their original validated
+    /// recipes in one transaction. Subscription identity and all user-owned
+    /// state remain unchanged; the obsolete source rows are retained so prior
+    /// article provenance stays queryable.
+    pub async fn migrate_personal_feed_links_atomic(
+        &self,
+        workspace: WorkspaceId,
+        configurations: Vec<(String, serde_json::Value)>,
+    ) -> Result<usize, RepositoryError> {
+        let configurations = configurations.into_iter().collect::<HashMap<_, _>>();
+        let mut tx = self.pool.begin().await.map_err(storage)?;
+        let documents: Vec<String> = sqlx::query_scalar(
+            "SELECT document FROM subscriptions WHERE document::jsonb ->> 'workspace_id'=$1 FOR UPDATE",
+        )
+        .bind(workspace.as_uuid().to_string())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(storage)?;
+        let mut migrated = 0usize;
+        for document in documents {
+            let mut subscription: Subscription =
+                serde_json::from_str(&document).map_err(storage)?;
+            let legacy = subscription.source_url();
+            if legacy.host_str() != Some("china-radio-international.duckdns.org") {
+                continue;
+            }
+            let Some(source_id) = legacy
+                .path()
+                .strip_prefix('/')
+                .and_then(|value| value.strip_suffix(".xml"))
+                .map(str::to_owned)
+            else {
+                return Err(storage("legacy personal_feed URL has an unsupported path"));
+            };
+            let configuration = configurations
+                .get(&source_id)
+                .ok_or_else(|| storage(format!("missing personal_feed recipe for {source_id}")))?;
+            let raw: ImportedSeedConfig = serde_json::from_value(configuration.clone())
+                .map_err(|e| storage(format!("invalid imported source recipe: {e}")))?;
+            if raw.id != source_id {
+                return Err(storage("personal_feed URL and recipe identity differ"));
+            }
+            let exact_url = raw.feed_url.as_deref().unwrap_or(&raw.url).to_owned();
+            let canonical = url::Url::parse(&exact_url)
+                .map_err(|_| storage("invalid personal_feed canonical URL"))?;
+            let kind = imported_source_kind(configuration)?;
+            let proposed_id = SourceId::from_uuid(Uuid::new_v5(
+                &Uuid::NAMESPACE_URL,
+                canonical.as_str().as_bytes(),
+            ));
+            let proposed = SourceDefinition::new(proposed_id, canonical.clone(), kind.clone())
+                .map_err(storage)?;
+            let actual_source = if let Some(existing) =
+                sqlx::query_scalar::<_, String>("SELECT source_id FROM source_urls WHERE url=$1")
+                    .bind(canonical.as_str())
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(storage)?
+            {
+                let existing_id = SourceId::from_uuid(Uuid::parse_str(&existing).map_err(storage)?);
+                let (revision, existing_document): (i64, String) =
+                    sqlx::query_as("SELECT revision,document FROM sources WHERE id=$1 FOR UPDATE")
+                        .bind(&existing)
+                        .fetch_one(&mut *tx)
+                        .await
+                        .map_err(storage)?;
+                let existing_source: SourceDefinition =
+                    serde_json::from_str(&existing_document).map_err(storage)?;
+                if existing_source.kind() != &kind {
+                    if !matches!(existing_source.kind(), SourceKind::Auto)
+                        || existing_source.url() != &canonical
+                    {
+                        return Err(storage(format!(
+                            "canonical source {} already exists with a different collector",
+                            canonical
+                        )));
+                    }
+                    let upgraded =
+                        SourceDefinition::new(existing_id, canonical.clone(), kind.clone())
+                            .map_err(storage)?;
+                    sqlx::query(
+                        "UPDATE sources SET revision=$1,document=$2 WHERE id=$3 AND revision=$4",
+                    )
+                    .bind(revision + 1)
+                    .bind(serde_json::to_string(&upgraded).map_err(storage)?)
+                    .bind(&existing)
+                    .bind(revision)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(storage)?;
+                }
+                existing_id
+            } else {
+                let proposed_key = proposed_id.as_uuid().to_string();
+                if let Some(document) = sqlx::query_scalar::<_, String>(
+                    "SELECT document FROM sources WHERE id=$1 FOR UPDATE",
+                )
+                .bind(&proposed_key)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage)?
+                {
+                    let existing: SourceDefinition =
+                        serde_json::from_str(&document).map_err(storage)?;
+                    if existing != proposed {
+                        if !matches!(existing.kind(), SourceKind::Auto)
+                            || existing.url() != &canonical
+                        {
+                            return Err(storage("personal_feed source identity collision"));
+                        }
+                        sqlx::query(
+                            "UPDATE sources SET revision=revision+1,document=$1 WHERE id=$2",
+                        )
+                        .bind(serde_json::to_string(&proposed).map_err(storage)?)
+                        .bind(&proposed_key)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(storage)?;
+                    }
+                } else if cas_tx(&mut tx, "sources", proposed_key.clone(), None, 0, &proposed)
+                    .await?
+                    != 1
+                {
+                    return Err(storage("personal_feed source identity collision"));
+                }
+                sqlx::query("INSERT INTO source_urls(url,source_id) VALUES($1,$2)")
+                    .bind(canonical.as_str())
+                    .bind(proposed_key)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(storage)?;
+                proposed_id
+            };
+            let old_revision = subscription.revision();
+            let old_key = workspace_feed_url_key(workspace, subscription.source_url_exact());
+            subscription
+                .replace_source(canonical.clone(), exact_url.clone(), raw.name.clone())
+                .map_err(storage)?;
+            let new_key = workspace_feed_url_key(workspace, subscription.source_url_exact());
+            if let Some(owner) = sqlx::query_scalar::<_, String>(
+                "SELECT subscription_id FROM workspace_feed_urls WHERE id=$1 FOR UPDATE",
+            )
+            .bind(&new_key)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(storage)?
+            {
+                if owner != subscription.id().as_uuid().to_string() {
+                    return Err(storage(format!(
+                        "canonical source {} is already subscribed in this workspace",
+                        canonical
+                    )));
+                }
+            }
+            if cas_tx(
+                &mut tx,
+                "subscriptions",
+                subscription.id().as_uuid().to_string(),
+                Some(old_revision),
+                subscription.revision(),
+                &subscription,
+            )
+            .await?
+                != 1
+            {
+                return Err(RepositoryError::Conflict);
+            }
+            sqlx::query("DELETE FROM workspace_feed_urls WHERE id=$1")
+                .bind(old_key)
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
+            sqlx::query("INSERT INTO workspace_feed_urls(id,subscription_id) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET subscription_id=EXCLUDED.subscription_id")
+                .bind(new_key).bind(subscription.id().as_uuid().to_string()).execute(&mut *tx).await.map_err(storage)?;
+            sqlx::query("UPDATE subscription_sources SET source_id=$1 WHERE subscription_id=$2")
+                .bind(actual_source.as_uuid().to_string())
+                .bind(subscription.id().as_uuid().to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
+            if let Some(recipe) = editable_recipe_document(workspace, &canonical, &kind)? {
+                sqlx::query("INSERT INTO web_feed_recipes(id,revision,document) VALUES($1,0,$2) ON CONFLICT(id) DO UPDATE SET revision=web_feed_recipes.revision+1,document=EXCLUDED.document")
+                    .bind(subscription.id().as_uuid().to_string()).bind(recipe).execute(&mut *tx).await.map_err(storage)?;
+            } else {
+                sqlx::query("DELETE FROM web_feed_recipes WHERE id=$1")
+                    .bind(subscription.id().as_uuid().to_string())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(storage)?;
+            }
+            let item = if matches!(kind, SourceKind::WebPage(_) | SourceKind::BuiltIn(_)) {
+                WorkItem::CollectWebFeed {
+                    source_id: actual_source,
+                }
+            } else {
+                WorkItem::PollSource {
+                    source_id: actual_source,
+                }
+            };
+            let identity = format!("personal-feed-migration/{source_id}");
+            enqueue_work_tx(
+                &mut tx,
+                Uuid::new_v5(&Uuid::NAMESPACE_OID, identity.as_bytes()),
+                &item,
+            )
+            .await?;
+            migrated += 1;
+        }
+        tx.commit().await.map_err(storage)?;
+        Ok(migrated)
+    }
+}
+
 async fn cas_tx<T: Serialize>(
     tx: &mut Transaction<'_, Postgres>,
     kind: &str,

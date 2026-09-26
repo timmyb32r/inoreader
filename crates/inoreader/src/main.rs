@@ -52,6 +52,10 @@ enum Command {
         workspace_id: uuid::Uuid,
     },
     MigrateYdbToPostgres,
+    MigratePersonalFeedLinks {
+        inventory: PathBuf,
+        workspace_id: uuid::Uuid,
+    },
     BootstrapAdmin {
         username: String,
     },
@@ -80,6 +84,26 @@ struct SeedItem {
     status: String,
     configuration: serde_json::Value,
     note: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceInventory {
+    schema_version: u64,
+    expected_source_count: usize,
+    origin: serde_json::Value,
+    sources: Vec<InventorySource>,
+    pdf_inventory: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InventorySource {
+    id: String,
+    configuration: serde_json::Value,
+    adapter_kind: String,
+    historical_observations: serde_json::Value,
+    fixture_coverage: String,
 }
 
 type PreparedSeed = (String, Subscription, SeedSource, serde_json::Value);
@@ -198,6 +222,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             println!("YDB to PostgreSQL migration verified");
+        }
+        Command::MigratePersonalFeedLinks {
+            inventory,
+            workspace_id,
+        } => {
+            let raw = std::fs::read(inventory)?;
+            let inventory: SourceInventory = serde_json::from_slice(&raw)?;
+            if inventory.schema_version != 1
+                || inventory.sources.len() != inventory.expected_source_count
+                || inventory.expected_source_count != 42
+            {
+                return Err("personal_feed inventory is incomplete or unsupported".into());
+            }
+            let _ = (&inventory.origin, &inventory.pdf_inventory);
+            let mut ids = std::collections::HashSet::new();
+            let values = inventory
+                .sources
+                .into_iter()
+                .map(|source| {
+                    if source.id.is_empty() || !ids.insert(source.id.clone()) {
+                        return Err("personal_feed inventory has invalid identities");
+                    }
+                    let _ = (
+                        source.adapter_kind,
+                        source.historical_observations,
+                        source.fixture_coverage,
+                    );
+                    Ok((source.id, source.configuration))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
+            let repository =
+                PostgresRepository::new(pool, policy, config.ingest.initial_feed_items)?;
+            repository
+                .workspace(WorkspaceId::from_uuid(workspace_id))
+                .await?;
+            let migrated = repository
+                .migrate_personal_feed_links_atomic(WorkspaceId::from_uuid(workspace_id), values)
+                .await?;
+            println!("migrated {migrated} legacy personal_feed subscriptions atomically");
         }
         Command::Serve => {
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
