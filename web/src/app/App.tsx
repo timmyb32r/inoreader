@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { Article, Subscription, Workspace } from "./data";
-import { ApiError, type ApiClient,type WebFeedRecipeView } from "../api/client";
+import { ApiError, type ApiClient,type ArticlePage,type WebFeedRecipeView } from "../api/client";
 import { Icon, type IconName } from "../ui/Icon";
 import { AutofillResistantField, AutofillResistantSelect, AutofillResistantTextarea } from "../ui/fields";
 import { Dialog } from "./Dialog";
@@ -19,14 +19,15 @@ const views: { id: View; label: string; icon: IconName }[] = [
 ];
 
 export function App({ client }: { client: ApiClient }) {
+  const initialPagePosition=useRef(readArticlePagePosition()).current;
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
-  const [view, setView] = useState<View>("all");
+  const [view, setView] = useState<View>(initialPagePosition.view);
   const [articles, setArticles] = useState<Article[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedId, setSelectedId] = useState("");
-  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<string | null>(null);
+  const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<string | null>(initialPagePosition.subscriptionId);
   const [modal, setModal] = useState<Modal>(null);
   const [mobilePanel, setMobilePanel] = useState<"nav" | "list" | "article">("list");
   const [newCount, setNewCount] = useState(0);
@@ -41,7 +42,12 @@ export function App({ client }: { client: ApiClient }) {
   const [markingAll, setMarkingAll] = useState(false);
   const [refreshingSubscription, setRefreshingSubscription] = useState(false);
   const [editingRecipe,setEditingRecipe]=useState<WebFeedRecipeView|null>(null);
-  const [showingNew, setShowingNew] = useState(false);
+  const [pageTotal,setPageTotal]=useState(0);
+  const [unreadTotal,setUnreadTotal]=useState(0);
+  const [newerCursor,setNewerCursor]=useState<string>();
+  const [olderCursor,setOlderCursor]=useState<string>();
+  const [pageNumber,setPageNumber]=useState(initialPagePosition.batch);
+  const [paging,setPaging]=useState(false);
   const [locationPath,setLocationPath]=useState(window.location.pathname);
   const [sourceMenu,setSourceMenu]=useState<string|null>(null);
   const [pendingArticleMutations, setPendingArticleMutations] = useState<Set<string>>(()=>new Set());
@@ -65,9 +71,9 @@ export function App({ client }: { client: ApiClient }) {
   useEffect(() => {
     let active = true;
     if (signedIn !== null) return () => { active = false; };
-    client.bootstrap().then((data) => { if (!active) return; articlesRef.current=data.articles; setSignedIn(true); setLoadError(""); setAccount(data.account); setWorkspaces(data.workspaces); setWorkspaceId(data.activeWorkspaceId); setSubscriptions(data.subscriptions); setArticles(data.articles); setSelectedId(data.articles[0]?.id ?? ""); setNewCount(data.newArticleCount); setArchived(data.workspaces.find((item) => item.id === data.activeWorkspaceId)?.archived ?? false); }).catch((error: Error) => { if (!active) return; if (error instanceof ApiError && error.status === 401) setSignedIn(false); else setLoadError(error.message); });
+    client.bootstrap(initialPagePosition).then((data) => { if (!active) return; const page=data.articlePage;articlesRef.current=page.articles; setSignedIn(true); setLoadError(""); setAccount(data.account); setWorkspaces(data.workspaces); setWorkspaceId(data.activeWorkspaceId); setSubscriptions(data.subscriptions); setArticles(page.articles); setSelectedId(page.articles[0]?.id ?? "");setPageTotal(page.total);setUnreadTotal(page.unreadTotal);setNewerCursor(page.newerCursor);setOlderCursor(page.olderCursor);setNewCount(0); setArchived(data.workspaces.find((item) => item.id === data.activeWorkspaceId)?.archived ?? false); }).catch((error: Error) => { if (!active) return; if (error instanceof ApiError && error.status === 401) setSignedIn(false); else setLoadError(error.message); });
     return () => { active = false; if (noticeTimer.current) window.clearTimeout(noticeTimer.current); };
-  }, [client, signedIn]);
+  }, [client, signedIn, initialPagePosition]);
   useEffect(() => { const unauthorized = () => setSignedIn(false); window.addEventListener("reader:unauthorized", unauthorized); return () => window.removeEventListener("reader:unauthorized", unauthorized); }, []);
   useEffect(()=>{const pop=()=>{const next=window.location.pathname;if(!confirmDiscard()){history.pushState({},"",locationPathRef.current);return}locationPathRef.current=next;setLocationPath(next)};window.addEventListener("popstate",pop);return()=>window.removeEventListener("popstate",pop)},[]);
   useEffect(() => {
@@ -125,16 +131,18 @@ export function App({ client }: { client: ApiClient }) {
     mutationQueue.current.set(id, request);
   };
   const open = (id: string) => { setSelectedId(id); update(id, { read: true }); setMobilePanel("article"); };
-  const chooseView = (next: View) => { setView(next); setSelectedSubscriptionId(null); setMobilePanel("list"); };
+  const applyPage=(page:ArticlePage,batch:number)=>{articlesRef.current=page.articles;setArticles(page.articles);setSelectedId(page.articles[0]?.id??"");setPageTotal(page.total);setUnreadTotal(page.unreadTotal);setNewerCursor(page.newerCursor);setOlderCursor(page.olderCursor);setPageNumber(batch)};
+  const loadPage=(nextView:View,subscriptionId:string|null,cursor?:string,direction?:"older"|"newer",batch=1)=>{if(paging||!workspaceId)return;setPaging(true);client.listArticles(workspaceId,nextView,subscriptionId??undefined,cursor,direction).then(page=>{applyPage(page,batch);setView(nextView);setSelectedSubscriptionId(subscriptionId);writeArticlePagePosition(nextView,subscriptionId,cursor,direction,batch)}).catch((error:Error)=>announce(error.message)).finally(()=>setPaging(false))};
+  const chooseView = (next: View) => { loadPage(next,null,undefined,undefined,1); setMobilePanel("list"); };
   const announce = (message: string) => { setNotice(message); if (noticeTimer.current) window.clearTimeout(noticeTimer.current); noticeTimer.current = window.setTimeout(() => setNotice(""), 1600); };
   const switchWorkspace = (id: string) => {
     if (id === workspaceId || switchingWorkspace) return;
     const generation = ++workspaceGeneration.current;
     setSwitchingWorkspace(true);
-    Promise.all([client.listArticles(id, "all"), client.listSubscriptions(id)]).then(([nextArticles, nextSubscriptions]) => {
+    Promise.all([client.listArticles(id, "all"), client.listSubscriptions(id)]).then(([nextPage, nextSubscriptions]) => {
       if (generation !== workspaceGeneration.current) return;
-      setWorkspaceId(id); setArticles(nextArticles); setSubscriptions(nextSubscriptions); setSelectedId(nextArticles[0]?.id ?? "");
-      setSelectedSubscriptionId(null); setView("all"); setArchived(workspaces.find(item => item.id === id)?.archived ?? false); setNewCount(0); setMobilePanel("list");
+      setWorkspaceId(id); applyPage(nextPage,1); setSubscriptions(nextSubscriptions);
+      setSelectedSubscriptionId(null); setView("all");writeArticlePagePosition("all",null,undefined,undefined,1); setArchived(workspaces.find(item => item.id === id)?.archived ?? false); setNewCount(0); setMobilePanel("list");
     }).catch((error: Error) => { if (generation === workspaceGeneration.current) announce(error.message); }).finally(() => { if (generation === workspaceGeneration.current) setSwitchingWorkspace(false); });
   };
   const markAllRead = () => {
@@ -183,16 +191,16 @@ export function App({ client }: { client: ApiClient }) {
       </div>
     </header>
     <main class={subscriptionRoute ? "entity-shell" : "reader-grid"}>
-      {subscriptionRoute ? <SubscriptionsPage client={client} workspaceId={workspaceId} workspaceName={workspace} subscriptions={subscriptions} articles={articles} subscriptionId={subscriptionRoute[1] ? decodeURIComponent(subscriptionRoute[1]) : undefined} initialTab={subscriptionRoute[2]==="activity"?"activity":"overview"} onBack={()=>navigate(subscriptionRoute[1]?"/subscriptions":"/")} onOpenDetail={(id)=>navigate(`/subscriptions/${encodeURIComponent(id)}`)} onOpenArticles={(id)=>{if(navigate("/")){setSelectedSubscriptionId(id);setView("all");setMobilePanel("list")}}} onRefresh={(id)=>client.refreshSubscription(id)} onPause={(id)=>{setSelectedSubscriptionId(id);setModal("pause")}} onChanged={(changed)=>setSubscriptions(items=>items.map(item=>item.id===changed.id?changed:item))} onEditRecipe={(recipe)=>{setEditingRecipe(recipe);setModal("webfeed")}} onDirtyNoteChange={(dirty)=>{dirtySubscriptionNote.current=dirty}}/> : <>
+      {subscriptionRoute ? <SubscriptionsPage client={client} workspaceId={workspaceId} workspaceName={workspace} subscriptions={subscriptions} articles={articles} subscriptionId={subscriptionRoute[1] ? decodeURIComponent(subscriptionRoute[1]) : undefined} initialTab={subscriptionRoute[2]==="activity"?"activity":"overview"} onBack={()=>navigate(subscriptionRoute[1]?"/subscriptions":"/")} onOpenDetail={(id)=>navigate(`/subscriptions/${encodeURIComponent(id)}`)} onOpenArticles={(id)=>{if(navigate("/")){loadPage("all",id,undefined,undefined,1);setMobilePanel("list")}}} onRefresh={(id)=>client.refreshSubscription(id)} onPause={(id)=>{setSelectedSubscriptionId(id);setModal("pause")}} onChanged={(changed)=>setSubscriptions(items=>items.map(item=>item.id===changed.id?changed:item))} onEditRecipe={(recipe)=>{setEditingRecipe(recipe);setModal("webfeed")}} onDirtyNoteChange={(dirty)=>{dirtySubscriptionNote.current=dirty}}/> : <>
       <aside class={`sidebar panel-mobile-${mobilePanel === "nav" ? "show" : "hide"}`} aria-label="Reader navigation">
         <WorkspacePicker value={workspace} workspaces={workspaces} archived={archived} pending={switchingWorkspace} onChange={switchWorkspace} onArchive={() => setModal("archive")} />
         <nav class="nav-block" aria-label="Library">
-          {views.map((item) => <button key={item.id} class={view === item.id && !selectedSubscriptionId ? "nav-item active" : "nav-item"} onClick={() => chooseView(item.id)}><Icon name={item.icon}/><span>{item.label}</span>{item.id === "unread" && <em>{articles.filter((a) => !a.read && !a.trash).length}</em>}</button>)}
+          {views.map((item) => <button key={item.id} disabled={paging} class={view === item.id && !selectedSubscriptionId ? "nav-item active" : "nav-item"} onClick={() => chooseView(item.id)}><Icon name={item.icon}/><span>{item.label}</span>{item.id === "unread" && <em>{unreadTotal}</em>}</button>)}
           <button class="nav-item nav-item--disabled" disabled title="Search is coming later"><Icon name="search"/><span>Search</span><small>Later</small></button>
         </nav>
         <div class="sidebar__section-title"><button class="sidebar__section-link" onClick={()=>navigate("/subscriptions")}>Subscriptions</button><button class="icon-button icon-button--small" aria-label="Add subscription" onClick={() => setModal("add")}><Icon name="plus" size={16}/></button></div>
         <nav class="source-list" aria-label="Subscriptions">
-          {subscriptions.filter(item=>item.status!=="archived").map((item) => <div class={item.error?"source-entry source-entry--error":"source-entry"} key={item.id}><button class={selectedSubscriptionId === item.id ? "source active" : "source"} title={item.error??item.continuation??(item.lastUpdate?`Last successful update: ${item.lastUpdate}`:"Waiting for the first successful update")} onClick={() => { setSelectedSubscriptionId(item.id); setView("all"); setMobilePanel("list"); }}><SubscriptionIcon name={item.name} sourceUrl={item.sourceUrl}/><span class="source__copy"><span class="source__name">{item.name}</span>{item.error?<small class="source__status source__status--error">Update failed · {item.error}</small>:item.incomplete?<small class="source__status">Incomplete · continuation queued</small>:item.lastUpdate?<small class="source__status">Updated {item.lastUpdate}</small>:<small class="source__status">Waiting for first update</small>}</span>{item.status === "paused" ? <Icon name="pause" size={14}/> : <em>{item.count}</em>}</button>{item.error&&<button class="source-error-log" aria-label={`Open update log for ${item.name}`} title="Open update log" onClick={()=>navigate(`/subscriptions/${encodeURIComponent(item.id)}/activity`)}>Log</button>}<button class="source-more" aria-label="More options" title={`More options for ${item.name}`} aria-expanded={sourceMenu===item.id} onClick={()=>setSourceMenu(sourceMenu===item.id?null:item.id)}><Icon name="dots" size={16}/></button>{sourceMenu===item.id&&<div class="source-menu"><button onClick={()=>{setSourceMenu(null);navigate(`/subscriptions/${encodeURIComponent(item.id)}`)}}>View details</button><button onClick={()=>{setSourceMenu(null);client.refreshSubscription(item.id).then(()=>announce("Refresh queued")).catch((e:Error)=>announce(e.message))}}>Refresh</button><button onClick={()=>{setSourceMenu(null);setSelectedSubscriptionId(item.id);setModal("pause")}}>Pause</button></div>}</div>)}
+          {subscriptions.filter(item=>item.status!=="archived").map((item) => <div class={item.error?"source-entry source-entry--error":"source-entry"} key={item.id}><button disabled={paging} class={selectedSubscriptionId === item.id ? "source active" : "source"} title={item.error??item.continuation??(item.lastUpdate?`Last successful update: ${item.lastUpdate}`:"Waiting for the first successful update")} onClick={() => { loadPage("all",item.id,undefined,undefined,1);setMobilePanel("list"); }}><SubscriptionIcon name={item.name} sourceUrl={item.sourceUrl}/><span class="source__copy"><span class="source__name">{item.name}</span>{item.error?<small class="source__status source__status--error">Update failed · {item.error}</small>:item.incomplete?<small class="source__status">Incomplete · continuation queued</small>:item.lastUpdate?<small class="source__status">Updated {item.lastUpdate}</small>:<small class="source__status">Waiting for first update</small>}</span>{item.status === "paused" ? <Icon name="pause" size={14}/> : <em>{item.count}</em>}</button>{item.error&&<button class="source-error-log" aria-label={`Open update log for ${item.name}`} title="Open update log" onClick={()=>navigate(`/subscriptions/${encodeURIComponent(item.id)}/activity`)}>Log</button>}<button class="source-more" aria-label="More options" title={`More options for ${item.name}`} aria-expanded={sourceMenu===item.id} onClick={()=>setSourceMenu(sourceMenu===item.id?null:item.id)}><Icon name="dots" size={16}/></button>{sourceMenu===item.id&&<div class="source-menu"><button onClick={()=>{setSourceMenu(null);navigate(`/subscriptions/${encodeURIComponent(item.id)}`)}}>View details</button><button onClick={()=>{setSourceMenu(null);client.refreshSubscription(item.id).then(()=>announce("Refresh queued")).catch((e:Error)=>announce(e.message))}}>Refresh</button><button onClick={()=>{setSourceMenu(null);setSelectedSubscriptionId(item.id);setModal("pause")}}>Pause</button></div>}</div>)}
         </nav>
         <div class="sidebar__footer"><button class="nav-item" disabled={!selectedSubscription} title={selectedSubscription ? "Manage rules for this subscription" : "Choose a subscription first"} onClick={() => setModal("rules")}><Icon name="rule"/><span>Rules</span></button><button class="nav-item" onClick={() => setModal("shortcuts")}><Icon name="settings"/><span>Settings & shortcuts</span></button></div>
       </aside>
@@ -200,11 +208,12 @@ export function App({ client }: { client: ApiClient }) {
         <header class="list-header"><div><p class="eyebrow">{selectedSubscription ? "Subscription" : workspace}</p><h1>{selectedSubscription?.name ?? views.find((v) => v.id === view)?.label}</h1></div><div class="list-header__tools"><button class="icon-button" aria-label="Refresh subscription" aria-busy={refreshingSubscription} disabled={!selectedSubscription || refreshingSubscription} title={selectedSubscription ? "Refresh this subscription" : "Choose a subscription to refresh"} onClick={() => { if (!selectedSubscription || refreshingSubscription) return; setRefreshingSubscription(true); client.refreshSubscription(selectedSubscription.id).then(()=>announce("Refresh queued")).catch((error:Error)=>announce(error.message)).finally(()=>setRefreshingSubscription(false)); }}>{refreshingSubscription ? <span class="spinner"/> : <Icon name="refresh"/>}</button></div></header>
         {archived && <div class="archive-strip"><Icon name="archive"/><span>This workspace is archived. {workspaces.find(item=>item.id===workspaceId)?.archiveReason ? `Reason: ${workspaces.find(item=>item.id===workspaceId)?.archiveReason}. ` : ""}Your library remains readable.</span></div>}
         {selectedSubscription?.status==="paused"&&<div class="archive-strip"><Icon name="pause"/><span>Paused{selectedSubscription.reason?`: ${selectedSubscription.reason}`:""}{selectedSubscription.reasonAt?` · ${new Date(selectedSubscription.reasonAt).toLocaleString("en-US")}`:""}</span></div>}
-        {newCount > 0 && <button class="new-items" disabled={showingNew} aria-busy={showingNew} onClick={() => {if(showingNew)return;const requestWorkspace=workspaceId;setShowingNew(true);client.listArticles(requestWorkspace,"all").then(next=>{if(requestWorkspace===workspaceId){setArticles(current=>{const byId=new Map(current.map(item=>[item.id,item]));next.forEach(item=>byId.set(item.id,item));return [...byId.values()]});setNewCount(0);announce("New articles added");}}).catch((error:Error)=>announce(error.message)).finally(()=>{if(requestWorkspace===workspaceId)setShowingNew(false)});}}><span>{showingNew?<><span class="spinner"/>Loading…</>:`${newCount} new articles`}</span><span>Show now</span></button>}
-        <div class="list-controls"><button disabled={markingAll || !filtered.some(article => !article.read)} aria-busy={markingAll} onClick={markAllRead}>{markingAll ? <span class="spinner"/> : <Icon name="check" size={15}/>} {markingAll ? "Marking…" : "Mark all read"}</button><span>{filtered.length} articles</span><span>Newest first</span></div>
+        {newCount > 0 && <button class="new-items" disabled={paging} aria-busy={paging} onClick={() => loadPage(view,selectedSubscriptionId,undefined,undefined,1)}><span>{paging?<><span class="spinner"/>Loading…</>:`${newCount} new articles`}</span><span>Show now</span></button>}
+        <div class="list-controls"><button disabled={markingAll || !filtered.some(article => !article.read)} aria-busy={markingAll} onClick={markAllRead}>{markingAll ? <span class="spinner"/> : <Icon name="check" size={15}/>} {markingAll ? "Marking…" : "Mark all read"}</button><span>{pageTotal?`${(pageNumber-1)*50+1}–${Math.min(pageNumber*50,pageTotal)} of ${pageTotal}`:"0 articles"}</span><span>Newest first</span></div>
         <div class="article-scroll">
           {filtered.length ? filtered.map((article) => <ArticleRow article={article} selected={article.id === selected?.id} savePending={pendingArticleMutations.has(`${article.id}:saved`)} onOpen={() => open(article.id)} onSave={() => update(article.id, { saved: !article.saved })}/>) : <EmptyState view={view}/>} 
         </div>
+        <nav class="article-pager" aria-label="Article pages"><button disabled={!newerCursor||paging} aria-busy={paging} onClick={()=>newerCursor&&loadPage(view,selectedSubscriptionId,newerCursor,"newer",Math.max(1,pageNumber-1))}>← Newer</button><span>50 articles per request</span><button disabled={!olderCursor||paging} aria-busy={paging} onClick={()=>olderCursor&&loadPage(view,selectedSubscriptionId,olderCursor,"older",pageNumber+1)}>Older →</button></nav>
       </section>
       {selected ? <ArticleReader article={selected} pending={pendingArticleMutations} className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`} onBack={() => setMobilePanel("list")} onUpdate={(patch) => update(selected.id, patch)} onRefresh={() => client.refreshFullText(workspaceId, selected.id)} onNotice={announce}/> : <section class="article-reader empty-reader"><Icon name="inbox" size={28}/><p>Select an article to read</p></section>}
       </>}
@@ -240,6 +249,24 @@ export function formatArticleDate(value: string): string {
   const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
   const pad = (part: number) => String(part).padStart(2, "0");
   return `${date.getUTCFullYear()}-${months[date.getUTCMonth()]}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
+type StoredArticlePagePosition = { view: View; subscriptionId: string | null; cursor?: string; direction?: "older" | "newer"; batch: number };
+function readArticlePagePosition(): StoredArticlePagePosition {
+  const query = new URLSearchParams(window.location.search);
+  const requestedView = query.get("view");
+  const view: View = views.some((item) => item.id === requestedView) ? requestedView as View : "all";
+  const direction = query.get("direction");
+  return { view, subscriptionId: query.get("subscription"), cursor: query.get("cursor") ?? undefined, direction: direction === "newer" || direction === "older" ? direction : undefined, batch: Math.max(1, Number.parseInt(query.get("batch") ?? "1", 10) || 1) };
+}
+function writeArticlePagePosition(view: View, subscriptionId: string | null, cursor?: string, direction?: "older" | "newer", batch = 1) {
+  const query = new URLSearchParams();
+  if (view !== "all") query.set("view", view);
+  if (subscriptionId) query.set("subscription", subscriptionId);
+  if (cursor) query.set("cursor", cursor);
+  if (direction) query.set("direction", direction);
+  if (batch > 1) query.set("batch", String(batch));
+  history.replaceState({}, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
 }
 
 function StateButton({ icon, label, active, pending, onClick }: { icon: IconName; label: string; active?: boolean; pending:boolean;onClick: () => void }) { return <button class={`icon-button toolbar-tooltip ${active ? "active" : ""}`} data-tooltip={label} disabled={pending} aria-busy={pending} aria-label={label} aria-pressed={active} onClick={onClick}>{pending?<span class="spinner"/>:<Icon name={icon}/>}</button>; }

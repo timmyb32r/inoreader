@@ -1,7 +1,9 @@
 import type { Article, Subscription, Workspace } from "../app/data";
 import { reportApiRequest } from "../performanceDiagnostics";
 
-export type Bootstrap = { account: { displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articles: Article[]; newArticleCount: number };
+export type ArticlePage = { articles:Article[]; total:number; unreadTotal:number; newerCursor?:string; olderCursor?:string };
+export type ArticlePagePosition = { view?:string; subscriptionId?:string|null; cursor?:string; direction?:"older"|"newer" };
+export type Bootstrap = { account: { displayName: string; initials: string }; workspaces: Workspace[]; activeWorkspaceId: string; subscriptions: Subscription[]; articlePage:ArticlePage };
 export type RuleDraft = { id?: string; subscriptionId: string; field: "title" | "full_text" | "title_or_full_text"; phrase: string; action: "mark_read" | "move_to_trash"; enabled: boolean };
 export type RulePreview = { matchedArticles:number; sharedArticles:number; totalSubscriptionArticles:number; sampleArticleIds:string[] };
 export type RuleApplicationStatusName = "queued"|"running"|"completed"|"cancelled"|"failed";
@@ -48,13 +50,13 @@ export class ApiError extends Error { constructor(readonly status: number, messa
 
 export class ApiClient {
   constructor(private readonly transport: Transport) {}
-  bootstrap = () => this.transport<Bootstrap>("/api/bootstrap");
+  bootstrap = (position?:ArticlePagePosition) => this.transport<Bootstrap>(`/api/bootstrap${articlePageQuery(position)}`);
   signIn = (username: string, password: string) => this.transport<void>("/api/auth/sessions", json("POST", { username, password }));
   signOut = () => this.transport<void>("/api/auth/sessions", { method: "DELETE" });
   acceptInvite = (token: string, username: string, password: string) => this.transport<void>("/api/auth/invites/accept", json("POST", { token, username, password }));
   changePassword = (currentPassword: string, newPassword: string) => this.transport<void>("/api/auth/password/change", json("POST", { current_password: currentPassword, new_password: newPassword }));
   resetPassword = (token: string, newPassword: string) => this.transport<void>("/api/auth/password/reset", json("POST", { token, new_password: newPassword }));
-  listArticles = (workspaceId: string, view: string, subscriptionId?: string) => this.transport<Article[]>(`/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}`);
+  listArticles = (workspaceId: string, view: string, subscriptionId?: string, cursor?:string, direction?:"older"|"newer") => this.transport<ArticlePage>(`/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}${cursor?`&cursor=${enc(cursor)}&direction=${direction??"older"}`:""}`);
   getArticle = (workspaceId: string, articleId: string) => this.transport<Article>(`/api/articles/${enc(articleId)}?workspace_id=${enc(workspaceId)}`);
   listSubscriptions = (workspaceId: string) => this.transport<Subscription[]>(`/api/subscriptions?workspace_id=${enc(workspaceId)}`);
   getSubscription = (id:string) => this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}`);
@@ -113,4 +115,5 @@ export const fetchTransport: Transport = async <T>(path: string, init?: RequestI
 };
 export const apiClient = new ApiClient(fetchTransport);
 const enc = encodeURIComponent;
+const articlePageQuery=(position?:ArticlePagePosition)=>{if(!position)return"";const query=new URLSearchParams();if(position.view)query.set("view",position.view);if(position.subscriptionId)query.set("subscription_id",position.subscriptionId);if(position.cursor){query.set("cursor",position.cursor);query.set("direction",position.direction??"older")}const value=query.toString();return value?`?${value}`:""};
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

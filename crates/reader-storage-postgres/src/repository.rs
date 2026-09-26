@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reader_application::{
-    AccountRecord, ArticlePresentation, InviteRecord, PasswordResetRecord, ReaderRepository,
-    RepositoryError, RuleApplicationProgress, SeedSource, SessionRecord, SourceUrlPreviewRecord,
-    SubscriptionActivity, SubscriptionStats,
+    AccountRecord, ArticlePage, ArticlePageDirection, ArticlePageRequest, ArticlePresentation,
+    InviteRecord, PasswordResetRecord, ReaderRepository, RepositoryError, RuleApplicationProgress,
+    SeedSource, SessionRecord, SourceUrlPreviewRecord, SubscriptionActivity, SubscriptionStats,
 };
 use reader_core::{
     AccountId, Article, ArticleId, DurableJob, ReasonPolicy, Rule, RuleId, SourceId, Subscription,
@@ -205,6 +205,111 @@ impl PostgresRepository {
             );
         }
         Ok(result)
+    }
+
+    async fn summary_presentations(
+        &self,
+        workspace: WorkspaceId,
+        articles: Vec<Article>,
+    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
+        if articles.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<String> = articles
+            .iter()
+            .map(|value| value.id.as_uuid().to_string())
+            .collect();
+        let rows: Vec<(String, String, String, Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT o.article_id,o.source_record_id,s.document,m.document,f.document FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2)",
+        )
+        .bind(workspace.as_uuid().to_string())
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(storage)?;
+        let mut origins: HashMap<
+            String,
+            Vec<(
+                String,
+                Subscription,
+                Option<reader_ingest::ContentManifestPointer>,
+                Option<String>,
+            )>,
+        > = HashMap::new();
+        for (article_id, record, subscription, manifest, failure) in rows {
+            let subscription: Subscription =
+                serde_json::from_str(&subscription).map_err(storage)?;
+            subscription.validate(self.reason_policy).map_err(storage)?;
+            if subscription.workspace_id() != workspace {
+                return Err(storage("article origin crosses workspace ownership"));
+            }
+            let manifest = manifest
+                .map(|value| serde_json::from_str(&value))
+                .transpose()
+                .map_err(storage)?;
+            let failure = failure
+                .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+                .and_then(|value| {
+                    value
+                        .get("diagnostic")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_owned)
+                });
+            origins
+                .entry(article_id)
+                .or_default()
+                .push((record, subscription, manifest, failure));
+        }
+        articles
+            .into_iter()
+            .map(|article| {
+                let rows = origins
+                    .remove(&article.id.as_uuid().to_string())
+                    .unwrap_or_default();
+                let mut subscription_ids = Vec::new();
+                let mut subscription_titles = Vec::new();
+                let mut latest = None;
+                let mut failure_reason = None;
+                for (record, subscription, manifest, failure) in rows {
+                    if !subscription_ids.contains(&subscription.id()) {
+                        subscription_ids.push(subscription.id());
+                    }
+                    if !subscription_titles
+                        .iter()
+                        .any(|value| value == subscription.title())
+                    {
+                        subscription_titles.push(subscription.title().to_owned());
+                    }
+                    if let Some(manifest) = manifest {
+                        if latest.as_ref().is_none_or(
+                            |(_, current): &(String, reader_ingest::ContentManifestPointer)| {
+                                current.fetched_at < manifest.fetched_at
+                            },
+                        ) {
+                            latest = Some((record, manifest));
+                        }
+                    }
+                    if failure.is_some() {
+                        failure_reason = failure;
+                    }
+                }
+                let full_text_status = if latest.is_some() {
+                    "ready"
+                } else if failure_reason.is_some() {
+                    "failed"
+                } else {
+                    "pending"
+                };
+                Ok(ArticlePresentation {
+                    article,
+                    subscription_ids,
+                    subscription_titles,
+                    safe_html: None,
+                    full_text_status,
+                    failure_reason,
+                })
+            })
+            .collect()
     }
 }
 
@@ -1850,6 +1955,73 @@ impl ReaderRepository for PostgresRepository {
         workspace: WorkspaceId,
     ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
         self.presentations(workspace, false).await
+    }
+    async fn article_summary_page(
+        &self,
+        workspace: WorkspaceId,
+        request: ArticlePageRequest,
+    ) -> Result<ArticlePage, RepositoryError> {
+        let workspace_id = workspace.as_uuid().to_string();
+        let subscription_id = request
+            .subscription_id
+            .map(|value| value.as_uuid().to_string());
+        let cursor_time = request
+            .cursor
+            .as_ref()
+            .map(|value| value.arrived_at.to_rfc3339());
+        let cursor_id = request
+            .cursor
+            .as_ref()
+            .map(|value| article_key(workspace, value.article_id));
+        let predicate = "split_part(a.id,'/',1)=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=split_part(a.id,'/',2) AND o.subscription_id=$2)) AND CASE $3 WHEN 'unread' THEN NOT (a.document::jsonb #>> '{state,read}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'saved' THEN (a.document::jsonb #>> '{state,saved}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'later' THEN (a.document::jsonb #>> '{state,later}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean WHEN 'trash' THEN (a.document::jsonb #>> '{state,trashed}')::boolean ELSE NOT (a.document::jsonb #>> '{state,trashed}')::boolean END";
+        let total_sql = format!("SELECT COUNT(*) FROM articles a WHERE {predicate}");
+        let total: i64 = sqlx::query_scalar(&total_sql)
+            .bind(&workspace_id)
+            .bind(&subscription_id)
+            .bind(&request.view)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(storage)?;
+        let unread_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM articles a WHERE split_part(a.id,'/',1)=$1 AND NOT (a.document::jsonb #>> '{state,read}')::boolean AND NOT (a.document::jsonb #>> '{state,trashed}')::boolean")
+            .bind(&workspace_id).fetch_one(&self.pool).await.map_err(storage)?;
+        let comparison = match request.direction {
+            ArticlePageDirection::Older => "<",
+            ArticlePageDirection::Newer => ">",
+        };
+        let order = match request.direction {
+            ArticlePageDirection::Older => "DESC",
+            ArticlePageDirection::Newer => "ASC",
+        };
+        let page_sql = format!("SELECT a.document FROM articles a WHERE {predicate} AND ($4::text IS NULL OR (a.document::jsonb ->> 'first_arrived_at', a.id) {comparison} ($4, $5)) ORDER BY (a.document::jsonb ->> 'first_arrived_at') {order}, a.id {order} LIMIT $6");
+        let mut articles: Vec<Article> = sqlx::query_scalar::<_, String>(&page_sql)
+            .bind(&workspace_id)
+            .bind(&subscription_id)
+            .bind(&request.view)
+            .bind(&cursor_time)
+            .bind(&cursor_id)
+            .bind(i64::try_from(request.limit.saturating_add(1)).map_err(storage)?)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(storage)?
+            .into_iter()
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .collect::<Result<_, _>>()?;
+        let has_extra = articles.len() > request.limit;
+        articles.truncate(request.limit);
+        if request.direction == ArticlePageDirection::Newer {
+            articles.reverse();
+        }
+        let articles = self.summary_presentations(workspace, articles).await?;
+        Ok(ArticlePage {
+            articles,
+            total: usize::try_from(total).map_err(storage)?,
+            unread_total: usize::try_from(unread_total).map_err(storage)?,
+            has_newer: request.cursor.is_some()
+                && (request.direction == ArticlePageDirection::Older || has_extra),
+            has_older: (request.cursor.is_some()
+                && request.direction == ArticlePageDirection::Newer)
+                || has_extra,
+        })
     }
     async fn article_presentation(
         &self,

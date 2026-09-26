@@ -7,11 +7,25 @@ import { ApiClient, ApiError } from "../api/client";
 const renderApp = () => render(<App client={mockClient()}/>);
 
 describe("reader application", () => {
+  beforeEach(()=>history.replaceState({},"","/"));
+  it("replaces the visible batch through stable cursors and preserves the position in the URL", async () => {
+    const client=mockClient();
+    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[articles[0]],total:100,unreadTotal:75,olderCursor:"older-1"}});
+    const list=vi.spyOn(client,"listArticles").mockResolvedValue({articles:[articles[1]],total:100,unreadTotal:75,newerCursor:"newer-2",olderCursor:"older-2"});
+    render(<App client={client}/>);
+    expect(await screen.findByText("1–50 of 100")).toBeVisible();
+    await userEvent.setup().click(screen.getByRole("button",{name:"Older →"}));
+    expect(await screen.findByRole("heading",{name:articles[1].title,level:2})).toBeVisible();
+    expect(list).toHaveBeenCalledWith("ws","all",undefined,"older-1","older");
+    expect(window.location.search).toContain("cursor=older-1");
+    expect(window.location.search).toContain("batch=2");
+    expect(screen.getByRole("navigation",{name:"Article pages"})).toHaveClass("article-pager");
+  });
   it("formats article timestamps in stable UTC and omits relative age and missing authors", async () => {
     expect(formatArticleDate("2026-09-26T14:06:26.316789727+00:00")).toBe("2026-sep-26 14:06:26");
     const timestamped={...articles[0],age:"2026-09-26T14:06:26.316789727+00:00",author:undefined};
     const client=mockClient();
-    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articles:[timestamped],newArticleCount:0});
+    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[timestamped],total:1,unreadTotal:1}});
     render(<App client={client}/>);
     expect((await screen.findAllByText("2026-sep-26 14:06:26")).length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/Unknown author| ago/)).not.toBeInTheDocument();
@@ -23,7 +37,7 @@ describe("reader application", () => {
     vi.spyOn(client, "bootstrap").mockResolvedValue({
       account: { displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
-      activeWorkspaceId: "ws", subscriptions: [failed], articles: [], newArticleCount: 0,
+      activeWorkspaceId: "ws", subscriptions: [failed], articlePage:{articles:[],total:0,unreadTotal:0},
     });
     vi.spyOn(client, "getSubscription").mockResolvedValue(failed);
     const activity = vi.spyOn(client, "subscriptionActivity").mockResolvedValue([{
@@ -78,8 +92,7 @@ describe("reader application", () => {
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
       activeWorkspaceId: "ws",
       subscriptions: [],
-      articles: [pending],
-      newArticleCount: 0,
+      articlePage:{articles:[pending],total:1,unreadTotal:1},
     });
     const getArticle = vi.spyOn(client, "getArticle").mockResolvedValue(
       { ...pending, fullText: "ready", body: ["Extracted body"] },
@@ -111,7 +124,7 @@ describe("reader application", () => {
     vi.spyOn(client, "bootstrap").mockResolvedValue({
       account: { displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
-      activeWorkspaceId: "ws", subscriptions: [], articles: [formatted], newArticleCount: 0,
+      activeWorkspaceId: "ws", subscriptions: [], articlePage:{articles:[formatted],total:1,unreadTotal:1},
     });
     render(<App client={client}/>);
 
@@ -201,7 +214,7 @@ describe("reader application", () => {
   it("preserves the discovered source title when adding a subscription", async () => {
     const calls:{path:string;body?:Record<string,unknown>}[]=[];
     const base=mockClient();
-    const client=new ApiClient(async<T,>(path:string,init?:RequestInit)=>{calls.push({path,body:init?.body?JSON.parse(String(init.body)):undefined});if(path==="/api/bootstrap")return await base.bootstrap() as T;if(path==="/api/feeds/discover")return {title:"Canonical source title",kind:"rss",url:"https://example.com/feed",articles:[]} as T;if(path==="/api/subscriptions")return {id:"added",name:"Canonical source title",count:0,unreadCount:0,status:"active"} as T;return undefined as T});
+    const client=new ApiClient(async<T,>(path:string,init?:RequestInit)=>{calls.push({path,body:init?.body?JSON.parse(String(init.body)):undefined});if(path.startsWith("/api/bootstrap"))return await base.bootstrap() as T;if(path==="/api/feeds/discover")return {title:"Canonical source title",kind:"rss",url:"https://example.com/feed",articles:[]} as T;if(path==="/api/subscriptions")return {id:"added",name:"Canonical source title",count:0,unreadCount:0,status:"active"} as T;return undefined as T});
     const user=userEvent.setup();render(<App client={client}/>);await user.click(await screen.findByRole("button",{name:"Add subscription"}));await user.type(screen.getByLabelText("Feed or website URL"),"https://example.com/feed");await user.click(screen.getByRole("button",{name:"Check URL"}));await user.click(await within(screen.getByRole("dialog")).findByRole("button",{name:"Add subscription"}));
     expect(calls.find(call=>call.path==="/api/subscriptions")?.body).toEqual({workspace_id:"ws",url:"https://example.com/feed",title:"Canonical source title"});
   });

@@ -206,6 +206,23 @@ pub struct ArticleListQuery {
     pub view: Option<String>,
     pub subscription_id: Option<Uuid>,
     pub cursor: Option<String>,
+    pub direction: Option<String>,
+}
+#[derive(Debug, Default, Deserialize)]
+pub struct BootstrapQuery {
+    pub view: Option<String>,
+    pub subscription_id: Option<Uuid>,
+    pub cursor: Option<String>,
+    pub direction: Option<String>,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArticlePageView {
+    pub articles: Vec<ArticleView>,
+    pub total: usize,
+    pub unread_total: usize,
+    pub newer_cursor: Option<String>,
+    pub older_cursor: Option<String>,
 }
 #[derive(Debug, Deserialize)]
 pub struct WorkspaceQuery {
@@ -415,8 +432,7 @@ pub struct BootstrapResponse {
     pub workspaces: Vec<WorkspaceView>,
     pub active_workspace_id: Uuid,
     pub subscriptions: Vec<SubscriptionView>,
-    pub articles: Vec<ArticleView>,
-    pub new_article_count: usize,
+    pub article_page: ArticlePageView,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]

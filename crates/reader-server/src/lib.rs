@@ -7,8 +7,8 @@ use axum::{
 };
 use chrono::Utc;
 use reader_application::{
-    AuthError, AuthPolicy, AuthService, CommandError, ReaderRepository, ReaderService,
-    RepositoryError, SessionRecord,
+    ArticlePageCursor, ArticlePageDirection, ArticlePageRequest, AuthError, AuthPolicy,
+    AuthService, CommandError, ReaderRepository, ReaderService, RepositoryError, SessionRecord,
 };
 use reader_core::{
     AccountId, ActorId, ArticleId, ReasonPolicy, Rule, RuleAction, RuleField, RuleId, Subscription,
@@ -20,6 +20,7 @@ use url::Url;
 use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "reader_session";
+const ARTICLE_PAGE_SIZE: usize = 50;
 
 #[async_trait::async_trait]
 pub trait FeedDiscovery: Send + Sync {
@@ -362,6 +363,7 @@ async fn create_password_reset<R: ReaderRepository + 'static>(
 async fn bootstrap<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
     headers: HeaderMap,
+    Query(query): Query<BootstrapQuery>,
 ) -> Result<Json<BootstrapResponse>, ApiFailure> {
     let actor = auth(&s, &headers).await?;
     let workspaces = s.repository.workspaces_by_owner(actor.account.id).await?;
@@ -372,11 +374,18 @@ async fn bootstrap<R: ReaderRepository + 'static>(
         .map(Workspace::id)
         .ok_or(ApiFailure::NoWorkspace)?;
     let subscriptions = s.repository.subscriptions_by_workspace(active_id).await?;
-    let articles = s
+    let article_page = s
         .repository
-        .article_summaries_by_workspace(active_id)
+        .article_summary_page(
+            active_id,
+            article_page_request(
+                query.view.as_deref().unwrap_or("all"),
+                query.subscription_id.map(SubscriptionId::from_uuid),
+                query.cursor.as_deref(),
+                query.direction.as_deref(),
+            )?,
+        )
         .await?;
-    let unread = articles.iter().filter(|a| !a.article.state.read).count();
     let initials = actor
         .account
         .username
@@ -392,8 +401,7 @@ async fn bootstrap<R: ReaderRepository + 'static>(
         workspaces: workspaces.iter().map(workspace_view).collect(),
         active_workspace_id: active_id.as_uuid(),
         subscriptions: subscription_views(s.repository.as_ref(), &subscriptions).await?,
-        articles: articles.iter().map(article_view).collect(),
-        new_article_count: unread,
+        article_page: article_page_view(article_page),
     }))
 }
 async fn create_workspace<R: ReaderRepository + 'static>(
@@ -943,29 +951,23 @@ async fn list_articles<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
     headers: HeaderMap,
     Query(query): Query<ArticleListQuery>,
-) -> Result<Json<Vec<ArticleView>>, ApiFailure> {
+) -> Result<Json<ArticlePageView>, ApiFailure> {
     let actor = auth(&s, &headers).await?;
     let workspace = WorkspaceId::from_uuid(query.workspace_id);
     owned_workspace(&s, workspace, actor.account.id).await?;
-    let mut values = s
+    let values = s
         .repository
-        .article_summaries_by_workspace(workspace)
+        .article_summary_page(
+            workspace,
+            article_page_request(
+                query.view.as_deref().unwrap_or("all"),
+                query.subscription_id.map(SubscriptionId::from_uuid),
+                query.cursor.as_deref(),
+                query.direction.as_deref(),
+            )?,
+        )
         .await?;
-    if let Some(subscription_id) = query.subscription_id {
-        let subscription_id = SubscriptionId::from_uuid(subscription_id);
-        values.retain(|value| value.subscription_ids.contains(&subscription_id));
-    }
-    if let Some(view) = query.view.as_deref() {
-        values.retain(|a| match view {
-            "unread" => !a.article.state.read && !a.article.state.trashed,
-            "saved" => a.article.state.saved && !a.article.state.trashed,
-            "later" => a.article.state.later && !a.article.state.trashed,
-            "trash" => a.article.state.trashed,
-            "all" => !a.article.state.trashed,
-            _ => false,
-        })
-    }
-    Ok(Json(values.iter().map(article_view).collect()))
+    Ok(Json(article_page_view(values)))
 }
 async fn get_article<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
@@ -1591,6 +1593,77 @@ fn article_view(value: &reader_application::ArticlePresentation) -> ArticleView 
     view.full_text = value.full_text_status.to_owned();
     view.full_text_reason = value.failure_reason.clone();
     view
+}
+
+fn article_page_request(
+    view: &str,
+    subscription_id: Option<SubscriptionId>,
+    cursor: Option<&str>,
+    direction: Option<&str>,
+) -> Result<ArticlePageRequest, ApiFailure> {
+    if !matches!(view, "all" | "unread" | "saved" | "later" | "trash") {
+        return Err(ApiFailure::Validation("invalid article view"));
+    }
+    let direction = match direction.unwrap_or("older") {
+        "older" => ArticlePageDirection::Older,
+        "newer" => ArticlePageDirection::Newer,
+        _ => return Err(ApiFailure::Validation("invalid article page direction")),
+    };
+    let cursor = cursor.map(decode_article_cursor).transpose()?;
+    if direction == ArticlePageDirection::Newer && cursor.is_none() {
+        return Err(ApiFailure::Validation("newer direction requires a cursor"));
+    }
+    Ok(ArticlePageRequest {
+        view: view.to_owned(),
+        subscription_id,
+        cursor,
+        direction,
+        limit: ARTICLE_PAGE_SIZE,
+    })
+}
+
+fn article_page_view(page: reader_application::ArticlePage) -> ArticlePageView {
+    let newer_cursor = page
+        .has_newer
+        .then(|| page.articles.first().map(article_cursor))
+        .flatten();
+    let older_cursor = page
+        .has_older
+        .then(|| page.articles.last().map(article_cursor))
+        .flatten();
+    ArticlePageView {
+        articles: page.articles.iter().map(article_view).collect(),
+        total: page.total,
+        unread_total: page.unread_total,
+        newer_cursor,
+        older_cursor,
+    }
+}
+
+fn article_cursor(value: &reader_application::ArticlePresentation) -> String {
+    format!(
+        "{}.{}",
+        value.article.first_arrived_at.timestamp_micros(),
+        value.article.id.as_uuid()
+    )
+}
+
+fn decode_article_cursor(value: &str) -> Result<ArticlePageCursor, ApiFailure> {
+    let (micros, id) = value
+        .split_once('.')
+        .ok_or(ApiFailure::Validation("invalid article cursor"))?;
+    let micros = micros
+        .parse::<i64>()
+        .map_err(|_| ApiFailure::Validation("invalid article cursor"))?;
+    let arrived_at = chrono::DateTime::from_timestamp_micros(micros)
+        .ok_or(ApiFailure::Validation("invalid article cursor"))?;
+    let article_id = Uuid::parse_str(id)
+        .map(ArticleId::from_uuid)
+        .map_err(|_| ApiFailure::Validation("invalid article cursor"))?;
+    Ok(ArticlePageCursor {
+        arrived_at,
+        article_id,
+    })
 }
 fn article_domain_view(value: &reader_core::Article) -> ArticleView {
     let excerpt = value.key.description.clone().unwrap_or_default();

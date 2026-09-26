@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS articles (
     revision BIGINT NOT NULL CHECK (revision >= 0),
     document TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS articles_by_workspace_arrival
+    ON articles ((split_part(id, '/', 1)), ((document::jsonb ->> 'first_arrived_at')) DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,
@@ -177,6 +179,8 @@ CREATE TABLE IF NOT EXISTS library_origins (
 );
 CREATE INDEX IF NOT EXISTS by_subscription
     ON library_origins (subscription_id, workspace_id);
+CREATE INDEX IF NOT EXISTS origins_by_workspace_article
+    ON library_origins (workspace_id, article_id);
 
 CREATE TABLE IF NOT EXISTS staged_content_chunks (
     record_id TEXT NOT NULL,

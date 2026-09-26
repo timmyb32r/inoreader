@@ -72,3 +72,5 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .entity-name--with-icon{display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px}
 .entity-name--with-icon>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .entity-name--with-icon small{display:block;overflow:hidden;text-overflow:ellipsis}
+
+.article-pager{height:48px;flex:0 0 48px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:0 12px;border-top:1px solid var(--line);background:var(--surface);color:var(--text-muted);font-size:10px}.article-pager button{min-width:76px;height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--text);font:inherit;font-weight:600;cursor:pointer}.article-pager button:last-child{justify-self:end}.article-pager button:hover:not(:disabled){border-color:var(--accent);background:var(--accent-soft);color:var(--accent-deep)}.article-pager button:active:not(:disabled){transform:translateY(1px)}.article-pager button:disabled{cursor:default;opacity:.45}

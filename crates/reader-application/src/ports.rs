@@ -64,6 +64,32 @@ pub struct ArticlePresentation {
     pub full_text_status: &'static str,
     pub failure_reason: Option<String>,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ArticlePageDirection {
+    Older,
+    Newer,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArticlePageCursor {
+    pub arrived_at: DateTime<Utc>,
+    pub article_id: ArticleId,
+}
+#[derive(Clone, Debug)]
+pub struct ArticlePageRequest {
+    pub view: String,
+    pub subscription_id: Option<SubscriptionId>,
+    pub cursor: Option<ArticlePageCursor>,
+    pub direction: ArticlePageDirection,
+    pub limit: usize,
+}
+#[derive(Clone, Debug)]
+pub struct ArticlePage {
+    pub articles: Vec<ArticlePresentation>,
+    pub total: usize,
+    pub unread_total: usize,
+    pub has_newer: bool,
+    pub has_older: bool,
+}
 #[derive(Clone, Debug)]
 pub enum SeedSource {
     Feed,
@@ -317,6 +343,65 @@ pub trait ReaderRepository: Send + Sync {
         workspace: WorkspaceId,
     ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
         self.article_presentations_by_workspace(workspace).await
+    }
+    async fn article_summary_page(
+        &self,
+        workspace: WorkspaceId,
+        request: ArticlePageRequest,
+    ) -> Result<ArticlePage, RepositoryError> {
+        let mut all = self.article_summaries_by_workspace(workspace).await?;
+        let unread_total = all
+            .iter()
+            .filter(|value| !value.article.state.read && !value.article.state.trashed)
+            .count();
+        all.retain(|value| {
+            request
+                .subscription_id
+                .is_none_or(|subscription| value.subscription_ids.contains(&subscription))
+                && match request.view.as_str() {
+                    "unread" => !value.article.state.read && !value.article.state.trashed,
+                    "saved" => value.article.state.saved && !value.article.state.trashed,
+                    "later" => value.article.state.later && !value.article.state.trashed,
+                    "trash" => value.article.state.trashed,
+                    _ => !value.article.state.trashed,
+                }
+        });
+        all.sort_by_key(|value| {
+            (
+                std::cmp::Reverse(value.article.first_arrived_at),
+                std::cmp::Reverse(value.article.id.as_uuid()),
+            )
+        });
+        let total = all.len();
+        let matching = |value: &&ArticlePresentation| {
+            request.cursor.as_ref().is_none_or(|cursor| {
+                let key = (value.article.first_arrived_at, value.article.id.as_uuid());
+                let boundary = (cursor.arrived_at, cursor.article_id.as_uuid());
+                match request.direction {
+                    ArticlePageDirection::Older => key < boundary,
+                    ArticlePageDirection::Newer => key > boundary,
+                }
+            })
+        };
+        let mut selected: Vec<_> = all.iter().filter(matching).cloned().collect();
+        if request.direction == ArticlePageDirection::Newer {
+            selected.reverse();
+        }
+        let has_extra = selected.len() > request.limit;
+        selected.truncate(request.limit);
+        if request.direction == ArticlePageDirection::Newer {
+            selected.reverse();
+        }
+        Ok(ArticlePage {
+            has_newer: request.cursor.is_some()
+                && (request.direction == ArticlePageDirection::Older || has_extra),
+            has_older: (request.cursor.is_some()
+                && request.direction == ArticlePageDirection::Newer)
+                || has_extra,
+            articles: selected,
+            total,
+            unread_total,
+        })
     }
     async fn article_presentation(
         &self,
