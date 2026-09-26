@@ -512,6 +512,11 @@ async fn router_returns_not_found_for_cross_user_subscription_routes() {
     for (method, uri, body) in [
         ("GET", format!("/api/subscriptions/{id}"), None),
         ("GET", format!("/api/subscriptions/{id}/activity"), None),
+        (
+            "GET",
+            format!("/api/subscriptions/{id}/publication-history"),
+            None,
+        ),
         ("GET", format!("/api/subscriptions/{id}/extraction"), None),
         (
             "PUT",

@@ -40,6 +40,7 @@ export type VisualPreview = { snapshotToken:string; expiresAt:string; imageDataU
 export type VisualSelection = { selector:SelectorDraft; count:number; similarItems:VisualRect[] };
 export type OpmlPreview = { preview_id: string; subscriptions: number; warnings: string[] };
 export type SubscriptionActivity = { id:string; occurredAt:string; successful:boolean; durationMs?:number; discoveredItems?:number; diagnostic?:string };
+export type PublicationHistory = { days: { date: string; count: number }[]; undated: number; conflicting: number };
 export type SourceUrlPreview = { token:string; url:string; title:string; expiresAt:string };
 export type SubscriptionExtraction = { sourceType:string; feedUrls:string[]; recipeVersion?:number; recipeSummary?:string; lastPreview?:string };
 export type SubscriptionRuleView = { id:string; scope:"subscription"|"workspace"; summary:string; enabled:boolean };
@@ -62,6 +63,7 @@ export class ApiClient {
   getSubscription = (id:string) => this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}`);
   saveSubscriptionNote = (id:string,note:string) => this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}/note`,json("PUT",{note}));
   subscriptionActivity = (id:string) => this.transport<SubscriptionActivity[]>(`/api/subscriptions/${enc(id)}/activity`);
+  publicationHistory = (id:string) => this.transport<PublicationHistory>(`/api/subscriptions/${enc(id)}/publication-history`);
   subscriptionExtraction = (id:string) => this.transport<SubscriptionExtraction>(`/api/subscriptions/${enc(id)}/extraction`);
   previewSubscriptionSourceUrl = (id:string,url:string) => this.transport<SourceUrlPreview>(`/api/subscriptions/${enc(id)}/source-url/preview`,json("POST",{url}));
   commitSubscriptionSourceUrl = (id:string,previewToken:string) => this.transport<Subscription>(`/api/subscriptions/${enc(id)}/source-url`,json("PUT",{previewToken}));

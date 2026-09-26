@@ -1594,6 +1594,17 @@ impl ReaderRepository for PostgresRepository {
         }
         Ok(result)
     }
+    async fn publication_history(
+        &self,
+        owner: AccountId,
+        id: SubscriptionId,
+    ) -> Result<reader_application::PublicationHistory, RepositoryError> {
+        let subscription = self.subscription(id).await?;
+        if self.workspace(subscription.workspace_id()).await?.owner() != owner {
+            return Err(RepositoryError::NotFound);
+        }
+        crate::publication_history::load(&self.pool, subscription.workspace_id(), id).await
+    }
     async fn subscription_activity(
         &self,
         owner: AccountId,

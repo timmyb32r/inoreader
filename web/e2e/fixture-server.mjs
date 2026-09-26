@@ -19,6 +19,7 @@ createServer(async(request,response)=>{
  if(url.pathname.startsWith("/api/")){
   if(url.pathname==="/api/bootstrap")return json(response,200,{account:{displayName:"Fixture",initials:"FX"},workspaces,activeWorkspaceId:"ws",subscriptions:[subscription()],articles,newArticleCount:0});
   if(url.pathname==="/api/subscriptions"&&request.method==="GET")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[]:[subscription()]);
+  if(url.pathname==="/api/subscriptions/sub/publication-history")return json(response,200,{days:[],undated:2,conflicting:0});
   if(url.pathname==="/api/subscriptions/sub"&&request.method==="GET")return json(response,200,subscription());
   if(url.pathname==="/api/subscriptions/sub/note"&&request.method==="PUT"){personalNote=(await body(request)).note;return json(response,200,subscription());}
   if(url.pathname==="/api/articles")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[{...articles[0],id:"finance-1",title:"Finance workspace article"}]:articles);

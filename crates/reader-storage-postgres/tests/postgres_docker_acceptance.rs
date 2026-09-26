@@ -189,7 +189,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 33);
+    assert_eq!(table_count, 34); // Includes the subscription icon cache.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -325,6 +325,16 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .save_subscription(None, subscription_b.clone())
         .await
         .expect("create second subscription to shared source");
+
+    verify_publication_history(
+        pool,
+        &repository,
+        account_a.id,
+        &subscription_a,
+        account_b.id,
+        &subscription_b,
+    )
+    .await;
 
     subscription_a.rename("Private rename".into());
     repository
@@ -467,7 +477,7 @@ async fn verify_repository_isolation(pool: &PgPool) {
     let unrelated_id = format!("{}/{}", workspace_a.id().as_uuid(), Uuid::new_v4());
     sqlx::query("INSERT INTO articles (id, revision, document) VALUES ($1, 0, $2)")
         .bind(&unrelated_id)
-        .bind("not valid article JSON")
+        .bind(r#""not valid article JSON""#)
         .execute(pool)
         .await
         .expect("insert an unrelated article sentinel");
@@ -562,6 +572,86 @@ async fn verify_repository_isolation(pool: &PgPool) {
     let source: SourceDefinition =
         serde_json::from_str(&source_document).expect("deserialize migrated collector");
     assert!(matches!(source.kind(), SourceKind::WebPage(_)));
+}
+
+async fn verify_publication_history(
+    pool: &PgPool,
+    repository: &PostgresRepository,
+    owner: AccountId,
+    subscription: &Subscription,
+    other_owner: AccountId,
+    other: &Subscription,
+) {
+    assert!(repository
+        .publication_history(owner, subscription.id())
+        .await
+        .unwrap()
+        .days
+        .is_empty());
+    let mut records = Vec::new();
+    for (article, date, target) in [
+        ("pub-a", Some("2024-02-29T23:30:00-02:00"), subscription),
+        ("pub-a", Some("2024-03-01T02:00:00Z"), subscription),
+        ("pub-b", Some("2025-01-01T12:00:00Z"), subscription),
+        ("pub-c", None, subscription),
+        ("pub-d", Some("2025-01-01T00:00:00Z"), subscription),
+        ("pub-d", Some("2025-01-02T00:00:00Z"), subscription),
+        ("pub-foreign", Some("2020-01-01T00:00:00Z"), other),
+    ] {
+        let id = Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO source_records(id,revision,document) VALUES ($1,0,$2)")
+            .bind(&id)
+            .bind(serde_json::json!({"published_at": date}).to_string())
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO library_origins(workspace_id,article_id,subscription_id,source_record_id) VALUES ($1,$2,$3,$4)")
+            .bind(target.workspace_id().as_uuid().to_string()).bind(article)
+            .bind(target.id().as_uuid().to_string()).bind(&id).execute(pool).await.unwrap();
+        records.push(id);
+    }
+    let result = repository
+        .publication_history(owner, subscription.id())
+        .await
+        .unwrap();
+    assert_eq!(
+        result
+            .days
+            .iter()
+            .map(|day| (day.date.to_string(), day.count))
+            .collect::<Vec<_>>(),
+        vec![("2024-03-01".into(), 1), ("2025-01-01".into(), 1)]
+    );
+    assert_eq!((result.undated, result.conflicting), (1, 1));
+    assert!(matches!(
+        repository
+            .publication_history(other_owner, subscription.id())
+            .await,
+        Err(RepositoryError::NotFound)
+    ));
+    sqlx::query("UPDATE source_records SET document=$2 WHERE id=$1")
+        .bind(&records[0])
+        .bind(r#"{"published_at":"corrupt"}"#)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        repository
+            .publication_history(owner, subscription.id())
+            .await
+            .is_err(),
+        "invalid dates must not silently become undated"
+    );
+    sqlx::query("DELETE FROM library_origins WHERE source_record_id=ANY($1)")
+        .bind(&records)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM source_records WHERE id=ANY($1)")
+        .bind(&records)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn verify_lease_fencing(pool: &PgPool) {

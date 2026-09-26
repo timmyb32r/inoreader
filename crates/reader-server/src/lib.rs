@@ -138,6 +138,10 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
             get(subscription_activity::<R>),
         )
         .route(
+            "/api/subscriptions/{id}/publication-history",
+            get(publication_history::<R>),
+        )
+        .route(
             "/api/subscriptions/{id}/extraction",
             get(subscription_extraction::<R>),
         )
@@ -602,6 +606,18 @@ async fn subscription_activity<R: ReaderRepository + 'static>(
                 diagnostic: event.diagnostic,
             })
             .collect(),
+    ))
+}
+async fn publication_history<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<Json<reader_application::PublicationHistory>, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    Ok(Json(
+        s.repository
+            .publication_history(actor.account.id, SubscriptionId::from_uuid(id))
+            .await?,
     ))
 }
 async fn subscription_extraction<R: ReaderRepository + 'static>(

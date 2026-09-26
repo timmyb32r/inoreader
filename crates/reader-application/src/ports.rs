@@ -271,6 +271,19 @@ pub trait ReaderRepository: Send + Sync {
             "subscription activity is unavailable".into(),
         ))
     }
+    async fn publication_history(
+        &self,
+        owner: AccountId,
+        subscription: SubscriptionId,
+    ) -> Result<crate::PublicationHistory, RepositoryError> {
+        let subscription = self.subscription(subscription).await?;
+        if self.workspace(subscription.workspace_id()).await?.owner() != owner {
+            return Err(RepositoryError::NotFound);
+        }
+        Err(RepositoryError::Storage(
+            "publication history is unavailable for this storage backend".into(),
+        ))
+    }
     async fn save_subscription(
         &self,
         expected_revision: Option<u64>,

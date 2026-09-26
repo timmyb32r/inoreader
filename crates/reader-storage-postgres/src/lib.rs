@@ -1,6 +1,7 @@
 //! PostgreSQL persistence boundary for the reader application.
 
 mod ingest_store;
+mod publication_history;
 mod repository;
 pub mod schema;
 
