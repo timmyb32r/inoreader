@@ -22,9 +22,44 @@ fn escaped_article_markup_is_decoded_sanitized_and_resolved() {
     );
     assert!(rendered.html().contains("<picture>"));
     assert!(rendered.html().contains("https://example.test/hero.png"));
+    assert!(rendered
+        .html()
+        .contains("srcset=\"https://example.test/hero.webp 2x\""));
     assert!(rendered.html().contains("<h2>Section</h2>"));
     assert!(rendered.html().contains("Body &amp; details."));
     assert!(!rendered.html().contains("onerror"));
+}
+
+#[test]
+fn every_responsive_image_candidate_is_resolved_against_the_article() {
+    let raw = r#"<picture><source srcset="/small.webp 384w, /large.webp 1536w"><img src="/fallback.png" srcset="thumb.png 1x, hero.png 2x"></picture>"#;
+    let rendered = SafeRenderedContent::from_untrusted_html_with_base(
+        raw,
+        Some("https://publisher.test/posts/article"),
+    );
+
+    assert!(rendered.html().contains(
+        "srcset=\"https://publisher.test/small.webp 384w, https://publisher.test/large.webp 1536w\""
+    ));
+    assert!(rendered.html().contains(
+        "srcset=\"https://publisher.test/posts/thumb.png 1x, https://publisher.test/posts/hero.png 2x\""
+    ));
+    assert!(!rendered.html().contains("srcset=\"/"));
+}
+
+#[test]
+fn unsafe_or_malformed_responsive_image_candidates_are_removed() {
+    let raw = r#"<img src="/fallback.png" srcset="javascript:steal() 1x, /hero.png 2x"><source srcset="/hero.webp nonsense">"#;
+    let rendered = SafeRenderedContent::from_untrusted_html_with_base(
+        raw,
+        Some("https://publisher.test/posts/article"),
+    );
+
+    assert!(rendered
+        .html()
+        .contains("https://publisher.test/fallback.png"));
+    assert!(!rendered.html().contains("srcset"));
+    assert!(!rendered.html().contains("javascript:"));
 }
 
 #[test]

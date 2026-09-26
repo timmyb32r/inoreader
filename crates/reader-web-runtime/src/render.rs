@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use ammonia::{Builder, Url, UrlRelative};
 
 /// Raw source remains owned by storage. This renderer borrows it and returns a
@@ -56,6 +58,14 @@ impl SafeRenderedContent {
             .url_schemes(["http", "https"].into_iter().collect())
             .link_rel(Some("noopener noreferrer"));
         if let Some(base_url) = base_url.and_then(|value| Url::parse(value).ok()) {
+            let srcset_base = base_url.clone();
+            builder.attribute_filter(move |element, attribute, value| {
+                if matches!(element, "img" | "source") && attribute == "srcset" {
+                    rewrite_srcset(value, &srcset_base).map(Cow::Owned)
+                } else {
+                    Some(Cow::Borrowed(value))
+                }
+            });
             builder.url_relative(UrlRelative::RewriteWithBase(base_url));
         }
         Self {
@@ -65,6 +75,47 @@ impl SafeRenderedContent {
     pub fn html(&self) -> &str {
         &self.sanitized_html
     }
+}
+
+/// `srcset` contains a list of URLs, so HTML sanitizers cannot treat it like a
+/// single URL-valued attribute. Resolve and validate every candidate before the
+/// browser sees it; otherwise root-relative candidates resolve against Reader.
+fn rewrite_srcset(value: &str, base_url: &Url) -> Option<String> {
+    value
+        .split(',')
+        .map(|candidate| {
+            let mut parts = candidate.split_whitespace();
+            let url = base_url.join(parts.next()?).ok()?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return None;
+            }
+            let descriptor = parts.next();
+            if parts.next().is_some()
+                || descriptor.is_some_and(|value| !valid_srcset_descriptor(value))
+            {
+                return None;
+            }
+            Some(match descriptor {
+                Some(descriptor) => format!("{url} {descriptor}"),
+                None => url.to_string(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|candidates| candidates.join(", "))
+}
+
+fn valid_srcset_descriptor(value: &str) -> bool {
+    value.strip_suffix('w').is_some_and(|number| {
+        !number.is_empty() && number.bytes().all(|byte| byte.is_ascii_digit())
+    }) || value.strip_suffix('x').is_some_and(|number| {
+        !number.is_empty()
+            && number
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || byte == b'.')
+            && number
+                .parse::<f64>()
+                .is_ok_and(|density| density.is_finite() && density > 0.0)
+    })
 }
 
 fn decode_escaped_markup(value: &str) -> String {
