@@ -4,6 +4,7 @@ import type { ApiClient, RuleDraft, SourceUrlPreview, SubscriptionActivity, Subs
 import { AutofillResistantField, AutofillResistantSelect, AutofillResistantTextarea } from "../ui/fields";
 import { Icon } from "../ui/Icon";
 import { Dialog } from "./Dialog";
+import { SubscriptionIcon } from "./SubscriptionIcon";
 
 type CatalogView="current"|"attention"|"archived";
 type Sort="name"|"updated"|"unread";
@@ -73,4 +74,4 @@ function writeSort(key:string,value:Sort){memoryLayouts.set(key,value);try{globa
 function move<T>(values:T[],from:number,to:number){const copy=[...values];const [item]=copy.splice(from,1);copy.splice(to,0,item);return copy}
 function toggle(set:Set<string>,id:string){const n=new Set(set);n.has(id)?n.delete(id):n.add(id);return n}
 function formatKind(v?:Subscription["sourceType"]){return v?v.replaceAll("_"," ").replace(/^./,x=>x.toUpperCase()):"Unknown"}
-function cell(s:Subscription,c:Column,onOpenDetail?:(id:string)=>void){switch(c){case"name":return <a class="entity-name" href={`/subscriptions/${encodeURIComponent(s.id)}`} onClick={e=>{if(onOpenDetail){e.preventDefault();onOpenDetail(s.id)}}}>{s.name}{s.attentionReason&&<small>{s.attentionReason}</small>}</a>;case"kind":return formatKind(s.sourceType);case"status":return <span class={`status-pill status-${s.status}`}>{s.status}</span>;case"updated":return s.lastUpdate||"Never";case"unread":return s.unreadCount??0;case"url":return s.sourceUrl||"—";case"note":return s.personalNote||"—";case"interval":return s.pollingInterval||"—";case"error":return s.error||"—";case"added":return s.createdAt||"—"}}
+function cell(s:Subscription,c:Column,onOpenDetail?:(id:string)=>void){switch(c){case"name":return <a class="entity-name entity-name--with-icon" href={`/subscriptions/${encodeURIComponent(s.id)}`} onClick={e=>{if(onOpenDetail){e.preventDefault();onOpenDetail(s.id)}}}><SubscriptionIcon name={s.name} sourceUrl={s.sourceUrl} size={30}/><span>{s.name}{s.attentionReason&&<small>{s.attentionReason}</small>}</span></a>;case"kind":return formatKind(s.sourceType);case"status":return <span class={`status-pill status-${s.status}`}>{s.status}</span>;case"updated":return s.lastUpdate||"Never";case"unread":return s.unreadCount??0;case"url":return s.sourceUrl||"—";case"note":return s.personalNote||"—";case"interval":return s.pollingInterval||"—";case"error":return s.error||"—";case"added":return s.createdAt||"—"}}

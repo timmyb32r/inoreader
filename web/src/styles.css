@@ -60,3 +60,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .activity-list article{padding:9px 0;row-gap:4px}
 .activity-list .activity-diagnostic{margin:0;padding:8px 10px;border-left:2px solid var(--danger);border-radius:0 6px 6px 0;background:var(--danger-soft);font-family:"IBM Plex Mono",ui-monospace,monospace;line-height:1.5;overflow-wrap:anywhere;white-space:pre-wrap}
 .detail-single .card-heading>div>p{margin:-8px 0 14px;color:var(--text-muted);font-size:10px}
+
+/* Favicons replace the letter only after loading; both layers occupy the same
+   fixed box, so slow or failed external images never move subscription rows. */
+.subscription-icon{position:relative;display:grid;flex:0 0 auto;place-items:center;overflow:hidden;border-radius:7px;background:var(--accent-soft);color:var(--accent-deep);font-size:10px;font-weight:700}
+.subscription-icon__fallback,.subscription-icon__image{position:absolute;inset:0;width:100%;height:100%}
+.subscription-icon__fallback{display:grid;place-items:center}
+.subscription-icon__image{object-fit:contain;opacity:0;background:var(--surface);transition:opacity .12s ease}
+.subscription-icon__image.loaded{opacity:1}
+.entity-name--with-icon{display:grid;grid-template-columns:30px minmax(0,1fr);align-items:center;gap:9px}
+.entity-name--with-icon>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.entity-name--with-icon small{display:block;overflow:hidden;text-overflow:ellipsis}
