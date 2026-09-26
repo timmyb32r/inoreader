@@ -77,8 +77,11 @@ describe("reader application", () => {
     );
 
     render(<App client={client}/>);
-    expect(await screen.findByText(/Fetching the full article/)).toBeVisible();
+    const readerStatus = await screen.findByText(/Fetching the full article/);
+    expect(readerStatus).toBeVisible();
+    expect(readerStatus.querySelector(".spinner")).not.toBeNull();
     const row = screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article");
+    expect(row?.querySelector(".fulltext--pending .spinner")).not.toBeNull();
 
     expect(await screen.findByText("Extracted body", {}, { timeout: 2000 })).toBeVisible();
     expect(getArticle).toHaveBeenCalledTimes(1);
