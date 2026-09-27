@@ -48,32 +48,12 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
             i64,
             i64,
         );
-        let rows: Vec<StatsRow> = sqlx::query_as(
-            r#"SELECT requested.subscription_id,
-                      health.document,
-                      source.document,
-                      recipe.id IS NOT NULL,
-                      icon.data_url,
-                      COUNT(DISTINCT origin.article_id)::bigint,
-                      COUNT(DISTINCT origin.article_id) FILTER (
-                          WHERE NOT COALESCE(article.is_read, false)
-                      )::bigint
-               FROM unnest($1::text[]) AS requested(subscription_id)
-               LEFT JOIN subscription_sources mapping ON mapping.subscription_id=requested.subscription_id
-               LEFT JOIN sources source ON source.id=mapping.source_id
-               LEFT JOIN source_health health ON health.source_id=mapping.source_id
-               LEFT JOIN web_feed_recipes recipe ON recipe.id=requested.subscription_id
-               LEFT JOIN subscription_icons icon ON icon.subscription_id=requested.subscription_id
-               LEFT JOIN library_origins origin
-                 ON origin.workspace_id=$2 AND origin.subscription_id=requested.subscription_id
-               LEFT JOIN articles article ON article.id=$2 || '/' || origin.article_id
-               GROUP BY requested.subscription_id,health.document,source.document,recipe.id,icon.data_url"#,
-        )
-        .bind(&wanted_ids)
-        .bind(workspace.as_uuid().to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage)?;
+        let rows: Vec<StatsRow> = sqlx::query_as(include_str!("subscription_stats.sql"))
+            .bind(&wanted_ids)
+            .bind(workspace.as_uuid().to_string())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(storage)?;
         for (id, health, definition, editable_web_feed, icon_data_url, count, unread_count) in rows
         {
             let health = health

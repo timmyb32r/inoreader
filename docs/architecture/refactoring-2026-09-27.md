@@ -98,3 +98,12 @@ times are not a production SLO. Complete SQL, plans and samples are in
 The API also reuses the Feed total as its unread total, avoiding a duplicate
 COUNT. State predicates remain literal SQL chosen from a closed match so a
 prepared statement's generic plan can still use partial indexes.
+
+Production follow-up found an additional independent cost: the subscription
+statistics query grouped repeated article rows together with full icon data URLs,
+source and health documents. Counts now aggregate subscription/article identities
+first, then join metadata once. Read-only comparison on production confirmed exact
+result equality. After one warmup, three samples gave medians of **917.564 ms before
+and 35.916 ms after**. A PostgreSQL plan regression rejects grouping on document or
+icon payloads. This measurement is recorded in
+`subscription-stats-benchmark-2026-09-27.json`.

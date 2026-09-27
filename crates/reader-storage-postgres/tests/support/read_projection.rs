@@ -1,5 +1,17 @@
 use sqlx::PgPool;
 pub async fn verify(pool: &PgPool) {
+    let sql = format!(
+        "EXPLAIN (FORMAT JSON) {}",
+        include_str!("../../src/repository/subscription_stats.sql")
+    );
+    let plan: serde_json::Value = sqlx::query_scalar(&sql)
+        .bind(vec!["projection-subscription".to_owned()])
+        .bind("projection-workspace")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_small_group_keys(&plan);
+
     let values = [
         "-000001-12-31T23:59:59Z",
         "0000-01-01T00:00:00Z",
@@ -57,4 +69,29 @@ pub async fn verify(pool: &PgPool) {
         .execute(pool)
         .await
         .unwrap();
+}
+
+// A plan regression: the former query sorted repeated icon/source payloads for
+// every article. Counts must aggregate only subscription/article identities.
+fn assert_small_group_keys(value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            if let Some(keys) = fields.get("Group Key") {
+                let keys = keys.to_string();
+                assert!(
+                    !keys.contains("data_url") && !keys.contains("document"),
+                    "large payload in aggregation: {keys}"
+                );
+            }
+            for child in fields.values() {
+                assert_small_group_keys(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                assert_small_group_keys(item);
+            }
+        }
+        _ => {}
+    }
 }

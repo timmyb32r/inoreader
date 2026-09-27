@@ -1,0 +1,19 @@
+{
+  "exact_result_equality": true,
+  "before": {
+    "median_ms": 917.564,
+    "measured_ms": [
+      917.564,
+      923.705,
+      914.121
+    ]
+  },
+  "after": {
+    "median_ms": 35.916,
+    "measured_ms": [
+      36.612,
+      35.011,
+      35.916
+    ]
+  }
+}
