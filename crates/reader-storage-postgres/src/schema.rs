@@ -1,5 +1,7 @@
 use sqlx::{PgPool, Postgres, Transaction};
 
+mod upgrade;
+
 /// Current PostgreSQL schema.
 ///
 /// Opaque IDs and serialized documents remain `TEXT`: several repository keys are
@@ -358,6 +360,7 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     sqlx::raw_sql(include_str!("../../../tools/upgrade_binary_content.sql"))
         .execute(&mut *transaction)
         .await?;
+    upgrade::content_bytes(&mut transaction, batch).await?;
     crate::ai::backfill_public_views(&mut transaction, batch).await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)

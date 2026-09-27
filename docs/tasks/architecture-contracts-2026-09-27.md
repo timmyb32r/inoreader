@@ -39,3 +39,11 @@ retained drafts are quarantined before they can abort expired-chat recovery;
 quarantined state takes precedence over cached public output. Candidate Linux
 image is being rebuilt from the same production sources. Schema/content rollout
 and actual production smoke remain in progress.
+
+## Offline conversion adjustment
+
+Production preflight measured 332 ms for a synthetic 262 KiB per-byte SQL
+conversion. The rollout was paused before schema changes; replaced conversion
+with native Rust keyset batches and transactional table compaction. The fresh
+backup remains retained, and release/upgrade tests are being rerun. No requested
+obligation was removed or narrowed.

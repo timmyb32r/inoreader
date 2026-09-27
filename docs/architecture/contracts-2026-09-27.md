@@ -30,9 +30,10 @@ before starting the server or workers. This is not a full DDL fingerprint.
 Chunk bytes are native `BYTEA`. Publication batches inserts within PostgreSQL's
 65,535 parameter protocol capacity, while configured ingestion limits govern
 payload admission. A snapshot still reads manifest and ordered chunks in one SQL
-statement and verifies count, identity, order and UTF-8. The offline converter
-rejects malformed/noninteger/out-of-range JSON bytes and preserves empty chunks.
-It changes the storage representation only, never the source byte sequence.
+statement and verifies count, identity, order and UTF-8. The offline Rust converter reads keyset batches, fills a checked BYTEA column,
+then swaps columns and compacts the table inside the same transaction. It rejects malformed/noninteger/out-of-range JSON bytes and preserves empty chunks.
+It changes the storage representation only, never the source byte sequence. A server probe of the earlier per-byte SQL approach took
+332 ms for only 262 KiB, so it was replaced before any production schema change.
 
 ## Chat read and write models
 

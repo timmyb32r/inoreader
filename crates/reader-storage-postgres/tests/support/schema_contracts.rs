@@ -36,84 +36,7 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     reader_storage_postgres::verify_schema(pool).await.unwrap();
 
-    let mut connection = pool.acquire().await.unwrap();
-    sqlx::raw_sql("CREATE SCHEMA binary_fixture; SET search_path TO binary_fixture; CREATE TABLE ai_chats(inputs TEXT); CREATE TABLE staged_content_chunks(id INTEGER PRIMARY KEY,bytes TEXT);").execute(&mut *connection).await.unwrap();
-    let source: Vec<u8> = (0..262144).map(|i| (i % 256) as u8).collect();
-    let old = serde_json::to_string(&source).unwrap();
-    sqlx::query("INSERT INTO staged_content_chunks VALUES(1,$1),(2,'[]'),(3,'[256]')")
-        .bind(&old)
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    sqlx::query("BEGIN")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    assert!(
-        sqlx::raw_sql(include_str!("../../../../tools/upgrade_binary_content.sql"))
-            .execute(&mut *connection)
-            .await
-            .is_err()
-    );
-    sqlx::query("ROLLBACK")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    let retained: String = sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE id=1")
-        .fetch_one(&mut *connection)
-        .await
-        .unwrap();
-    assert_eq!(
-        retained, old,
-        "failed conversion rolls back every original byte"
-    );
-    sqlx::query("DELETE FROM staged_content_chunks WHERE id=3")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    let start = Instant::now();
-    for _ in 0..10 {
-        let text: String = sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE id=1")
-            .fetch_one(&mut *connection)
-            .await
-            .unwrap();
-        assert_eq!(serde_json::from_str::<Vec<u8>>(&text).unwrap(), source);
-    }
-    let json_us = start.elapsed().as_micros();
-    sqlx::query("BEGIN")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    sqlx::raw_sql(include_str!("../../../../tools/upgrade_binary_content.sql"))
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    sqlx::query("COMMIT")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
-    let start = Instant::now();
-    for _ in 0..10 {
-        let bytes: Vec<u8> = sqlx::query_scalar(
-            "SELECT bytes AS binary_bytes FROM staged_content_chunks WHERE id=1",
-        )
-        .fetch_one(&mut *connection)
-        .await
-        .unwrap();
-        assert_eq!(bytes, source);
-    }
-    let binary_us = start.elapsed().as_micros();
-    let empty: Vec<u8> = sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE id=2")
-        .fetch_one(&mut *connection)
-        .await
-        .unwrap();
-    assert!(empty.is_empty());
-    eprintln!("content_storage_benchmark reads=10 json_bytes={} binary_bytes={} json_us={json_us} binary_us={binary_us}", old.len(), source.len());
-    assert!(old.len() > source.len() * 3);
-    sqlx::raw_sql("SET search_path TO public; DROP SCHEMA binary_fixture CASCADE;")
-        .execute(&mut *connection)
-        .await
-        .unwrap();
+    binary_roundtrip(pool).await;
 }
 
 /// Exercise the actual native upgrade, including late failure after chunk conversion.
@@ -135,7 +58,7 @@ pub async fn upgrade_roundtrip(pool: &PgPool) {
         .connect_with((*pool.connect_options()).clone())
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE staged_content_chunks(id INTEGER PRIMARY KEY,bytes TEXT NOT NULL); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+    sqlx::raw_sql("CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
         .execute(&isolated).await.unwrap();
     let value = ai_tests::record(
         Uuid::new_v4(),
@@ -161,7 +84,7 @@ pub async fn upgrade_roundtrip(pool: &PgPool) {
     }
     let document = progress.to_string();
     let inputs = serde_json::to_string_pretty(&inputs).unwrap();
-    sqlx::query("INSERT INTO staged_content_chunks VALUES(1,'[0,255,228,184,173]')")
+    sqlx::query("INSERT INTO staged_content_chunks VALUES('1','r','raw',0,'[0,255,228,184,173]')")
         .execute(&isolated)
         .await
         .unwrap();
@@ -229,6 +152,100 @@ pub async fn upgrade_roundtrip(pool: &PgPool) {
         .unwrap();
     isolated.close().await;
     sqlx::query("DROP SCHEMA native_upgrade_fixture CASCADE")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn binary_roundtrip(pool: &PgPool) {
+    sqlx::query("CREATE SCHEMA binary_fixture")
+        .execute(pool)
+        .await
+        .unwrap();
+    let isolated = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("SET search_path TO binary_fixture")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect_with((*pool.connect_options()).clone())
+        .await
+        .unwrap();
+    sqlx::raw_sql("CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+        .execute(&isolated).await.unwrap();
+    let source: Vec<u8> = (0..262144).map(|i| (i % 256) as u8).collect();
+    let old = serde_json::to_string(&source).unwrap();
+    sqlx::query("INSERT INTO staged_content_chunks VALUES('1','r','raw',0,$1),('2','r','raw',0,'[]'),('3','r','raw',0,'[256]')").bind(&old).execute(&isolated).await.unwrap();
+    let batch = std::num::NonZeroU32::new(1).unwrap();
+    assert!(reader_storage_postgres::upgrade_schema(&isolated, batch)
+        .await
+        .is_err());
+    let retained: String =
+        sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE record_id='1'")
+            .fetch_one(&isolated)
+            .await
+            .unwrap();
+    assert_eq!(
+        retained, old,
+        "late invalid chunk rolls back earlier converted rows"
+    );
+    for invalid in ["[-1]", "[1.5]", "[1e2]", "null", "{}", "[true]", "[0,256]"] {
+        sqlx::query("UPDATE staged_content_chunks SET bytes=$1 WHERE record_id='3'")
+            .bind(invalid)
+            .execute(&isolated)
+            .await
+            .unwrap();
+        assert!(
+            reader_storage_postgres::upgrade_schema(&isolated, batch)
+                .await
+                .is_err(),
+            "must reject {invalid}"
+        );
+    }
+    sqlx::query("DELETE FROM staged_content_chunks WHERE record_id='3'")
+        .execute(&isolated)
+        .await
+        .unwrap();
+    let start = Instant::now();
+    for _ in 0..10 {
+        let value: String =
+            sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE record_id='1'")
+                .fetch_one(&isolated)
+                .await
+                .unwrap();
+        assert_eq!(serde_json::from_str::<Vec<u8>>(&value).unwrap(), source);
+    }
+    let json_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    reader_storage_postgres::upgrade_schema(&isolated, batch)
+        .await
+        .unwrap();
+    let upgrade_us = start.elapsed().as_micros();
+    let start = Instant::now();
+    for _ in 0..10 {
+        let value: Vec<u8> = sqlx::query_scalar(
+            "SELECT bytes AS binary_bytes FROM staged_content_chunks WHERE record_id='1'",
+        )
+        .fetch_one(&isolated)
+        .await
+        .unwrap();
+        assert_eq!(value, source);
+    }
+    let binary_us = start.elapsed().as_micros();
+    let empty: Vec<u8> =
+        sqlx::query_scalar("SELECT bytes FROM staged_content_chunks WHERE record_id='2'")
+            .fetch_one(&isolated)
+            .await
+            .unwrap();
+    assert!(empty.is_empty());
+    eprintln!("content_storage_benchmark reads=10 json_bytes={} binary_bytes={} json_us={json_us} binary_us={binary_us} native_upgrade_us={upgrade_us}",old.len(),source.len());
+    assert!(old.len() > source.len() * 3);
+    isolated.close().await;
+    sqlx::query("DROP SCHEMA binary_fixture CASCADE")
         .execute(pool)
         .await
         .unwrap();
