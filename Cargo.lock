@@ -1992,6 +1992,7 @@ dependencies = [
  "clap",
  "env_logger",
  "log",
+ "reader-ai",
  "reader-application",
  "reader-collectors",
  "reader-core",
@@ -3155,6 +3156,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reader-ai"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "http 1.5.0",
+ "log",
+ "reader-web-runtime",
+ "ring",
+ "scraper",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "reader-application"
 version = "0.1.0"
 dependencies = [
@@ -3229,6 +3249,7 @@ dependencies = [
  "axum",
  "chrono",
  "log",
+ "reader-ai",
  "reader-application",
  "reader-core",
  "reader-server-contracts",
@@ -3267,6 +3288,7 @@ dependencies = [
  "chrono",
  "log",
  "murmur3",
+ "reader-ai",
  "reader-application",
  "reader-core",
  "reader-ingest",

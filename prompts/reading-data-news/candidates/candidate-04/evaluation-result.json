@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-09-27T00:19:48.600906+00:00",
+  "prompt_version": "reading-data-news-2026-09-27-candidate-04",
+  "sample_size": 20,
+  "planned_provider_calls": 40,
+  "attempted_provider_calls": 40,
+  "transport_passes": 18,
+  "missing_post_ids": [
+    1304,
+    286
+  ],
+  "human_evaluation_id": "fff68d30d6374ef7aa70e8c378bfa997",
+  "human_review_status": "not received; optional review of all completed outputs; planned missing case remains failed",
+  "human_style_passes": null,
+  "human_reviewable_count": 18,
+  "factual_gate": "failed",
+  "prompt_approved": false,
+  "all_detected_error_cases": [
+    998,
+    273,
+    747
+  ],
+  "factual_audit_status": "three-part full-source audit; see reports for qualifications",
+  "review_reports": [
+    "docs/research/fresh-cohort03-a.md",
+    "docs/research/fresh-cohort03-b.md",
+    "docs/research/fresh-cohort03-c.md"
+  ],
+  "metrics": {
+    "median_two_stage_http_seconds": 98.4265,
+    "min_two_stage_http_seconds": 63.289,
+    "max_two_stage_http_seconds": 157.077,
+    "median_body_words": 226.0,
+    "min_body_words": 104,
+    "max_body_words": 322,
+    "known_cohort_cost_usd": "0.991979384",
+    "uncertain_cohort_reserve_usd": "1.44900096",
+    "research_budget": {
+      "attempts": 330,
+      "settled": 328,
+      "uncertain": 2,
+      "known_cost_usd": "4.542521440",
+      "retained_reserve_usd": "2.89800192",
+      "committed_usd": "7.440523360",
+      "remaining_usd": "2.559476640",
+      "cap_usd": "10"
+    }
+  }
+}

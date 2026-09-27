@@ -9,6 +9,7 @@ async-trait.workspace = true
 chrono.workspace = true
 murmur3.workspace = true
 reader-application = { path = "../reader-application" }
+reader-ai = { path = "../reader-ai" }
 reader-core = { path = "../reader-core" }
 reader-ingest = { path = "../reader-ingest" }
 serde.workspace = true

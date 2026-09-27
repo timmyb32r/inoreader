@@ -18,15 +18,17 @@ ALLOWED: dict[str, set[str]] = {
     "reader-application": {"reader-core"},
     "reader-collectors": {"reader-core"},
     "reader-web-runtime": set(),
+    "reader-ai": {"reader-web-runtime"},
     "reader-ingest": {"reader-core", "reader-collectors", "reader-web-runtime"},
     "reader-server-contracts": {"reader-core"},
-    "reader-server": {"reader-core", "reader-application", "reader-server-contracts"},
+    "reader-server": {"reader-core", "reader-application", "reader-server-contracts", "reader-web-runtime", "reader-ai"},
     "reader-server-ui": set(),
     "reader-storage-ydb": {"reader-core", "reader-application", "reader-ingest"},
+    "reader-storage-postgres": {"reader-core", "reader-application", "reader-ingest", "reader-ai"},
     "inoreader": {
         "reader-core", "reader-application", "reader-collectors", "reader-ingest",
         "reader-server", "reader-server-contracts", "reader-server-ui",
-        "reader-storage-ydb", "reader-web-runtime",
+        "reader-storage-ydb", "reader-storage-postgres", "reader-web-runtime", "reader-ai",
     },
 }
 

@@ -2,6 +2,7 @@
 resolver = "2"
 exclude = ["acceptance/chromium"]
 members = [
+  "crates/reader-ai",
   "crates/reader-core",
   "crates/reader-application",
   "crates/reader-collectors",

@@ -1,0 +1,49 @@
+{
+  "frozen_at": "2026-09-26T21:45:08.199749+00:00",
+  "version": "reading-data-news-2026-09-27-candidate-02",
+  "style_path": "prompts/reading-data-news/candidates/candidate-02/style.md",
+  "transport_path": "prompts/reading-data-news/transport.md",
+  "system_path": "prompts/reading-data-news/candidates/candidate-02/system.md",
+  "model": "deepseek-v4-pro",
+  "thinking": {
+    "type": "enabled"
+  },
+  "reasoning_effort": "high",
+  "max_tokens": 8192,
+  "response_format": {
+    "type": "json_object"
+  },
+  "reference_bodies_seen_before_freeze": false,
+  "post_ids": [
+    539,
+    683,
+    1119,
+    1159,
+    201,
+    17,
+    748,
+    713,
+    1012,
+    1048,
+    301,
+    94,
+    687,
+    516,
+    1214,
+    1483,
+    187,
+    285,
+    609,
+    679
+  ],
+  "source_chars": 368803,
+  "selection": "rules-v9, no examples; Pro/high chosen over Flash and Pro/low for factual/compression evidence; known diagnostic privacy-exclusivity concern in464 retained. This is an unapproved candidate, not a factual or stylistic guarantee.",
+  "budget_plan": "candidate02-pro-sequential",
+  "stopping": "20 target calls, one at a time; stop before any call whose full-context reservation would exceed original USD10 cap. Never discard failed outputs or retry them invisibly.",
+  "prompt_approved": false,
+  "human_style_passes": null,
+  "human_sample_size": 20,
+  "required_style_passes": 18,
+  "factual_review_status": "pending cohort02; diagnostic464 unsupported-exclusivity concern retained",
+  "research_report": "../../docs/research/summary-report.md"
+}

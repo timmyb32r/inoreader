@@ -4,12 +4,12 @@ use std::{
 };
 
 use async_trait::async_trait;
-use http::{header, HeaderMap, StatusCode};
+use http::{header, HeaderMap, Method, StatusCode};
 use thiserror::Error;
 use url::Url;
 
 use crate::{
-    BoundedBody, ConnectionAuthorization, Deadline, OutboundError, OutboundPolicy, PreparedRequest,
+    ConnectionAuthorization, Deadline, OutboundError, OutboundPolicy, PreparedRequest,
     RedirectChain,
 };
 
@@ -114,8 +114,32 @@ where
 
     pub async fn execute(
         &self,
-        mut request: PreparedRequest,
+        request: PreparedRequest,
     ) -> Result<OutboundResponse, OutboundError> {
+        let mut stream = self
+            .execute_stream(request, "public_web", "http_request")
+            .await?;
+        let mut body = Vec::new();
+        while let Some(chunk) = stream.next_chunk().await? {
+            body.extend(chunk);
+        }
+        Ok(OutboundResponse {
+            final_url: stream.final_url.clone(),
+            status: stream.status,
+            headers: stream.headers.clone(),
+            body,
+        })
+    }
+
+    /// Opens a bounded validated stream. Dropping it cancels reception and records
+    /// an interrupted external request. Non-idempotent requests are never retried
+    /// against another IP after an ambiguous transport failure.
+    pub async fn execute_stream(
+        &self,
+        mut request: PreparedRequest,
+        system: &'static str,
+        operation: &'static str,
+    ) -> Result<OutboundResponseStream<'_>, OutboundError> {
         if let Some(user_agent) = &self.user_agent {
             request
                 .headers
@@ -123,27 +147,53 @@ where
                 .or_insert_with(|| user_agent.clone());
         }
         let started = Instant::now();
-        let result = self.execute_inner(&mut request).await;
-        let outcome = match &result {
-            Ok(_) => ExternalRequestOutcome::Success,
-            Err(OutboundError::Transport { .. }) => ExternalRequestOutcome::Failed,
-            Err(_) => ExternalRequestOutcome::Rejected,
+        let mut opening = OpeningObservation {
+            observer: &self.observer,
+            started,
+            system,
+            operation,
+            active: true,
         };
-        self.observer.completed(ExternalRequestCompletion {
-            system: "public_web",
-            operation: "http_request",
-            outcome,
-            elapsed: started.elapsed(),
-        });
-        result
+        let deadline = Deadline::new(self.policy.limits().request_deadline);
+        let result = self.open_stream(&mut request, &deadline).await;
+        opening.active = false;
+        match result {
+            Ok(response) => Ok(OutboundResponseStream {
+                final_url: request.url,
+                status: response.status,
+                headers: response.headers,
+                body: response.body,
+                deadline,
+                received: 0,
+                limit: self.policy.limits().max_response_body_bytes,
+                observer: &self.observer,
+                started,
+                system,
+                operation,
+                finished: false,
+            }),
+            Err(error) => {
+                self.observer.completed(ExternalRequestCompletion {
+                    system,
+                    operation,
+                    outcome: if matches!(error, OutboundError::Transport { .. }) {
+                        ExternalRequestOutcome::Failed
+                    } else {
+                        ExternalRequestOutcome::Rejected
+                    },
+                    elapsed: started.elapsed(),
+                });
+                Err(error)
+            }
+        }
     }
 
-    async fn execute_inner(
+    async fn open_stream(
         &self,
         request: &mut PreparedRequest,
-    ) -> Result<OutboundResponse, OutboundError> {
+        deadline: &Deadline,
+    ) -> Result<TransportResponse, OutboundError> {
         self.policy.validate_url(&request.url)?;
-        let deadline = Deadline::new(self.policy.limits().request_deadline);
         let mut redirects =
             RedirectChain::new(&request.url, self.policy.limits().max_redirect_hops);
 
@@ -154,11 +204,11 @@ where
                 .url
                 .port_or_known_default()
                 .ok_or(OutboundError::MissingHost)?;
-            let addresses = self
-                .resolver
-                .resolve(host, port)
-                .await
-                .map_err(|_| OutboundError::Transport { kind: "dns" })?;
+            let addresses =
+                tokio::time::timeout(deadline.remaining()?, self.resolver.resolve(host, port))
+                    .await
+                    .map_err(|_| OutboundError::Transport { kind: "deadline" })?
+                    .map_err(|_| OutboundError::Transport { kind: "dns" })?;
             let resolved = self.policy.authorize_resolution(&request.url, addresses)?;
             // Try every address from the authorized DNS answer. Hosts commonly
             // publish IPv6 before IPv4 even when the caller has no IPv6 route.
@@ -182,7 +232,12 @@ where
                         response = Some((value, authorization));
                         break;
                     }
-                    Err(error) => last_transport_error = Some(error.kind),
+                    Err(error) => {
+                        if !matches!(request.method, Method::GET | Method::HEAD) {
+                            return Err(OutboundError::Transport { kind: error.kind });
+                        }
+                        last_transport_error = Some(error.kind);
+                    }
                 }
             }
             let (response, authorization) = response.ok_or(OutboundError::Transport {
@@ -202,23 +257,98 @@ where
                 continue;
             }
 
-            let mut source = response.body;
-            let mut body = BoundedBody::new(self.policy.limits().max_response_body_bytes);
-            while let Some(chunk) = source
-                .next_chunk()
-                .await
-                .map_err(|error| OutboundError::Transport { kind: error.kind })?
-            {
-                deadline.remaining()?;
-                body.push(&chunk)?;
-            }
-            return Ok(OutboundResponse {
-                final_url: request.url.clone(),
-                status: response.status,
-                headers: response.headers,
-                body: body.into_bytes(),
+            return Ok(response);
+        }
+    }
+}
+
+pub struct OutboundResponseStream<'a> {
+    pub final_url: Url,
+    pub status: StatusCode,
+    pub headers: HeaderMap,
+    body: Box<dyn ResponseBody>,
+    deadline: Deadline,
+    received: usize,
+    limit: usize,
+    observer: &'a dyn ExternalRequestObserver,
+    started: Instant,
+    system: &'static str,
+    operation: &'static str,
+    finished: bool,
+}
+struct OpeningObservation<'a> {
+    observer: &'a dyn ExternalRequestObserver,
+    started: Instant,
+    system: &'static str,
+    operation: &'static str,
+    active: bool,
+}
+impl Drop for OpeningObservation<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.observer.completed(ExternalRequestCompletion {
+                system: self.system,
+                operation: self.operation,
+                outcome: ExternalRequestOutcome::Failed,
+                elapsed: self.started.elapsed(),
             });
         }
+    }
+}
+impl OutboundResponseStream<'_> {
+    pub async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, OutboundError> {
+        let result = self.read_chunk().await;
+        if let Err(error) = &result {
+            self.finish(if matches!(error, OutboundError::Transport { .. }) {
+                ExternalRequestOutcome::Failed
+            } else {
+                ExternalRequestOutcome::Rejected
+            });
+        } else if matches!(result, Ok(None)) {
+            self.finish(
+                if self.status.is_success() || self.status == StatusCode::NOT_MODIFIED {
+                    ExternalRequestOutcome::Success
+                } else {
+                    ExternalRequestOutcome::Failed
+                },
+            );
+        }
+        result
+    }
+    async fn read_chunk(&mut self) -> Result<Option<Vec<u8>>, OutboundError> {
+        if self.finished {
+            return Ok(None);
+        }
+        let chunk = tokio::time::timeout(self.deadline.remaining()?, self.body.next_chunk())
+            .await
+            .map_err(|_| OutboundError::Transport { kind: "deadline" })?
+            .map_err(|e| OutboundError::Transport { kind: e.kind })?;
+        if let Some(value) = &chunk {
+            self.received = self
+                .received
+                .checked_add(value.len())
+                .ok_or(OutboundError::ResponseBodyTooLarge { limit: self.limit })?;
+            if self.received > self.limit {
+                return Err(OutboundError::ResponseBodyTooLarge { limit: self.limit });
+            }
+        }
+        Ok(chunk)
+    }
+    fn finish(&mut self, outcome: ExternalRequestOutcome) {
+        if !self.finished {
+            self.finished = true;
+            self.observer.completed(ExternalRequestCompletion {
+                system: self.system,
+                operation: self.operation,
+                outcome,
+                elapsed: self.started.elapsed(),
+            });
+        }
+    }
+}
+impl Drop for OutboundResponseStream<'_> {
+    fn drop(&mut self) {
+        self.finish(ExternalRequestOutcome::Failed);
     }
 }
 

@@ -8,7 +8,9 @@ const articles = [
   { id:"2",url:"https://example.test/queue",source:"Database Internals",title:"The durable queue is the product",excerpt:"Retries and intent.",body:["A second deterministic fixture."],age:"43 min",read:false,later:false,fullText:"failed" },
 ];
 const workspaces=[{id:"ws",name:"Data engineering",archived:false},{id:"finance",name:"Финансы",archived:false}];
-let rules=[];
+const financeArticles=[{...articles[0],id:"finance-1",title:"Finance workspace article",subscriptionIds:[]}];
+const articlePage=items=>({articles:items,total:items.length,unreadTotal:items.filter(item=>!item.read).length});
+let rules=[{id:"fixture-rule",subscriptionId:"sub",field:"title",phrase:"career",action:"mark_read",enabled:true}];
 let personalNote="";
 const subscription=()=>({id:"sub",name:"This Week in Rust",sourceTitle:"This Week in Rust",sourceUrl:"https://example.test/feed",sourceType:"feed",personalNote,count:2,unreadCount:2,status:"active",lastUpdate:"2026-09-25T18:00:00Z",editableWebFeed:false});
 const json=(response,status,body)=>{response.writeHead(status,{"content-type":"application/json"});response.end(JSON.stringify(body));};
@@ -17,12 +19,14 @@ const body=async request=>{let value="";for await(const chunk of request)value+=
 createServer(async(request,response)=>{
  const url=new URL(request.url,"http://127.0.0.1:4173");
  if(url.pathname.startsWith("/api/")){
-  if(url.pathname==="/api/bootstrap")return json(response,200,{account:{displayName:"Fixture",initials:"FX"},workspaces,activeWorkspaceId:"ws",subscriptions:[subscription()],articles,newArticleCount:0});
+  if(url.pathname==="/api/bootstrap")return json(response,200,{account:{id:"fixture-owner",displayName:"Fixture",initials:"FX"},workspaces,activeWorkspaceId:"ws",subscriptions:[subscription()],articlePage:articlePage(articles)});
+  if(url.pathname==="/api/ai/profile")return json(response,200,{configured:false,enabled:false});
   if(url.pathname==="/api/subscriptions"&&request.method==="GET")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[]:[subscription()]);
   if(url.pathname==="/api/subscriptions/sub/publication-history")return json(response,200,{days:[],undated:2,conflicting:0});
   if(url.pathname==="/api/subscriptions/sub"&&request.method==="GET")return json(response,200,subscription());
   if(url.pathname==="/api/subscriptions/sub/note"&&request.method==="PUT"){personalNote=(await body(request)).note;return json(response,200,subscription());}
-  if(url.pathname==="/api/articles")return json(response,200,url.searchParams.get("workspace_id")==="finance"?[{...articles[0],id:"finance-1",title:"Finance workspace article"}]:articles);
+  if(url.pathname==="/api/articles")return json(response,200,articlePage(url.searchParams.get("workspace_id")==="finance"?financeArticles:url.searchParams.has("subscription_id")?articles.filter(item=>item.subscriptionIds?.includes(url.searchParams.get("subscription_id"))):articles));
+  if(/^\/api\/articles\/[^/]+$/.test(url.pathname)&&request.method==="GET")return json(response,200,[...articles,...financeArticles].find(item=>url.pathname===`/api/articles/${item.id}`));
   if(/\/api\/articles\/[^/]+\/state/.test(url.pathname)){const patch=await body(request);const item=articles.find(value=>url.pathname.includes(value.id));return json(response,200,{...item,...patch});}
   if(url.pathname==="/api/feeds/discover")return json(response,200,{title:"Fixture Feed",kind:"rss",url:"https://feed.test",articles:[{title:"Discovered article"}]});
   if(url.pathname==="/api/subscriptions"&&request.method==="POST")return json(response,200,{id:"added",name:"Fixture Feed",count:0,status:"active",lastUpdate:"now"});

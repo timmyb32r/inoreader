@@ -24,13 +24,17 @@ services:
     environment:
       YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS: /run/secrets/ydb-key.json
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+      AI_ENCRYPTION_KEY_FILE: /run/secrets/ai-encryption-key
     volumes:
       - ./config.yaml:/etc/inoreader/config.yaml:ro
+      - ./prompts:/etc/inoreader/prompts:ro
     secrets:
       - source: ydb-key
         target: ydb-key.json
       - source: postgres-password
         target: postgres-password
+      - source: ai-encryption-key
+        target: ai-encryption-key
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -112,6 +116,9 @@ secrets:
     file: ./secrets/ydb-key.json
   postgres-password:
     file: ./secrets/postgres-password
+  ai-encryption-key:
+    # Exactly 32 random bytes; back up separately from the PostgreSQL database.
+    file: ./secrets/ai-encryption-key
 
 volumes:
   caddy-data:

@@ -1,0 +1,51 @@
+{
+  "frozen_at": "2026-09-26T22:08:29.106150+00:00",
+  "version": "reading-data-news-2026-09-27-candidate-03",
+  "style_path": "prompts/reading-data-news/candidates/candidate-03/style.md",
+  "transport_path": "prompts/reading-data-news/transport.md",
+  "system_path": "prompts/reading-data-news/candidates/candidate-03/system.md",
+  "model": "deepseek-v4-pro",
+  "thinking": {
+    "type": "enabled"
+  },
+  "reasoning_effort": "high",
+  "max_tokens": 8192,
+  "response_format": {
+    "type": "json_object"
+  },
+  "reference_bodies_seen_before_freeze": false,
+  "post_ids": [
+    539,
+    683,
+    1119,
+    1159,
+    201,
+    17,
+    748,
+    713,
+    1012,
+    1048,
+    301,
+    94,
+    687,
+    516,
+    1214,
+    1483,
+    187,
+    285,
+    609,
+    679
+  ],
+  "source_chars": 368803,
+  "selection": "Author-feedback-v13: all49 requests mapped; v10-v13 diagnostic failures preserved. Pro/high8192; two editor-authored corrected examples and corrected meaning fragments from known cohort01. Frozen before reading any cohort02 output or author-reference body. Three final diagnostic cases completed; independent factual review still pending, no acceptance implied.",
+  "budget_plan": "candidate03-feedback-paired-sequential",
+  "stopping": "20 target calls, one at a time; stop before any call whose full-context reservation would exceed original USD10 cap. Never discard failed outputs or retry them invisibly.",
+  "comparison_arm": "candidate-02 on exactly same twenty source snapshots",
+  "cohort02_output_bodies_seen_before_freeze": false,
+  "prompt_approved": false,
+  "human_style_passes": null,
+  "human_sample_size": 20,
+  "required_style_passes": 18,
+  "factual_review_status": "pending; old diagnostics not acceptance",
+  "research_report": "../../docs/research/summary-report.md"
+}

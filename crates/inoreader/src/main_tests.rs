@@ -1,5 +1,18 @@
 use super::*;
 
+#[tokio::test]
+async fn disabled_ai_needs_neither_secret_nor_prompt_artifact() {
+    let config: Config =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@127.0.0.1/unused")
+        .unwrap();
+    let repository = Arc::new(
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap(),
+    );
+    assert!(ai::compose(&config, pool, repository).unwrap().is_none());
+}
+
 fn manifest() -> SeedManifest {
     SeedManifest {
         schema_version: 1,

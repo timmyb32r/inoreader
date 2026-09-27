@@ -1,0 +1,65 @@
+{
+  "evaluated_at": "2026-09-26T22:27:15.875556+00:00",
+  "prompt_version": "reading-data-news-2026-09-27-candidate-03",
+  "transport_passes": 20,
+  "sample_size": 20,
+  "human_style_passes": 20,
+  "human_review_status": "complete; all20 like, five binding comments recorded; factual gate remains failed",
+  "factual_gate": "failed",
+  "substantive_error_cases": [
+    539,
+    1214,
+    1483
+  ],
+  "terminological_error_cases": [
+    301
+  ],
+  "all_detected_error_cases": [
+    539,
+    301,
+    1214,
+    1483
+  ],
+  "prompt_approved": false,
+  "review_reports": [
+    "docs/research/paired-cohort02-a.md",
+    "docs/research/paired-cohort02-b.md",
+    "docs/research/paired-cohort02-root.md",
+    "docs/research/candidate03-factual-crosscheck.md"
+  ],
+  "metrics": {
+    "candidate-02": {
+      "n": 20,
+      "transport_passes": 20,
+      "median_body_words": 95.5,
+      "min_words": 81,
+      "max_words": 131,
+      "median_seconds": 14.356345645996043,
+      "max_seconds": 25.68756583299546,
+      "tldr_count": 0
+    },
+    "candidate-03": {
+      "n": 20,
+      "transport_passes": 20,
+      "median_body_words": 240.0,
+      "min_words": 94,
+      "max_words": 300,
+      "median_seconds": 35.82025122900086,
+      "max_seconds": 51.69373808399541,
+      "tldr_count": 20
+    },
+    "budget": {
+      "calls": 209,
+      "cost_usd": "1.776534744",
+      "unresolved": 0,
+      "cap_usd": "10"
+    }
+  },
+  "human_style_dislikes": 0,
+  "human_evaluation_id": "6223d7b61b3946d1a631b1e32fbd2dfb",
+  "human_feedback_exported_at": "2026-09-26T22:32:08.048Z",
+  "human_review_recorded_at": "2026-09-26T22:37:02.929565+00:00",
+  "human_feedback_comments": 5,
+  "human_factual_flags": 0,
+  "human_feedback_report": "docs/research/author-feedback-02.md"
+}

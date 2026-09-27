@@ -5,6 +5,71 @@ use reader_core::{StateEvent, WorkspaceStateEvent};
 struct NoDiscovery;
 
 #[test]
+fn invalid_provider_credentials_do_not_expire_the_reader_session() {
+    assert_eq!(
+        ApiFailure::Ai(reader_ai::AiError::InvalidKey)
+            .into_response()
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+}
+
+#[tokio::test]
+async fn changed_summary_title_has_a_stable_actionable_error() {
+    let response = ApiFailure::Ai(reader_ai::AiError::OriginalTitleChanged).into_response();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["code"], "original_title_changed");
+    assert_eq!(
+        body["message"],
+        reader_ai::AiError::OriginalTitleChanged.to_string()
+    );
+}
+
+#[tokio::test]
+async fn ai_routes_require_reader_auth_and_exact_origin() {
+    let (state, _, _) = route_fixture(AccountId::new(), None);
+    let app = router(state);
+    let unauthenticated = axum::http::Request::builder()
+        .uri("/api/ai/profile")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(unauthenticated).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let wrong_origin = axum::http::Request::builder()
+        .method("PUT")
+        .uri("/api/ai/profile")
+        .header(header::COOKIE, "reader_session=route-token")
+        .header(header::ORIGIN, "https://attacker.test")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(r#"{"apiKey":"must-not-be-sent"}"#))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(wrong_origin).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    let profile = axum::http::Request::builder()
+        .uri("/api/ai/profile")
+        .header(header::COOKIE, "reader_session=route-token")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let response = app.oneshot(profile).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    let profile: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(profile["enabled"], false);
+    assert!(profile.get("availabilityReason").is_some());
+    assert!(profile.get("apiKey").is_none());
+}
+
+#[test]
 fn feed_is_unread_only_and_complete_history_requires_a_subscription() {
     for removed in ["all", "unread", "saved", "trash"] {
         assert!(article_page_request(removed, None, None, None).is_err());

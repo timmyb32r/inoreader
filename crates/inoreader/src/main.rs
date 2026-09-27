@@ -33,6 +33,7 @@ use reader_web_runtime::{
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use url::Url;
 
+mod ai;
 mod migration;
 
 #[derive(Parser)]
@@ -488,6 +489,7 @@ async fn serve(
         config.ingest.initial_feed_items,
     )?);
     repository.readiness().await?;
+    let ai_service = ai::compose(config, pool.clone(), repository.clone())?;
     // The transport exposes decoded response bytes, so both the wire/body
     // budget and decompressed budget constrain the same pre-parser boundary.
     let limits = OutboundLimits::try_from(RawOutboundLimits {
@@ -566,7 +568,7 @@ async fn serve(
         initial_items: config.ingest.initial_feed_items,
         visual_snapshots: tokio::sync::Mutex::new(HashMap::new()),
     });
-    let app = reader_server::router(reader_server::AppState::new(
+    let mut server_state = reader_server::AppState::new(
         repository,
         discovery,
         reason_policy,
@@ -574,13 +576,18 @@ async fn serve(
         config.server.external_origin.clone(),
         config.auth.login_attempts_per_minute,
         config.ingest.batch_items,
-    ))
-    .fallback(serve_ui)
-    .layer(DefaultBodyLimit::max(config.server.max_request_body_bytes))
-    .layer(tower_http::timeout::TimeoutLayer::with_status_code(
-        StatusCode::REQUEST_TIMEOUT,
-        Duration::from_secs(config.server.request_timeout_seconds),
-    ));
+    );
+    if let Some(ai) = ai_service {
+        ai.spawn_workers();
+        server_state = server_state.with_ai(ai);
+    }
+    let app = reader_server::router(server_state)
+        .fallback(serve_ui)
+        .layer(DefaultBodyLimit::max(config.server.max_request_body_bytes))
+        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(config.server.request_timeout_seconds),
+        ));
     let ingest_store = Arc::new(PostgresIngestStore::new(
         pool,
         chrono::Duration::seconds(config.scheduler.polling_interval_seconds as i64),

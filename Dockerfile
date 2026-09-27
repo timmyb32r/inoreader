@@ -12,6 +12,7 @@ FROM rust:1.96-bookworm AS rust
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
+COPY prompts/reading-data-news/transport.md prompts/reading-data-news/transport.md
 COPY --from=ui /src/web/dist web/dist
 RUN --mount=type=cache,id=inoreader-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,id=inoreader-cargo-git,target=/usr/local/cargo/git,sharing=locked \

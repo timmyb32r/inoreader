@@ -72,3 +72,43 @@ observability:
   log_format: "json"
   external_request_metrics: true
   archive_budget_bytes: 107374182400
+ai:
+  # Set true only after documented operator acceptance (passed evaluation or explicit owner waiver).
+  prompt_approved: false
+  prompt_path: "/etc/inoreader/prompts/reading-data-news/style.md"
+  prompt_version: "reading-data-news-2026-09-27-candidate-04"
+  review:
+    prompt_path: "/etc/inoreader/prompts/reading-data-news/review.md"
+    prompt_version: "reading-data-news-factual-review-2026-09-27-v3"
+    model: "deepseek-v4-pro"
+    generation_mode:
+      kind: thinking
+      effort: low
+    max_output_tokens: 16384
+    input_usd_per_million_tokens: "1.32"
+    cached_input_usd_per_million_tokens: "0.044"
+    output_usd_per_million_tokens: "3.96"
+  enabled_accounts: []
+  encryption_key_file_env: "AI_ENCRYPTION_KEY_FILE"
+  model: "deepseek-v4-pro"
+  generation_mode:
+    kind: thinking
+    effort: high
+  context_tokens: 1048576
+  # Conservative UTF-8 byte-token preflight plus explicitly reserved chat framing.
+  framing_tokens_per_message: 64
+  framing_tokens_base: 128
+  max_output_tokens: 16384
+  max_input_bytes: 3000000
+  max_message_bytes: 65536
+  max_response_bytes: 4194304
+  request_timeout_seconds: 300
+  connect_timeout_seconds: 10
+  workers: 2
+  poll_milliseconds: 500
+  # One claim covers draft and verification; must exceed both request deadlines.
+  lease_seconds: 660
+  # Verify current provider prices before enabling; exact USD decimal rates.
+  input_usd_per_million_tokens: "1.32"
+  cached_input_usd_per_million_tokens: "0.044"
+  output_usd_per_million_tokens: "3.96"

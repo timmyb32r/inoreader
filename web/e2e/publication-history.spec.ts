@@ -7,10 +7,6 @@ test("publication calendar keeps controls fixed through loading and every chart 
   }).filter(day => day.count > 0);
   let release!: () => void;
   const ready = new Promise<void>(resolve => { release = resolve; });
-  await page.route("**/api/bootstrap*", async route => {
-    const data = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...data, account: { ...data.account, id: "fixture" }, articlePage: { articles: data.articles, total: data.articles.length, unreadTotal: 2 } } });
-  });
   await page.route("**/publication-history", async route => {
     await ready;
     await route.fulfill({ json: { days: [{ date: "2025-03-01", count: 4 }, ...days], undated: 7, conflicting: 0 } });

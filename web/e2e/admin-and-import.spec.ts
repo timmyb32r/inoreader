@@ -1,6 +1,6 @@
 import { expect,test } from "@playwright/test";
 
-test.beforeEach(async({page})=>{await page.goto("/");await expect(page.getByRole("heading",{name:/^Feed \(\d+\)$/})).toBeVisible();});
+test.beforeEach(async({page})=>{await page.goto("/reader");await expect(page.getByRole("heading",{name:/^Feed \(\d+\)$/})).toBeVisible();});
 
 test("workspace switch reloads its library without moving the picker",async({page})=>{
  const picker=page.getByRole("button",{name:/Data engineering/});const before=await picker.boundingBox();await picker.click();await page.getByRole("button",{name:/Финансы/}).click();
@@ -19,11 +19,12 @@ test("administrator creates invite and reset links with one request per activati
  await page.getByRole("button",{name:"Create password reset"}).click();await expect(page.getByText(/Password reset: .*token=fixed/)).toBeVisible();
 });
 
-test("rule preview exposes shared scope and bulk apply reports progress",async({page})=>{
+test("subscription details expose the current rules and workspace scope",async({page})=>{
  await page.getByRole("navigation",{name:"Subscriptions"}).getByRole("button",{name:/This Week in Rust/}).click();
- await page.getByRole("button",{name:"Rules"}).click();await page.getByLabel("New literal phrase").fill("career");await page.getByLabel("Match field").selectOption("title");await page.getByLabel("Action").selectOption("mark_read");await page.getByRole("button",{name:"Preview matches"}).click();
- const stats=page.locator(".rule-stats");await expect(stats.getByText("4",{exact:true})).toBeVisible();await expect(stats.getByText("2",{exact:true})).toBeVisible();await expect(page.getByText(/shared with linked subscriptions/)).toBeVisible();await page.getByText("Sample article IDs (2)").click();await expect(page.getByText("article-1")).toBeVisible();
- await page.getByRole("button",{name:"Save & apply existing"}).dblclick();await expect(page.getByText(/v1 · career/)).toBeVisible();await expect(page.getByText("Bulk apply: completed")).toBeVisible();await expect(page.getByText("9 articles evaluated")).toBeVisible();page.once("dialog",dialog=>dialog.accept());await page.getByRole("button",{name:"Delete career"}).click();await expect(page.getByText(/v1 · career/)).toHaveCount(0);
+ await page.getByRole("link",{name:"Open settings for This Week in Rust"}).click();
+ await page.getByRole("button",{name:"Rules",exact:true}).click();
+ await expect(page.getByText("title contains “career” → mark read")).toBeVisible();
+ await expect(page.getByText("Workspace-level rules are not supported yet.")).toBeVisible();
 });
 
 test("Web Feed stages an advanced recipe, keeps actions stable and requires a fresh preview",async({page})=>{

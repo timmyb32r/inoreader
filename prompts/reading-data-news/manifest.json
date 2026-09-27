@@ -1,0 +1,68 @@
+{
+  "frozen_at": "2026-09-26T23:35:36.469837+00:00",
+  "version": "reading-data-news-2026-09-27-candidate-04",
+  "pipeline": "draft_then_source_review",
+  "style_path": "prompts/reading-data-news/candidates/candidate-04/style.md",
+  "system_path": "prompts/reading-data-news/candidates/candidate-04/system.md",
+  "transport_path": "prompts/reading-data-news/transport.md",
+  "model": "deepseek-v4-pro",
+  "thinking": {
+    "type": "enabled"
+  },
+  "reasoning_effort": "high",
+  "max_tokens": 16384,
+  "response_format": {
+    "type": "json_object"
+  },
+  "review": {
+    "version": "reading-data-news-factual-review-2026-09-27-v3",
+    "prompt_path": "prompts/reading-data-news/candidates/candidate-04/review.md",
+    "system_path": "prompts/reading-data-news/candidates/candidate-04/review-system.md",
+    "model": "deepseek-v4-pro",
+    "thinking": {
+      "type": "enabled"
+    },
+    "reasoning_effort": "low",
+    "max_tokens": 16384,
+    "response_format": {
+      "type": "json_object"
+    }
+  },
+  "request_timeout_seconds": 300,
+  "reference_bodies_seen_before_freeze": false,
+  "cohort03_output_bodies_seen_before_freeze": false,
+  "post_ids": [
+    1304,
+    610,
+    1229,
+    1215,
+    286,
+    651,
+    998,
+    916,
+    409,
+    602,
+    1286,
+    838,
+    9,
+    442,
+    1170,
+    1021,
+    273,
+    747,
+    901,
+    126
+  ],
+  "source_chars": 306994,
+  "selection": "Nineteen remaining untouched final article groups in original order plus previously unavailable-source recovery126; full source provenance in decisions03/cohort03 report. Old cohorts and all known feedback diagnostics are tuning, never fresh validation. Prior reference bodies remain unread. v17 preserves all49 first-review intents and five second-review comments; v3 factual review selected on known failures. All prompts frozen before any new output/reference is read.",
+  "budget_plan": "candidate04-two-stage-fresh-cohort03",
+  "provider_calls": 40,
+  "stopping": "One provider call at a time under original USD10 cap with full-context reserve. Keep all failures/unknowns; no automatic paid retries or substituted sources. Only complete checked summaries enter blind review; any missing or defective case fails the gate.",
+  "comparison_arm": null,
+  "prompt_approved": false,
+  "human_style_passes": null,
+  "human_sample_size": 20,
+  "required_style_passes": 18,
+  "factual_review_status": "pending; known-case checks are not fresh acceptance",
+  "research_report": "../../docs/research/summary-report.md"
+}

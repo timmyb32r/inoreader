@@ -2,12 +2,13 @@
 
 The application is a modular monolith. `reader-core` owns valid domain values and
 state transitions. `reader-application` coordinates use cases through ports.
-Collectors and the browser/HTTP runtime obtain untrusted external data. The YDB
-adapter owns persistence details. Server crates translate HTTP DTOs and embed the
+Collectors and the browser/HTTP runtime obtain untrusted external data. Storage
+adapters own persistence details; the deployed reader uses PostgreSQL, and the
+YDB adapter remains independently available. Server crates translate HTTP DTOs and embed the
 Preact build. The `inoreader` binary is the only composition root.
 
-Dependencies point toward domain contracts. Core never imports HTTP, YDB, CDP, or
-server code. Application code never embeds YQL. Adapters may depend on core and
+Dependencies point toward domain contracts. Core never imports HTTP, PostgreSQL,
+YDB, CDP, or server code. Application code never embeds SQL or YQL. Adapters may depend on core and
 application ports, but never on sibling adapters. The source-level boundary guard
 in `scripts/check_crate_boundaries.py` makes the initial direction discoverable;
 Cargo type checking remains the authoritative compiler boundary.
@@ -15,7 +16,7 @@ Cargo type checking remains the authoritative compiler boundary.
 `reader-ingest` is the durable background-work boundary. It depends on feed
 parsers and the shared web runtime, but neither on YDB nor the HTTP server. A
 worker claims a single fenced job and performs network work outside database
-transactions. The YDB adapter implements the semantic `IngestStore` operations:
+transactions. Both database adapters implement the semantic `IngestStore` operations:
 poll commit plus fan-out outbox, exact-key delivery plus origin attachment, and
 chunk publication plus manifest switch. Every operation checks the current lease
 token. Retry may repeat any operation; source identity, delivery origin and
@@ -37,9 +38,9 @@ manifest. URL-less `exact_location` is `(source_id, upstream_id)`. Job identity,
 lease token, run time and fan-out cursor are stored as separate typed columns so
 claim/renew/complete can use indexed predicates without parsing JSON.
 
-`commit_poll`, `deliver`, and `publish_content` are native YDB transactions. They
-read and verify the typed lease token inside the same serializable transaction as
-their writes. A general sequence of `compare_and_swap` calls is not an
+`commit_poll`, `deliver`, and `publish_content` are native database transactions.
+YDB checks the typed lease inside its serializable transaction; PostgreSQL locks
+and checks the job row in the transaction that writes its results. A general sequence of `compare_and_swap` calls is not an
 implementation of these operations. Feed validators are committed with a
 successful poll and sent as `If-None-Match`/`If-Modified-Since`; HTTP 304 updates
 no records and creates no fan-out work.
@@ -56,12 +57,37 @@ the runtime never reads the repository, `web/`, or `node_modules`. HTML uses a
 revalidation cache policy while content-addressed assets are immutable. Missing
 UI output fails compilation instead of silently shipping an API-only binary.
 
-Production has two Compose services: the application and Chromium. Managed YDB
-is outside Compose. The optional local overlay adds the official local YDB
-implementation for integration work without introducing another storage adapter.
-The app joins a public-egress network and an internal browser-control network;
-Chromium joins only browser-control. CDP is private and the browser container has
-no direct Internet route. No service receives `docker.sock`.
+Production Compose contains Caddy, the application, PostgreSQL and Chromium.
+PostgreSQL uses a durable volume on the private database network. The app also
+joins a public-egress network and an internal browser-control network; Chromium
+joins only browser-control. CDP is private and the browser container has no direct
+Internet route. No service receives `docker.sock`. The separate local YDB topology
+remains available for adapter acceptance tests.
+
+## Article conversations
+
+`reader-ai` owns validated AI policies, provider-independent conversation records,
+the repository port, encrypted credentials, DeepSeek protocol handling and durable
+generation orchestration. Its HTTP requests use `reader-web-runtime`; it does not
+depend on the server or a concrete database. PostgreSQL implements its repository
+port. `reader-server` authenticates and scopes every operation to its account, and
+the composition root wires optional, explicitly allowlisted access.
+
+An explicit Summarize action pins the complete article text and prompt/model
+version. Article opening never initiates a paid request. The conversation retains
+that immutable snapshot across follow-up turns and explicit regenerated versions.
+Leases and operation IDs prevent concurrent duplicate submissions; uncertain
+provider outcomes require a deliberate retry. The server verifies each complete
+quotation segment before publishing it. This is an exact-quotation guarantee,
+not a guarantee of factual correctness for arbitrary model prose.
+
+The Preact `ai/` feature owns profile controls, safe Markdown and the floating chat.
+The reader supplies article identity; `api/ai.ts` owns its wire contract. Chat state
+is account scoped, controls show pending feedback immediately, and dragging or
+streamed messages do not move the reader's controls. See
+[deepseek-operations.md](deepseek-operations.md) for key management, startup gates,
+limits, interrupted requests and the distinction between infrastructure readiness
+and human approval of the author-style prompt.
 
 ## Durable operations
 
@@ -71,8 +97,10 @@ application creates subscriptions. Unresolved OCR rows cannot be selected. The
 backend must atomically persist each application result so interruption resumes
 without duplicate subscriptions; a local file alone is never proof of apply.
 
-Backup and restore operate on the entire YDB database because archive content,
-library ownership, jobs, leases, and outbox records form one durable contract.
+Backup and restore cover the entire selected database because archive content,
+library ownership, jobs, leases, outbox records and conversations form one durable
+contract. PostgreSQL backups must include the AI tables; the credential-encryption
+key is backed up separately and must never be regenerated over an existing key.
 Restore targets a separate database and preserves primary rows exactly. Derived
 counters may be rebuilt only after primary verification. The application never
-falls back to files or memory when YDB is unavailable.
+falls back to files or memory when its database is unavailable.

@@ -1,7 +1,7 @@
 import { expect,test } from "@playwright/test";
 
 test("a 401 moves the application to sign in",async({page})=>{
- await page.route("**/api/bootstrap",route=>route.fulfill({status:401,contentType:"application/json",body:JSON.stringify({message:"Session expired"})}));await page.goto("/");await expect(page.getByRole("heading",{name:"Welcome back"})).toBeVisible();
+ await page.route("**/api/bootstrap**",route=>route.fulfill({status:401,contentType:"application/json",body:JSON.stringify({message:"Session expired"})}));await page.goto("/");await expect(page.getByRole("heading",{name:"Welcome back"})).toBeVisible();
 });
 
 test("invitation and reset screens expose correct autofill contracts",async({page})=>{

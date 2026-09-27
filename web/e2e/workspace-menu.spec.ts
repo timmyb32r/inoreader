@@ -1,11 +1,6 @@
 import { expect, test } from "@playwright/test";
 
 test("collapsed workspace menu fits its content without moving navigation", async ({ page }) => {
-  await page.route("**/api/bootstrap*", async route => {
-    const response = await route.fetch();
-    const data = await response.json();
-    await route.fulfill({ json: { ...data, account: { ...data.account, id: "fixture" }, articlePage: { articles: data.articles, total: data.articles.length, unreadTotal: 2 } } });
-  });
   await page.goto("/");
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   const trigger = page.locator(".workspace-button");

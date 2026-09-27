@@ -1,10 +1,12 @@
 //! PostgreSQL persistence boundary for the reader application.
 
+mod ai;
 mod ingest_store;
 mod publication_history;
 mod repository;
 pub mod schema;
 
+pub use ai::PostgresAiStore;
 pub use ingest_store::PostgresIngestStore;
 pub use repository::PostgresRepository;
 pub use schema::prepare_schema;

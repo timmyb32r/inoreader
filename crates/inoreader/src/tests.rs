@@ -9,6 +9,94 @@ fn example_configuration_is_valid() {
 }
 
 #[test]
+fn ai_policy_rejects_invalid_alternate_configuration_before_runtime() {
+    let value = example();
+    let raw = value.ai.unwrap();
+    assert!(
+        reader_ai::AiPolicy::new(raw.clone(), String::new(), String::new()).is_ok(),
+        "unapproved prompt may be absent"
+    );
+    let mut invalid = raw.clone();
+    invalid.prompt_approved = true;
+    assert!(reader_ai::AiPolicy::new(invalid, String::new(), String::new()).is_err());
+    let mut invalid = raw.clone();
+    invalid.lease_seconds = invalid.request_timeout_seconds;
+    assert!(reader_ai::AiPolicy::new(invalid, "prompt".into(), "review".into()).is_err());
+    for field in 0..3 {
+        let mut invalid = raw.clone();
+        match field {
+            0 => invalid.input_usd_per_million_tokens = "-1".into(),
+            1 => invalid.cached_input_usd_per_million_tokens = "NaN".into(),
+            _ => {
+                invalid.output_usd_per_million_tokens =
+                    "340282366920938463463374607431768211455".into()
+            }
+        }
+        assert!(reader_ai::AiPolicy::new(invalid, "prompt".into(), "review".into()).is_err());
+    }
+    let mut invalid = raw;
+    invalid.max_message_bytes = 0;
+    assert!(reader_ai::AiPolicy::new(invalid, "prompt".into(), "review".into()).is_err());
+}
+
+#[test]
+fn ai_generation_mode_rejects_ignored_parameters_and_non_finite_yaml() {
+    let with_mode = |mode: &str| {
+        let mut value: serde_yaml::Value =
+            serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+        value["ai"]["generation_mode"] = serde_yaml::from_str(mode).unwrap();
+        serde_yaml::from_value::<Config>(value)
+    };
+    for temperature in [".nan", ".inf", "-0.1"] {
+        assert!(with_mode(&format!("kind: standard\ntemperature: {temperature}")).is_err());
+    }
+    assert!(with_mode("kind: thinking\neffort: high\ntemperature: 0.3").is_err());
+    with_mode("kind: standard\ntemperature: 0.3")
+        .unwrap()
+        .validate()
+        .unwrap();
+    let config = with_mode("kind: thinking\neffort: high").unwrap();
+    config.validate().unwrap();
+    assert_eq!(
+        config.ai.unwrap().generation_mode,
+        reader_ai::GenerationMode::Thinking {
+            effort: reader_ai::ReasoningEffort::High
+        }
+    );
+}
+
+#[test]
+fn ai_review_configuration_is_explicit_and_both_prompts_must_be_approved_artifacts() {
+    let mut config = example().ai.unwrap();
+    config.prompt_approved = true;
+    assert!(reader_ai::AiPolicy::new(config.clone(), "style".into(), String::new()).is_err());
+    assert!(reader_ai::AiPolicy::new(config.clone(), String::new(), "review".into()).is_err());
+    reader_ai::AiPolicy::new(config.clone(), "style".into(), "review".into()).unwrap();
+    config.lease_seconds = config.request_timeout_seconds * 2;
+    assert!(config.validate().is_err());
+    config.lease_seconds += 1;
+    config.validate().unwrap();
+    for field in 0..4 {
+        let mut invalid = config.clone();
+        match field {
+            0 => invalid.review.model.clear(),
+            1 => invalid.review.max_output_tokens = 0,
+            2 => invalid.review.input_usd_per_million_tokens = "-1".into(),
+            _ => {
+                invalid.review.max_output_tokens =
+                    invalid.context_tokens - invalid.framing_tokens_base
+            }
+        }
+        assert!(invalid.validate().is_err());
+    }
+    let mut wire: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    wire["ai"]["review"]["generation_mode"] =
+        serde_yaml::from_str("kind: thinking\neffort: high\ntemperature: 0.3").unwrap();
+    assert!(serde_yaml::from_value::<Config>(wire).is_err());
+}
+
+#[test]
 fn zero_workers_explicitly_pauses_ingest_without_invalidating_the_server() {
     let mut value = example();
     value.scheduler.workers = 0;

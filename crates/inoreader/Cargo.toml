@@ -10,6 +10,7 @@ base64 = "0.22"
 clap.workspace = true
 reader-server-contracts = { path = "../reader-server-contracts" }
 reader-application = { path = "../reader-application" }
+reader-ai = { path = "../reader-ai" }
 reader-server-ui = { path = "../reader-server-ui" }
 reader-server = { path = "../reader-server" }
 reader-storage-ydb = { path = "../reader-storage-ydb" }

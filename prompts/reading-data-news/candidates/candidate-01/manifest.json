@@ -1,0 +1,46 @@
+{
+  "frozen_at": "2026-09-26T21:09:50.490803+00:00",
+  "version": "reading-data-news-2026-09-27-candidate-01",
+  "style_path": "prompts/reading-data-news/style.md",
+  "transport_path": "prompts/reading-data-news/transport.md",
+  "system_path": "prompts/reading-data-news/system.md",
+  "model": "deepseek-flash",
+  "thinking": {
+    "type": "disabled"
+  },
+  "temperature": 0.3,
+  "max_tokens": 4096,
+  "response_format": {
+    "type": "json_object"
+  },
+  "reference_bodies_seen_before_freeze": false,
+  "selection": "compact rules-v6; first blinded author feedback candidate, not accepted; v4 examples advantage not robust and overly long; v5/v6 factual limitations retained",
+  "post_ids": [
+    198,
+    127,
+    587,
+    464,
+    882,
+    900,
+    47,
+    299,
+    597,
+    449,
+    1384,
+    1107,
+    318,
+    82,
+    592,
+    715,
+    948,
+    826,
+    73,
+    305
+  ],
+  "prompt_approved": false,
+  "human_style_passes": null,
+  "human_sample_size": 20,
+  "required_style_passes": 18,
+  "factual_review_status": "failed: source SLO presented as achieved performance in case1107; remaining review in progress",
+  "research_report": "../../docs/research/summary-report.md"
+}

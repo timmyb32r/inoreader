@@ -13,8 +13,8 @@ YDB/Chromium acceptance gate has passed.
 ## Architecture
 
 The release contains one `inoreader` binary. It serves the same-origin API and a
-compile-time embedded `web/dist` build. YDB is the only production storage
-implementation. Chromium is a sidecar reached through CDP for JavaScript pages;
+compile-time embedded `web/dist` build. The deployed reader uses PostgreSQL; a
+separate YDB adapter is also available. Chromium is a sidecar reached through CDP for JavaScript pages;
 it is not part of the application binary.
 
 The important module boundaries are documented in
@@ -23,6 +23,8 @@ The important module boundaries are documented in
 - `reader-core` owns valid domain values and transitions;
 - `reader-application` coordinates use cases through narrow ports;
 - `reader-storage-ydb` owns YQL, schema, transactions, leases, and persistence;
+- `reader-storage-postgres` owns PostgreSQL persistence and transaction boundaries;
+- `reader-ai` owns account-scoped article conversations and the DeepSeek integration;
 - `reader-collectors` parses feeds and site-specific formats;
 - `reader-web-runtime` owns outbound HTTP/CDP policy and instrumentation;
 - server crates own HTTP contracts, routing, and embedded UI assets;
@@ -33,9 +35,8 @@ The important module boundaries are documented in
 - Rust 1.96.0 (pinned by `rust-toolchain.toml`)
 - Node.js 22 and npm for rebuilding the UI
 - `just` for repository commands
-- an accessible YDB database and credentials
-- Docker Compose for the packaged app/Chromium topology
-- the official `ydb` CLI for backup and restore
+- Docker Compose for the packaged app/PostgreSQL/Chromium topology
+- an accessible YDB database and official `ydb` CLI when using the YDB adapter
 
 ## Build and development checks
 
@@ -62,8 +63,10 @@ binary into the runtime image.
 
 Copy `config.example.yaml` to the untracked `config.yaml` and replace every
 environment-specific value. All resource and safety limits are explicit; unknown
-fields and unsupported content policy values are rejected. The YDB key referenced
-by Compose belongs at the untracked `secrets/ydb-key.json`.
+fields and unsupported content policy values are rejected. Compose references
+untracked secrets for PostgreSQL, the optional YDB credentials and AI credential
+encryption. Follow [docs/deepseek-operations.md](docs/deepseek-operations.md) for the
+32-byte encryption key; never replace an existing key during deployment.
 
 ```sh
 cargo run -p inoreader -- --config config.yaml check-config
@@ -71,9 +74,8 @@ cargo run -p inoreader -- --config config.yaml prepare-schema
 docker compose up --build
 ```
 
-Production Compose contains the app and Chromium; YDB Serverless remains an
-external managed dependency. `compose.local.yaml` starts a real local YDB
-container for isolated integration work:
+Production Compose contains the app, Caddy, PostgreSQL and Chromium.
+`compose.local.yaml` starts a real local YDB container for isolated adapter work:
 
 ```sh
 docker compose -f compose.local.yaml up -d
@@ -96,7 +98,7 @@ just seed-preview ACCOUNT_UUID WORKSPACE_UUID seed-manifest.json
 just seed-validate seed-manifest.json
 ```
 
-The generated manifest is account/workspace scoped and does not write YDB until
+The generated manifest is account/workspace scoped and does not write the database until
 the explicit `seed MANIFEST --apply` command. See
 [source-inventory/README.md](source-inventory/README.md) for fixture provenance
 and [docs/operations.md](docs/operations.md) for the atomic application contract.
@@ -108,6 +110,12 @@ failure behavior, seed review, and guarded YDB backup/restore commands. Restore
 must target a separate fresh database and is successful only after archived
 content, primary row counts, content manifests, and pending job recovery have
 been verified.
+
+The optional DeepSeek chat uses a key saved by each user in their own profile.
+Its infrastructure, encryption/backup requirements and prompt-approval gate are
+documented in [docs/deepseek-operations.md](docs/deepseek-operations.md). Research
+artifacts and blind author evaluation are separate from production readiness; no
+claim of an accepted author-style prompt follows from passing software tests.
 
 ## Test layout
 

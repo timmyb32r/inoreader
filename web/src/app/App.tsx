@@ -1,3 +1,8 @@
+import { ArticleReader } from "./ArticleReader";
+import { ArticleChatWidget } from "../ai/ArticleChatWidget";
+import { DeepSeekProfile } from "../ai/DeepSeekProfile";
+import { useArticleChat } from "../ai/useArticleChat";
+import { useAiProfile } from "../ai/useAiProfile";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { formatArticleDate } from "../ui/formatArticleDate";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
@@ -16,7 +21,7 @@ import { ActivityDashboard, useActivityTracker } from "./ActivityDashboard";
 import { usePopupNavigation } from "./usePopupNavigation";
 
 type View = "feed" | "subscription" | "later";
-type Modal = "add" | "pause" | "archive" | "rules" | "webfeed" | "shortcuts" | null;
+type Modal = "add" | "pause" | "archive" | "rules" | "webfeed" | "shortcuts" | "profile" | null;
 const views: { id: View; label: string; icon: IconName }[] = [
   { id: "feed", label: "Feed", icon: "inbox" }, { id: "later", label: "Read later", icon: "later" },
 ];
@@ -45,6 +50,9 @@ export function App({ client }: { client: ApiClient }) {
   const [signingOut, setSigningOut] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [account, setAccount] = useState<{id:string;displayName:string;initials:string}>({ id: "", displayName: "", initials: "" });
+  const aiProfileState = useAiProfile(client.ai, signedIn ? account.id : "");
+  const aiProfile = aiProfileState.profile;
+  const chat = useArticleChat(client.ai, signedIn ? account.id : "", aiProfile);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [switchingWorkspace, setSwitchingWorkspace] = useState(false);
   const [markingAll, setMarkingAll] = useState(false);
@@ -199,7 +207,7 @@ export function App({ client }: { client: ApiClient }) {
       <button class="icon-button" aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`} onClick={() => setTheme(theme === "light" ? "dark" : "light")}><Icon name={theme === "light" ? "moon" : "sun"}/></button>
       <div class="account-menu" ref={accountMenuRef}>
         <button class="avatar" aria-label="Account menu" aria-haspopup="menu" aria-expanded={accountMenuOpen} onClick={() => setAccountMenuOpen((open) => !open)}>{account.initials}</button>
-        {accountMenuOpen && <div class="account-popover" role="menu"><div class="account-popover__identity"><strong>{account.displayName}</strong><span>Administrator</span></div><button role="menuitem" aria-busy={signingOut} disabled={signingOut} onClick={() => { if (signingOut || !confirmDiscard()) return; setSigningOut(true); client.signOut().then(() => setSignedIn(false)).catch((error: Error) => announce(error.message)).finally(() => setSigningOut(false)); }}>{signingOut ? <><span class="spinner"/> Signing out…</> : "Sign out"}</button></div>}
+        {accountMenuOpen && <div class="account-popover" role="menu"><div class="account-popover__identity"><strong>{account.displayName}</strong><span>Administrator</span></div><button role="menuitem" onClick={() => { setAccountMenuOpen(false); setModal("profile"); }}>Profile</button><button role="menuitem" aria-busy={signingOut} disabled={signingOut} onClick={() => { if (signingOut || !confirmDiscard()) return; setSigningOut(true); client.signOut().then(() => setSignedIn(false)).catch((error: Error) => announce(error.message)).finally(() => setSigningOut(false)); }}>{signingOut ? <><span class="spinner"/> Signing out…</> : "Sign out"}</button></div>}
       </div>
     </header>
     <main class={`reader-grid${readerPath==="/"?" reader-grid--home":""}${sidebarCollapsed?" reader-grid--collapsed":""}`}>
@@ -229,7 +237,7 @@ export function App({ client }: { client: ApiClient }) {
         </div>
         <nav class="article-pager" aria-label="Article pages"><button disabled={!newerCursor||paging} aria-busy={paging} onClick={()=>newerCursor&&loadPage(view,selectedSubscriptionId,newerCursor,"newer",Math.max(1,pageNumber-1))}>← Newer</button><span>50 articles per request</span><button disabled={!olderCursor||paging} aria-busy={paging} onClick={()=>olderCursor&&loadPage(view,selectedSubscriptionId,olderCursor,"older",pageNumber+1)}>Older →</button></nav>
       </section>
-      {selected ? <ArticleReader article={selected} pending={pendingArticleMutations} className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`} onBack={() => setMobilePanel("list")} onUpdate={(patch) => update(selected.id, patch)} onRefresh={() => client.refreshFullText(workspaceId, selected.id)} onNotice={announce}/> : <section class="article-reader empty-reader"><Icon name="inbox" size={28}/><p>Select an article to read</p></section>}</>}
+      {selected ? <ArticleReader article={selected} pending={pendingArticleMutations} className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`} onBack={() => setMobilePanel("list")} onUpdate={(patch) => update(selected.id, patch)} onRefresh={() => client.refreshFullText(workspaceId, selected.id)} onNotice={announce} summaryPending={!!chat.busy} onSummarize={() => void chat.open({ articleId: selected.id, workspaceId, title: selected.title })}/> : <section class="article-reader empty-reader"><Icon name="inbox" size={28}/><p>Select an article to read</p></section>}</>}
       </>
     </main>
     {subscriptionRoute && <SubscriptionsPage client={client} workspaceId={workspaceId} workspaceName={workspace} subscriptions={subscriptions} articles={articles} subscriptionId={subscriptionRoute[1] ? decodeURIComponent(subscriptionRoute[1]) : undefined} initialTab={subscriptionRoute[2]==="activity"?"activity":"overview"} onBack={closeSubscriptions} onOpenDetail={(id)=>navigate(`/subscriptions/${encodeURIComponent(id)}`)} onOpenArticles={(id,articleId)=>{if(navigate("/reader")){loadPage("subscription",id,undefined,undefined,1,articleId);if(!articleId)setMobilePanel("list")}}} onRefresh={(id)=>client.refreshSubscription(id)} onPause={(id)=>{setPauseTarget(id);setModal("pause")}} onChanged={(changed)=>setSubscriptions(items=>items.map(item=>item.id===changed.id?changed:item))} onEditRecipe={(recipe)=>{setEditingRecipe(recipe);setModal("webfeed")}} onDirtyNoteChange={(dirty)=>{dirtySubscriptionNote.current=dirty}}/>}
@@ -240,7 +248,9 @@ export function App({ client }: { client: ApiClient }) {
     {modal === "archive" && archived && <RestoreDialog onClose={() => setModal(null)} onDone={() => client.restoreWorkspace(workspaceId).then(() => { setArchived(false); setWorkspaces(items=>items.map(item=>item.id===workspaceId?{...item,archived:false}:item)); setModal(null); announce("Workspace restored"); })}/>}
     {modal === "rules" && selectedSubscription && <RulesDialog client={client} workspaceId={workspaceId} subscriptionId={selectedSubscription.id} onClose={() => setModal(null)}/>}
     {modal === "webfeed" && <WebFeedBuilder client={client} workspaceId={workspaceId} editing={editingRecipe} onClose={() => {setEditingRecipe(null);setModal(null)}} onDone={(added) => { setSubscriptions((items) => [...items, added]);setEditingRecipe(null); setModal(null); announce("Web feed created"); }} onUpdated={()=>{setEditingRecipe(null);setModal(null);announce("Web feed recipe updated; collection queued")}}/>}
-    {modalStack.includes("shortcuts") && <div hidden={modal !== "shortcuts"}><AdvancedSettings client={client} workspaceId={workspaceId} workspaceName={workspace} subscriptions={subscriptions} selectedSubscription={settingsSubscription} onSelectSubscription={setSettingsTarget} onSubscription={(changed)=>setSubscriptions(items=>items.map(item=>item.id===changed.id?changed:item))} onWorkspace={(item)=>{setWorkspaces(items=>[...items,item]);setWorkspaceId(item.id);setArticles([]);setSubscriptions([]);setSelectedSubscriptionId(null);}} onRename={(item)=>setWorkspaces(items=>items.map(old=>old.id===item.id?item:old))} onEditWebFeed={(recipe)=>{setEditingRecipe(recipe);setModal("webfeed")}} onClose={() => setModal(null)} onPause={() => {setPauseTarget(settingsTarget);setModal("pause")}} onResume={() => {if(!settingsSubscription)return;client.resumeSubscription(settingsSubscription.id).then(()=>{setSubscriptions(items=>items.map(item=>item.id===settingsSubscription.id?{...item,status:"active",reason:undefined}:item));setModal(null);announce("Subscription resumed; catch-up queued");});}}/></div>}
+    {chat.visible && <ArticleChatWidget controller={chat} profile={aiProfile} onProfile={() => setModal("profile")}/>}
+    {modal === "profile" && <Dialog title="Profile" description="Your personal DeepSeek key and balance." onClose={() => setModal(null)} width="540px"><DeepSeekProfile client={client.ai} onProfile={value => aiProfileState.update(account.id, value)} completedGeneration={chat.completedGeneration}/><footer class="modal__actions"><span/><span/><span/><button class="primary-button" onClick={() => setModal(null)}>Done</button></footer></Dialog>}
+    {modalStack.includes("shortcuts") && <div hidden={modal !== "shortcuts"}><AdvancedSettings onProfile={() => setModal("profile")} client={client} workspaceId={workspaceId} workspaceName={workspace} subscriptions={subscriptions} selectedSubscription={settingsSubscription} onSelectSubscription={setSettingsTarget} onSubscription={(changed)=>setSubscriptions(items=>items.map(item=>item.id===changed.id?changed:item))} onWorkspace={(item)=>{setWorkspaces(items=>[...items,item]);setWorkspaceId(item.id);setArticles([]);setSubscriptions([]);setSelectedSubscriptionId(null);}} onRename={(item)=>setWorkspaces(items=>items.map(old=>old.id===item.id?item:old))} onEditWebFeed={(recipe)=>{setEditingRecipe(recipe);setModal("webfeed")}} onClose={() => setModal(null)} onPause={() => {setPauseTarget(settingsTarget);setModal("pause")}} onResume={() => {if(!settingsSubscription)return;client.resumeSubscription(settingsSubscription.id).then(()=>{setSubscriptions(items=>items.map(item=>item.id===settingsSubscription.id?{...item,status:"active",reason:undefined}:item));setModal(null);announce("Subscription resumed; catch-up queued");});}}/></div>}
   </div>;
 }
 
@@ -253,10 +263,6 @@ function ArticleRow({ article, selected, laterPending, onOpen, onLater }: { arti
   return <article class={`article-row ${selected ? "selected" : ""} ${article.read ? "read" : ""}`}><button class="article-row__main" onClick={onOpen}><span class="unread-dot"/><span class="article-row__source">{article.sources?.join(" · ") ?? article.source}</span><time>{formatArticleDate(article.age)}</time><h2>{article.title}</h2><p>{article.excerpt}</p><span class={`fulltext fulltext--${article.fullText}`}>{article.fullText === "pending" && <span class="spinner" aria-hidden="true"/>}{article.fullText === "ready" ? "Full text" : article.fullText === "pending" ? "Fetching full text" : "Excerpt only"}</span></button><button class={`row-later ${article.later ? "active" : ""}`} disabled={laterPending} aria-busy={laterPending} aria-label={article.later ? "Remove article from Read later" : "Read article later"} onClick={onLater}>{laterPending?<span class="spinner"/>:<Icon name="later" size={17}/>}</button></article>;
 }
 
-function ArticleReader({ article, pending, className, onBack, onUpdate, onRefresh, onNotice }: { article: Article; pending:Set<string>;className: string; onBack: () => void; onUpdate: (p: Partial<Article>) => void; onRefresh: () => Promise<void>; onNotice: (m: string) => void }) {
-  const [refreshing,setRefreshing]=useState(false);
-  return <article class={`article-reader ${className}`} aria-label="Article reader"><header class="reader-toolbar"><button class="icon-button reader-back" aria-label="Back to articles" onClick={onBack}><span aria-hidden="true">←</span></button><div class="reader-toolbar__states"><StateButton icon="unread" label={article.read ? "Mark unread" : "Mark read"} active={!article.read} pending={pending.has(`${article.id}:read`)} onClick={() => onUpdate({ read: !article.read })}/><StateButton icon="later" label={article.later ? "Remove from later" : "Read later"} active={article.later} pending={pending.has(`${article.id}:later`)} onClick={() => onUpdate({ later: !article.later })}/></div><a class="icon-button toolbar-tooltip toolbar-tooltip--right" data-tooltip="Open original" aria-label="Open original" href={article.url} target="_blank" rel="noopener noreferrer"><Icon name="external"/></a></header><div class="reader-body"><div class="reader-meta"><span class="source__mark">{article.source.slice(0,1)}</span><div><strong>{article.source}</strong><time>{formatArticleDate(article.age)}</time></div></div><h1>{article.title}</h1><p class="reader-deck">{article.excerpt}</p>{article.fullText === "pending" && <div class="content-status"><span class="spinner"/> Fetching the full article. You can keep reading this excerpt.</div>}{article.fullText === "failed" && <div class="content-status content-status--error"><span>!</span> Full text was unavailable{article.fullTextReason ? ` (${article.fullTextReason})` : ""}. The source excerpt is preserved. <button disabled={refreshing} onClick={() => {if(refreshing)return;setRefreshing(true);onRefresh().then(()=>onNotice("Full-text refresh queued")).catch((error:Error)=>onNotice(error.message)).finally(()=>setRefreshing(false));}}>{refreshing?"Queuing…":"Try again"}</button></div>}{article.fullText === "pending" && <div class="article-content-loading" role="status" aria-label="Loading full article content"><span class="spinner" aria-hidden="true"/></div>}{article.bodyHtml ? <div class="article-content" dangerouslySetInnerHTML={{ __html: article.bodyHtml }}/> : article.body.map((paragraph,index) => <p key={index}>{paragraph}</p>)}<footer class="article-sources"><span>Delivered by</span>{(article.sources ?? [article.source]).map((source) => <span class="source-chip" key={source}>{source}</span>)}</footer></div></article>;
-}
 
 
 type StoredArticlePagePosition = { view: View; subscriptionId: string | null; cursor?: string; direction?: "older" | "newer"; batch: number };
@@ -277,7 +283,7 @@ function writeArticlePagePosition(view: View, subscriptionId: string | null, cur
   history.replaceState(history.state, "", `${window.location.pathname}${query.size ? `?${query}` : ""}`);
 }
 
-function StateButton({ icon, label, active, pending, onClick }: { icon: IconName; label: string; active?: boolean; pending:boolean;onClick: () => void }) { return <button class={`icon-button toolbar-tooltip ${active ? "active" : ""}`} data-tooltip={label} disabled={pending} aria-busy={pending} aria-label={label} aria-pressed={active} onClick={onClick}>{pending?<span class="spinner"/>:<Icon name={icon}/>}</button>; }
+
 function EmptyState() { return <div class="empty-state"><span><Icon name="check" size={24}/></span><h2>Nothing here right now</h2><p>You are caught up in this view.</p></div>; }
 
 function AddSubscription({ client, workspaceId, onClose, onWebFeed, onDone }: { client: ApiClient; workspaceId: string; onClose: () => void; onWebFeed: () => void; onDone: (item: Subscription) => void }) {

@@ -1,0 +1,18 @@
+{
+  "received_at": "2026-09-26T21:50:05.160042+00:00",
+  "evaluation_id": "e9ec28c3cdf2a4acc8ad35c1a5f3063af",
+  "candidate_version": "reading-data-news-2026-09-27-candidate-01",
+  "items_match_manifest_exactly": true,
+  "style_likes": 19,
+  "style_dislikes": 1,
+  "comments": 18,
+  "user_factual_flags": 0,
+  "independent_factual_gate": "failed",
+  "known_definite_case_ids": [
+    82,
+    1107,
+    464
+  ],
+  "prompt_approved": false,
+  "note": "Likes apply to the assessed outputs only; detailed corrections are binding input for the next prompt version. Zero user flags does not negate independent source review."
+}

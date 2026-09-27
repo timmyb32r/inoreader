@@ -9,6 +9,7 @@ async-trait.workspace = true
 chrono.workspace = true
 url.workspace = true
 reader-application = { path = "../reader-application" }
+reader-ai = { path = "../reader-ai" }
 reader-core = { path = "../reader-core" }
 reader-server-contracts = { path = "../reader-server-contracts" }
 reader-web-runtime = { path = "../reader-web-runtime" }

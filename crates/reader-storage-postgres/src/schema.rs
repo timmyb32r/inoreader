@@ -267,6 +267,9 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     sqlx::raw_sql(SCHEMA_SQL)
         .execute(&mut **transaction)
         .await?;
+    sqlx::raw_sql(crate::ai::SCHEMA)
+        .execute(&mut **transaction)
+        .await?;
     migrate_library_dedup_index(transaction).await?;
     Ok(())
 }

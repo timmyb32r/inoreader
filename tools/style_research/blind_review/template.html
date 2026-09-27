@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-@@NONCE@@'; style-src 'nonce-@@NONCE@@'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Проверка авторского стиля</title>
+  <style nonce="@@NONCE@@">@@STYLE@@</style>
+</head>
+<body>
+  <main class="app">
+    <header class="masthead">
+      <div><p class="eyebrow">СЛЕПАЯ ОЦЕНКА</p><h1>Звучит как вы?</h1></div>
+      <div class="progress-box"><span id="progress-text">Подготовка…</span><progress id="progress" aria-label="Прогресс оценки" value="0" max="20"></progress></div>
+    </header>
+    <nav id="item-nav" aria-label="Перейти к материалу"></nav>
+    <section class="workspace">
+      <article class="article-panel">
+        <div class="article-toolbar"><span id="item-number"></span><a id="source-link" target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer">Открыть оригинал ↗</a><button id="raw-toggle" type="button" aria-pressed="false">Исходная разметка</button></div>
+        <div id="summary" tabindex="0" aria-label="Полный пересказ"></div>
+      </article>
+      <aside class="feedback" aria-label="Ваша оценка">
+        <h2>Вы бы так написали?</h2>
+        <div class="votes" role="group" aria-label="Сходство с вашим стилем">
+          <button id="like" type="button" aria-pressed="false">Похоже на меня</button>
+          <button id="unlike" type="button" aria-pressed="false">Не мой стиль</button>
+        </div>
+        <fieldset id="issues"><legend>Есть проблема, если заметили</legend></fieldset>
+        <label class="comment-label" for="comment">Что звучит не по-вашему? <span>Необязательно</span></label>
+        <div id="comment-mount"></div>
+        <p class="privacy">Черновик остаётся в этом браузере. Сохраните экспорт, чтобы передать оценки.</p>
+      </aside>
+    </section>
+    <footer>
+      <div class="actions"><button id="previous" type="button">← Назад</button><button id="next" type="button">Далее →</button><button id="export" class="primary" type="button">Экспорт оценок</button></div>
+      <div class="status-row"><p id="status" role="status" aria-live="polite"></p><button id="recover-draft" type="button" hidden>Скачать прежний черновик</button></div>
+    </footer>
+  </main>
+  <noscript>Для оценки включите JavaScript. Эта страница работает локально и не отправляет данные.</noscript>
+  <script id="review-data" type="application/json" nonce="@@NONCE@@">@@DATA@@</script>
+  <script nonce="@@NONCE@@">@@SCRIPT@@</script>
+</body>
+</html>

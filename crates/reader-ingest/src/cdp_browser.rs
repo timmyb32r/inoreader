@@ -141,7 +141,10 @@ impl CdpBrowserCollector {
         Ok(value)
     }
     pub async fn health_check(&self) -> Result<(), FetchError> {
-        let endpoint = self.websocket_endpoint().await?;
+        let endpoint = self.websocket_endpoint().await.map_err(|_| {
+            self.available.store(false, Ordering::Relaxed);
+            FetchError::Rejected("browser_probe_failed".into())
+        })?;
         let connection =
             tokio::time::timeout(self.navigation_timeout, Browser::connect(endpoint)).await;
         let (browser, mut handler) = match connection {
@@ -171,7 +174,10 @@ impl CdpBrowserCollector {
         }
     }
     async fn connect(&self) -> Result<(Browser, chromiumoxide::Handler), FetchError> {
-        let endpoint = self.websocket_endpoint().await?;
+        let endpoint = self.websocket_endpoint().await.map_err(|_| {
+            self.available.store(false, Ordering::Relaxed);
+            FetchError::Rejected("browser_degraded".into())
+        })?;
         match tokio::time::timeout(self.navigation_timeout, Browser::connect(endpoint)).await {
             Ok(Ok(value)) => {
                 self.available.store(true, Ordering::Relaxed);

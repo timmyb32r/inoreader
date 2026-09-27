@@ -79,6 +79,91 @@ impl ExternalRequestObserver for Arc<Observer> {
     }
 }
 
+#[tokio::test]
+async fn paid_post_is_never_retried_on_another_address_after_transport_error() {
+    let first: IpAddr = "93.184.216.34".parse().unwrap();
+    let second: IpAddr = "93.184.216.35".parse().unwrap();
+    let observer = Arc::new(Observer::default());
+    let client = OutboundHttpClient::new(
+        OutboundPolicy::new(
+            false,
+            OutboundLimits {
+                connect_timeout: Duration::from_secs(1),
+                request_deadline: Duration::from_secs(2),
+                max_redirect_hops: 1,
+                max_response_body_bytes: 100,
+            },
+        ),
+        Resolver {
+            answers: Mutex::new(VecDeque::from([vec![first, second]])),
+        },
+        FirstAddressFails {
+            first,
+            attempts: Mutex::new(vec![]),
+        },
+        observer.clone(),
+    );
+    let request = PreparedRequest {
+        method: Method::POST,
+        url: Url::parse("https://model.test/chat").unwrap(),
+        headers: HeaderMap::new(),
+        body: Some(b"private input".to_vec()),
+    };
+    assert!(client
+        .execute_stream(request, "deepseek", "chat_completion")
+        .await
+        .is_err());
+    assert_eq!(*client.transport.attempts.lock().unwrap(), vec![first]);
+    assert_eq!(observer.0.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn dropping_stream_cancels_body_and_records_completion_once() {
+    let public: IpAddr = "93.184.216.34".parse().unwrap();
+    let observer = Arc::new(Observer::default());
+    let client = OutboundHttpClient::new(
+        OutboundPolicy::new(
+            false,
+            OutboundLimits {
+                connect_timeout: Duration::from_secs(1),
+                request_deadline: Duration::from_secs(2),
+                max_redirect_hops: 1,
+                max_response_body_bytes: 100,
+            },
+        ),
+        Resolver {
+            answers: Mutex::new(VecDeque::from([vec![public]])),
+        },
+        Transport {
+            responses: Mutex::new(VecDeque::from([response(StatusCode::OK, None, b"partial")])),
+            requests: Mutex::new(vec![]),
+        },
+        observer.clone(),
+    );
+    let mut stream = client
+        .execute_stream(
+            PreparedRequest {
+                method: Method::GET,
+                url: Url::parse("https://model.test/chat").unwrap(),
+                headers: HeaderMap::new(),
+                body: None,
+            },
+            "deepseek",
+            "chat_completion",
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        stream.next_chunk().await.unwrap(),
+        Some(b"partial".to_vec())
+    );
+    drop(stream);
+    let events = observer.0.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].system, "deepseek");
+    assert_eq!(events[0].outcome, ExternalRequestOutcome::Failed);
+}
+
 fn response(status: StatusCode, location: Option<&'static str>, body: &[u8]) -> TransportResponse {
     let mut headers = HeaderMap::new();
     if let Some(location) = location {

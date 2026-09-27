@@ -25,6 +25,8 @@ def main() -> int:
         "web/package-lock.json",
         "tools/test_ydb_backup_restore.sh",
         "tools/fixtures/ydb_backup_restore.sql",
+        "docs/deepseek-operations.md",
+        "prompts/reading-data-news/transport.md",
     )
     for relative in required:
         if not (ROOT / relative).is_file():
@@ -39,6 +41,18 @@ def main() -> int:
         failures.append("Compose command must not repeat the Dockerfile ENTRYPOINT")
     if "target: ydb-key.json" not in compose:
         failures.append("Compose must mount the YDB secret at the configured credential path")
+    for expected in (
+        "AI_ENCRYPTION_KEY_FILE: /run/secrets/ai-encryption-key",
+        "target: ai-encryption-key",
+        "file: ./secrets/ai-encryption-key",
+        "./prompts:/etc/inoreader/prompts:ro",
+    ):
+        if expected not in compose:
+            failures.append(f"Compose lacks the DeepSeek deployment contract {expected!r}")
+    if "COPY prompts/reading-data-news/transport.md prompts/reading-data-news/transport.md" not in dockerfile:
+        failures.append("Rust image build must include the embedded DeepSeek transport instruction")
+    if "secrets" not in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines():
+        failures.append("Docker context must exclude the secrets directory")
     if "docker.sock" in compose:
         failures.append("production Compose must not mount docker.sock")
     if 'ports: ["9222"]' in compose or '9222:9222' in compose:
@@ -47,14 +61,18 @@ def main() -> int:
         failures.append("production Compose must not contain local YDB")
     if not re.search(r"browser-control:\s*\n\s+name:.*\n\s+internal:\s*true", compose):
         failures.append("browser-control network must be internal")
-    app_block, separator, chromium_block = compose.rpartition("\n  chromium:\n")
-    if not separator:
-        failures.append("production Compose has no Chromium service")
+    app_match = re.search(r"^  app:\n(.*?)(?=^  \S|^\S|\Z)", compose, re.M | re.S)
+    chromium_match = re.search(r"^  chromium:\n(.*?)(?=^  \S|^\S|\Z)", compose, re.M | re.S)
+    if app_match is None:
+        failures.append("production Compose has no app service")
     else:
-        app_networks = app_block.rsplit("    networks:\n", 1)[-1]
+        app_networks = app_match.group(1).rsplit("    networks:\n", 1)[-1]
         if "- public-egress" not in app_networks or "- browser-control" not in app_networks:
             failures.append("app must join both public-egress and browser-control")
-        chromium_service = chromium_block.partition("secrets:\n")[0]
+    if chromium_match is None:
+        failures.append("production Compose has no Chromium service")
+    else:
+        chromium_service = chromium_match.group(1)
         chromium_networks = chromium_service.rsplit("    networks:\n", 1)[-1]
         if "- browser-control" not in chromium_networks or "- public-egress" in chromium_networks:
             failures.append("Chromium must join only browser-control")

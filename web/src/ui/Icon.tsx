@@ -1,8 +1,9 @@
 import type { JSX } from "preact";
 
-export type IconName = "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
+export type IconName = "chat" | "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
 
 const paths: Record<IconName, JSX.Element> = {
+  chat: <><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></>,
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
   collapse: <><path d="m14 7-5 5 5 5"/><path d="M20 4v16"/></>,
   inbox: <><path d="M4 5h16v14H4z"/><path d="M4 14h4l2 3h4l2-3h4"/></>,

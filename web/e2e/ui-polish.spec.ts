@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(async ({ page }) => {
   await page.route("**/api/bootstrap*", async route => {
     const data = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...data, account: { ...data.account, id: "polish-fixture" }, subscriptions: [...data.subscriptions, { id: "broken", name: "Broken source", status: "active", count: 0, needsAttention: true, attentionReason: "Repeated fetch failures" }], articlePage: { articles: data.articles, total: data.articles.length, unreadTotal: 2 } } });
+    await route.fulfill({ json: { ...data, subscriptions: [...data.subscriptions, { id: "broken", name: "Broken source", status: "active", count: 0, needsAttention: true, attentionReason: "Repeated fetch failures" }] } });
   });
 });
 

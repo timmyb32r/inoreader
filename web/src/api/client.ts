@@ -1,5 +1,6 @@
 import type { Article, Subscription, Workspace } from "../app/data";
 import { reportApiRequest } from "../performanceDiagnostics";
+import { AiClient } from "./ai";
 
 export type ArticlePage = { articles:Article[]; total:number; unreadTotal:number; newerCursor?:string; olderCursor?:string };
 export type ArticlePagePosition = { view?:string; subscriptionId?:string|null; cursor?:string; direction?:"older"|"newer" };
@@ -50,7 +51,8 @@ export type Transport = <T>(path: string, init?: RequestInit) => Promise<T>;
 export class ApiError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
 export class ApiClient {
-  constructor(private readonly transport: Transport) {}
+  readonly ai: AiClient;
+  constructor(private readonly transport: Transport) { this.ai = new AiClient(transport); }
   bootstrap = (position?:ArticlePagePosition) => this.transport<Bootstrap>(`/api/bootstrap${articlePageQuery(position)}`);
   signIn = (username: string, password: string) => this.transport<void>("/api/auth/sessions", json("POST", { username, password }));
   signOut = () => this.transport<void>("/api/auth/sessions", { method: "DELETE" });

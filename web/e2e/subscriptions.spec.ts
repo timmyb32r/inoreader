@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("subscription catalog navigates to durable details and explicitly saves a note", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "Subscriptions" }).click();
+  await page.getByRole("button", { name: /^Subscriptions \d+$/ }).click();
   await expect(page).toHaveURL(/\/subscriptions$/);
   await expect(page.getByRole("heading", { name: "Subscriptions" })).toBeVisible();
 

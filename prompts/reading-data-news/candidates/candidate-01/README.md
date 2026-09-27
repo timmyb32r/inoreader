@@ -1,0 +1,1 @@
+Immutable candidate01 prompt snapshot. Original manifest paths referred to the active artifact before candidate02 replaced it. Use the four files in this directory to reproduce candidate01; all original request payloads and the original frozen plan are retained in local research state. Factual review failed on cases82,1107,464; no author acceptance.

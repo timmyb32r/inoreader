@@ -16,6 +16,9 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/ai.rs"]
+mod ai_tests;
+
 const POSTGRES_IMAGE: &str =
     "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
@@ -189,7 +192,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 34); // Includes the subscription icon cache.
+    assert_eq!(table_count, 37); // AI call accounting is atomic in the chat document.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -253,6 +256,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_lease_fencing(&pool).await;
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
+    ai_tests::verify(&pool).await;
 }
 
 async fn verify_article_state_conversion(pool: &PgPool) {

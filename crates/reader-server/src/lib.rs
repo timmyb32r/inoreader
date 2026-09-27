@@ -23,6 +23,7 @@ use uuid::Uuid;
 const SESSION_COOKIE: &str = "reader_session";
 const ARTICLE_PAGE_SIZE: usize = 50;
 
+mod ai;
 mod api_observability;
 mod opml;
 
@@ -50,6 +51,7 @@ pub trait FeedDiscovery: Send + Sync {
 }
 
 pub struct AppState<R> {
+    ai: Option<Arc<reader_ai::AiService>>,
     repository: Arc<R>,
     discovery: Arc<dyn FeedDiscovery>,
     reason_policy: ReasonPolicy,
@@ -61,6 +63,7 @@ pub struct AppState<R> {
 impl<R> Clone for AppState<R> {
     fn clone(&self) -> Self {
         Self {
+            ai: self.ai.clone(),
             repository: self.repository.clone(),
             discovery: self.discovery.clone(),
             reason_policy: self.reason_policy,
@@ -82,6 +85,7 @@ impl<R> AppState<R> {
         bulk_mutation_limit: usize,
     ) -> Self {
         Self {
+            ai: None,
             repository,
             discovery,
             reason_policy,
@@ -90,6 +94,11 @@ impl<R> AppState<R> {
             login_attempts_per_minute,
             bulk_mutation_limit,
         }
+    }
+
+    pub fn with_ai(mut self, ai: Arc<reader_ai::AiService>) -> Self {
+        self.ai = Some(ai);
+        self
     }
 }
 
@@ -191,6 +200,7 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         )
         .route("/api/opml/import", post(import_opml::<R>))
         .route("/api/opml/export", get(export_opml::<R>))
+        .merge(ai::routes::<R>())
         .with_state(state)
         .layer(middleware::from_fn(api_observability::observe))
 }
@@ -1685,6 +1695,7 @@ fn html_text_paragraphs(value: &str) -> Vec<String> {
 
 #[derive(Debug)]
 enum ApiFailure {
+    Ai(reader_ai::AiError),
     Command(CommandError),
     Auth(AuthError),
     Repository(RepositoryError),
@@ -1728,6 +1739,26 @@ impl From<opml::Error> for ApiFailure {
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Ai(error) => {
+                use reader_ai::AiError;
+                let (status, code) = match &error {
+                    AiError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+                    AiError::Conflict => (StatusCode::CONFLICT, "ai_conflict"),
+                    AiError::Unavailable | AiError::PromptPending | AiError::MissingKey => {
+                        (StatusCode::CONFLICT, "ai_unavailable")
+                    }
+                    AiError::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "ai_rate_limit"),
+                    AiError::OriginalTitleChanged => {
+                        (StatusCode::UNPROCESSABLE_ENTITY, "original_title_changed")
+                    }
+                    AiError::Provider => (StatusCode::BAD_GATEWAY, "ai_provider_error"),
+                    AiError::Storage | AiError::Encryption | AiError::Configuration => {
+                        (StatusCode::INTERNAL_SERVER_ERROR, "ai_internal_error")
+                    }
+                    _ => (StatusCode::UNPROCESSABLE_ENTITY, "ai_invalid_request"),
+                };
+                (status, code, error.to_string())
+            }
             Self::Unauthorized => (
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",

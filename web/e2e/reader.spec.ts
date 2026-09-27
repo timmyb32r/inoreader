@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("reader navigation and article states", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/reader");
   await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
   await page.getByRole("heading", { name: "The durable queue is the product", level: 2 }).click();
   await expect(page.getByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
@@ -11,7 +11,7 @@ test("reader navigation and article states", async ({ page }) => {
 });
 
 test("pause validates reason without moving the dialog footer", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/reader");
   await page.getByRole("navigation", { name: "Subscriptions" }).getByRole("button", { name: /This Week in Rust/ }).click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Pause This Week in Rust" }).click();
@@ -27,7 +27,7 @@ test("pause validates reason without moving the dialog footer", async ({ page })
 
 test("theme and responsive panels remain usable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/reader");
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "dark");
   await page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 }).click();
@@ -37,7 +37,7 @@ test("theme and responsive panels remain usable", async ({ page }) => {
 });
 
 test("search is an inert placeholder", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/reader");
   await expect(page.getByRole("button", { name: /Search/ }).first()).toBeDisabled();
   await expect(page.getByRole("searchbox")).toHaveCount(0);
   await expect(page).not.toHaveURL(/search/);

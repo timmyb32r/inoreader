@@ -60,16 +60,22 @@ impl YdbContainer {
     fn connection_string(&self) -> String {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
-            let processes = command("docker", &["top", &self.name, "-eo", "comm"]);
-            let process_list = String::from_utf8_lossy(&processes.stdout);
+            let health = command(
+                "docker",
+                &[
+                    "inspect",
+                    "--format",
+                    "{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                    &self.name,
+                ],
+            );
             let output = command("docker", &["port", &self.name, "2136/tcp"]);
-            if process_list.lines().any(|line| line.trim() == "ydbd") && output.status.success() {
-                let mapping = String::from_utf8(output.stdout)
-                    .expect("docker port output must be UTF-8")
-                    .trim()
-                    .to_owned();
-                if let Some(port) = mapping.rsplit(':').next().filter(|value| !value.is_empty()) {
-                    return format!("grpc://127.0.0.1:{port}/local");
+            if health.status.success() && output.status.success() {
+                if let Some(connection) = healthy_connection(
+                    &String::from_utf8_lossy(&health.stdout),
+                    &String::from_utf8_lossy(&output.stdout),
+                ) {
+                    return connection;
                 }
             }
             let diagnostics = self.diagnostics();
@@ -88,7 +94,7 @@ impl YdbContainer {
             );
             assert!(
                 Instant::now() < deadline,
-                "YDB container did not publish its gRPC port within {STARTUP_TIMEOUT:?}: {}",
+                "YDB container did not become healthy with a published gRPC port within {STARTUP_TIMEOUT:?}: {}",
                 diagnostics
             );
             thread::sleep(Duration::from_millis(250));
@@ -104,6 +110,36 @@ impl YdbContainer {
             String::from_utf8_lossy(&output.stderr)
         )
     }
+}
+
+// The pinned image's healthcheck executes a real YDB query. A process-name check
+// is both weaker and incorrect under QEMU, where Docker reports the emulator.
+// The repository additionally validates its own SDK connection before use.
+fn healthy_connection(health: &str, mapping: &str) -> Option<String> {
+    if health.trim() != "healthy" {
+        return None;
+    }
+    let address = mapping.trim().parse::<std::net::SocketAddr>().ok()?;
+    if address.ip() != std::net::Ipv4Addr::LOCALHOST || address.port() == 0 {
+        return None;
+    }
+    // Discovery advertises localhost:2136 inside the container. This fixture
+    // must keep the randomly published host endpoint instead of switching to it.
+    Some(format!("grpc://{address}/local?use_discovery=false"))
+}
+
+#[test]
+fn published_port_is_not_readiness_until_the_image_healthcheck_succeeds() {
+    for health in ["", "starting", "unhealthy"] {
+        assert!(healthy_connection(health, "127.0.0.1:32100\n").is_none());
+    }
+    for mapping in ["", "0.0.0.0:32100", "127.0.0.1:0", "127.0.0.1:not-a-port"] {
+        assert!(healthy_connection("healthy", mapping).is_none());
+    }
+    assert_eq!(
+        healthy_connection("healthy\n", "127.0.0.1:32100\n"),
+        Some("grpc://127.0.0.1:32100/local?use_discovery=false".into())
+    );
 }
 
 impl Drop for YdbContainer {

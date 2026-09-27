@@ -1,16 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
-  await page.route("**/api/bootstrap*", async route => {
-    const data = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...data, account: { ...data.account, id: "fixture" }, articlePage: { articles: data.articles, total: data.articles.length, unreadTotal: 2 } } });
-  });
-  await page.route("**/api/articles?*", async route => {
-    const articles = await (await route.fetch()).json();
-    await route.fulfill({ json: { articles, total: articles.length, unreadTotal: 2 } });
-  });
-});
-
 test("direct subscription popup returns to the same reader with stable geometry", async ({ page }) => {
   await page.goto("/reader");
   await page.getByRole("navigation", { name: "Subscriptions", exact: true }).getByRole("button", { name: /This Week in Rust/ }).click();

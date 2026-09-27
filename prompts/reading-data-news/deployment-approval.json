@@ -1,0 +1,37 @@
+{
+  "recorded_at": "2026-09-27T00:26:26Z",
+  "decision_type": "explicit_owner_acceptance_and_questionnaire_waiver",
+  "exact_quote": "я уже не в силах проходить еще опросник из 20 вопросов. считай что всё ок и двигайся к завершению задачи",
+  "owner_uuid": "541affad-f1b0-4dd1-90de-7f41b689d4e6",
+  "candidate": "candidate-04",
+  "prompt_version": "reading-data-news-2026-09-27-candidate-04",
+  "draft_revision": "v17",
+  "review_version": "reading-data-news-factual-review-2026-09-27-v3",
+  "frozen_manifest": "prompts/reading-data-news/candidates/candidate-04/manifest.json",
+  "production_enable_authorized": true,
+  "authorized_host": "158.160.186.87",
+  "authorized_accounts": [
+    "541affad-f1b0-4dd1-90de-7f41b689d4e6"
+  ],
+  "another_questionnaire_required": false,
+  "new_human_score": null,
+  "factual_gate": "failed",
+  "research_outcome": {
+    "planned_cases": 20,
+    "accepted_format_outputs": 18,
+    "detected_factual_error_cases": [998, 273, 747],
+    "uncertain_review_cases": [286],
+    "exact_title_failure_cases": [1304]
+  },
+  "frozen_research_artifacts_unchanged": true,
+  "previous_human_scores_unchanged": true,
+  "runtime_validation_unchanged": true,
+  "deployment_status": "deployed",
+  "deployment_verified": true,
+  "deployment_verified_at": "2026-09-27T00:42:52.725176+00:00",
+  "deployed_image": "sha256:35da77df56ccc5a772aafe4784be1a9996eff66dbae1a9d729ac20c44cfa2dbd",
+  "deployment_record": "docs/deepseek-deployment-2026-09-27.md",
+  "production_profile_key_configured": false,
+  "paid_deployed_conversation_exercised": false,
+  "scope": "Owner accepts current candidate for use and waives further questionnaire; this does not turn the failed factual gate into a pass or create new per-item ratings. Deployment and authenticated missing-key UI smoke passed separately. The owner enters their provider key through Profile; no research key was imported."
+}

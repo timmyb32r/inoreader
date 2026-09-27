@@ -6,6 +6,8 @@ use thiserror::Error;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    pub ai: Option<reader_ai::AiConfig>,
+
     pub server: Server,
     pub database: Database,
     pub auth: Auth,
@@ -173,6 +175,9 @@ impl Config {
         Ok(value)
     }
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(ai) = &self.ai {
+            ai.validate().map_err(|_| ConfigError::Invalid("ai"))?;
+        }
         let strings = [
             ("server.bind", self.server.bind.as_str()),
             (
