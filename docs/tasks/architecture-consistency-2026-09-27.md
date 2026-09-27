@@ -16,7 +16,7 @@ Preserve source bytes, user state, associations and explicit retry semantics.
 | 8. Atomic origin admission | verified | Parallel claims honor origin capacity; blocked origins cannot starve another origin; expiry releases capacity. |
 | 9. Typed module contracts | verified | Response type derived from decoder; web recipe validated once through shared typed boundary and persisted without HTTP draft leakage. |
 | 10. Bounded efficient work | verified | Incremental AI parsing; measure chat write amplification and improve appropriately; icons persisted with bounded input/results; cohesive ownership. |
-| 11. Release and deploy | in progress | Meaningful regressions, full release gate, backup/restoration, authorized rollout, API/browser smoke, committed evidence. |
+| 11. Release and deploy | verified | Meaningful regressions, full release gate, backup/restoration, authorized rollout, API/browser smoke, committed evidence. |
 
 Execution order: storage consistency (1–4,8), frontend/content/contracts (5–6,9),
 AI/runtime/efficiency (7,10), integrated release (11). Independent read-only checks
@@ -54,3 +54,30 @@ AI input records and no active paid requests. Detailed contracts/trade-offs are 
 `docs/architecture/consistency-2026-09-27.md`.
 
 Final release gate passed: `just check-release` (Rust fmt/Clippy/tests, generated contracts, frontend build/format, Docker PostgreSQL backup/restore, real-backend browser acceptance, real Chromium/CDP, 152 frontend tests, 39 browser scenarios, crate boundaries and 14 Python tests). Production rollout and final smoke remain in progress.
+
+Final deployment checkpoint: all eleven obligations verified; none cancelled or
+blocked. Implementation commit `9ecb6f5`. Production image
+`sha256:edc5bbcf7fdccf44666c65e87fdaefb785caab3bd6b6292d3a49163f02124842`.
+A new 881,155,427-byte backup was restored into the separate
+`reader_consistency_verify_20260927` database. Every restored table count matched;
+both upgrades and new schema preparation were rehearsed there before production.
+The three saved AI documents were reconstructed and compared exactly before/after
+both rehearsal and production upgrade. 9,800 articles, 211 subscriptions and the
+account were retained. Old image/config/backup remain available together.
+
+Real production smoke passed at 2026-09-27 17:42 UTC: readiness 204,
+unauthenticated bootstrap 401, owned APIs 200, wrong-workspace article 404,
+50-row feed page, 211 subscriptions; browser verified reader, subscription popup,
+independent latest articles and return navigation with zero JS errors. Temporary
+session removed in finally. No paid provider requests were made for verification.
+Post-start logs contain no panic, missing-field, invalid content snapshot, AI
+quarantine or drain-timeout markers. Original logs remain intact; 111 non-JSON log
+lines were explicitly separated for the JSON-only latency report.
+
+Private operational evidence: `.inoreader-state/deployments/consistency-20260927/`.
+Verified production backup:
+`/home/timmyb32r/inoreader/.inoreader-state/consistency-20260927-rollout/before.dump`.
+215 Rust tests (including separate CDP acceptance), 152 frontend tests, 39 mocked
+browser scenarios, real-backend acceptance and 14 Python tests passed in the final
+`just check-release` run. The preserved database/image rollback contract is in the
+architecture document; rollback never discards post-rollout user activity silently.

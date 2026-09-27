@@ -115,3 +115,14 @@ An old application image cannot run against the new schema. Rollback requires th
 matching verified old database backup, old configuration and old image together;
 retain any new production data separately before considering rollback. Do not
 silently restore over user activity created after rollout.
+
+## Final verification
+
+`just check-release` passed on the final implementation: 215 Rust tests, 152 frontend
+tests, 39 mocked browser scenarios, real-backend browser acceptance, PostgreSQL
+backup/restore, actual Chromium/CDP and 14 Python tests. Production backup restored
+and both upgrades rehearsed successfully before rollout. The real-site smoke
+verified authenticated/unauthenticated and workspace boundaries, pagination,
+subscription dialogs/latest articles and return navigation without JS errors.
+All operational evidence and deployment identity are recorded in the
+[task ledger](../tasks/architecture-consistency-2026-09-27.md).
