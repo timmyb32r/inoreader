@@ -1,3 +1,4 @@
+import { CountdownTimer } from "./timer/CountdownTimer";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { ArticleChatWidget } from "../ai/ArticleChatWidget";
 import { DeepSeekProfile } from "../ai/DeepSeekProfile";
@@ -281,6 +282,7 @@ export function ReaderApplication({
           <span>Reader</span>
         </a>
         <div class="topbar__spacer" />
+        <CountdownTimer accountId={bootstrap.account.id} />
         <button
           class="search-stub"
           disabled

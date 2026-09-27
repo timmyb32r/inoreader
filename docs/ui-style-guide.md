@@ -58,3 +58,8 @@ row and footer keep fixed heights. Only the content pane scrolls. New definition
 precede a divider and exact known channel paragraphs with source links. Async
 results defer during a press, selection or scrolling. Copy buttons write safe
 rendered HTML plus plain text; unavailable rich clipboard uses plain text.
+
+The session countdown reserves a fixed-width digital display and two fixed
+control slots in the top bar. Running, paused and finished states never resize
+these slots. Duration editing uses a modal with a reserved validation region.
+Completion pulses only color/shadow; reduced motion uses a static highlight.
