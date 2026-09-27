@@ -170,7 +170,7 @@ fn state(origin: &str) -> AppState<()> {
         },
         origin.into(),
         10,
-        100,
+        reader_application::SelectionLimit::new(100).unwrap(),
     )
 }
 
@@ -585,7 +585,7 @@ fn route_fixture(
         },
         "https://reader.test".into(),
         10,
-        100,
+        reader_application::SelectionLimit::new(100).unwrap(),
     );
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -715,7 +715,7 @@ async fn source_url_commit_hides_token_for_another_subscription() {
         state.auth_policy,
         state.external_origin.clone(),
         10,
-        100,
+        reader_application::SelectionLimit::new(100).unwrap(),
     );
     assert!(matches!(
         commit_subscription_source_url(
@@ -761,6 +761,14 @@ impl reader_application::ArticleRepository for RouteRepository {
         _: WorkspaceId,
         _: &Article,
     ) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+    async fn unread_selection(
+        &self,
+        _: WorkspaceId,
+        _: reader_application::ArticleScope,
+        _: reader_application::SelectionLimit,
+    ) -> Result<Vec<Article>, RepositoryError> {
         route_unused()
     }
     async fn mark_articles_read_atomic(

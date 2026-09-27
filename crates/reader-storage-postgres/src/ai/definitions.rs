@@ -116,7 +116,6 @@ impl PostgresAiStore {
         claim: &ClaimedDefinitions,
         state: DefinitionState,
         usage: Option<Usage>,
-        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
         let status = match &state {
             DefinitionState::Completed { .. } => "completed",
@@ -126,12 +125,6 @@ impl PostgresAiStore {
         let mut record = claim.record.clone();
         record.finish(state, usage)?;
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        // Preserve provider bytes even if the publication lease expired. One job
-        // has exactly one attempt; a retry always creates a new immutable job.
-        if let Some(reply) = reply {
-            sqlx::query("UPDATE ai_definitions SET raw_response=$3,response_status=$4,response_interrupted=$5 WHERE id=$1 AND owner=$2 AND raw_response IS NULL")
-                .bind(record.job().id).bind(record.owner()).bind(reply.body).bind(i32::from(reply.status)).bind(reply.interrupted).execute(&mut *tx).await.map_err(storage)?;
-        }
         let n=sqlx::query("UPDATE ai_definitions d SET status=$4,document=$5,lease=NULL,lease_until=NULL FROM workspaces w WHERE d.id=$1 AND d.owner=$2 AND d.lease=$3 AND d.lease_until>now() AND d.status='generating' AND w.id=d.workspace::text AND w.document::jsonb->>'owner'=$2::text")
             .bind(record.job().id).bind(record.owner()).bind(claim.lease).bind(status).bind(encode(&record)?).execute(&mut *tx).await.map_err(storage)?.rows_affected();
         tx.commit().await.map_err(storage)?;

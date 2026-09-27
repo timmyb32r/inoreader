@@ -9,8 +9,11 @@ export function assertWire(
   const root: Schema = wireSchemas[name];
   const check = (schema: Schema, input: unknown): boolean => {
     if (typeof schema === "boolean") return schema;
-    if (schema.$ref)
-      return check((root as any).$defs[schema.$ref.split("/").at(-1)], input);
+    if (
+      schema.$ref &&
+      !check((root as any).$defs[schema.$ref.split("/").at(-1)], input)
+    )
+      return false;
     if (schema.enum && !schema.enum.includes(input)) return false;
     if ("const" in schema && schema.const !== input) return false;
     if (schema.anyOf && !schema.anyOf.some((s: Schema) => check(s, input)))
@@ -59,7 +62,11 @@ export function assertWire(
       for (const [key, item] of Object.entries(record)) {
         const property = schema.properties?.[key];
         if (property !== undefined && !check(property, item)) return false;
-        if (property === undefined && schema.additionalProperties === false)
+        if (
+          property === undefined &&
+          schema.additionalProperties !== undefined &&
+          !check(schema.additionalProperties, item)
+        )
           return false;
       }
     }
@@ -67,38 +74,27 @@ export function assertWire(
   };
   if (!check(root, value)) throw new Error(`Invalid API response (${name})`);
 }
-export function checkCriticalResponse(
-  path: string,
+/** Every transport call names its response contract; URL matching is forbidden. */
+export type ResponseContract =
+  | keyof typeof wireSchemas
+  | `${keyof typeof wireSchemas}[]`
+  | "empty"
+  | "string";
+export function decodeResponse(
+  contract: ResponseContract,
   value: unknown,
-  method = "GET",
-) {
-  const list = (name: keyof typeof wireSchemas) => {
+): unknown {
+  if (contract === "empty") {
+    if (value !== undefined) throw new Error("Invalid API response (empty)");
+  } else if (contract === "string") {
+    if (typeof value !== "string")
+      throw new Error("Invalid API response (string)");
+  } else if (contract.endsWith("[]")) {
     if (!Array.isArray(value))
-      throw new Error(`Invalid API response (${name}[])`);
-    value.forEach((item) => assertWire(name, item));
-  };
-  const pathname = new URL(path, location.origin).pathname;
-  if (pathname === "/api/bootstrap") assertWire("BootstrapResponse", value);
-  else if (pathname === "/api/articles") assertWire("ArticlePageView", value);
-  else if (/^\/api\/articles\/[^/]+$/.test(pathname))
-    assertWire("ArticleView", value);
-  else if (pathname === "/api/subscriptions" && method === "GET")
-    list("SubscriptionView");
-  else if (/^\/api\/ai\/(profile|balance)$/.test(pathname))
-    assertWire("AiProfile", value);
-  else if (/^\/api\/articles\/[^/]+\/translations$/.test(pathname)) {
-    if (method === "GET") list("ParagraphJob");
-    else assertWire("ParagraphJob", value);
-  } else if (/^\/api\/articles\/[^/]+\/chats$/.test(pathname))
-    list("ArticleChat");
-  else if (
-    /^\/api\/articles\/[^/]+\/chat$/.test(pathname) ||
-    /^\/api\/ai\/chats\/[^/]+(?:\/(messages|stop|retry))?$/.test(pathname)
-  )
-    assertWire("ArticleChat", value);
-  else if (/^\/api\/articles\/[^/]+\/definitions$/.test(pathname))
-    assertWire("DefinitionsView", value);
-  else if (/^\/api\/glossary\/channel(?:\/sync)?$/.test(pathname))
-    assertWire("ChannelStatus", value);
+      throw new Error(`Invalid API response (${contract})`);
+    value.forEach((item) =>
+      assertWire(contract.slice(0, -2) as keyof typeof wireSchemas, item),
+    );
+  } else assertWire(contract as keyof typeof wireSchemas, value);
   return value;
 }

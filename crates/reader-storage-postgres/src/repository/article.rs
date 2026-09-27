@@ -1,4 +1,5 @@
 use super::*;
+use reader_application::{ArticleScope, SelectionLimit};
 
 #[async_trait::async_trait]
 impl reader_application::ArticleRepository for PostgresRepository {
@@ -27,24 +28,23 @@ impl reader_application::ArticleRepository for PostgresRepository {
     ) -> Result<ArticlePage, RepositoryError> {
         let workspace_id = workspace.as_uuid().to_string();
         let subscription_id = request
-            .subscription_id
+            .scope()
+            .subscription()
             .map(|value| value.as_uuid().to_string());
-        let cursor_time = request.cursor.as_ref().map(|value| {
+        let cursor_time = request.cursor().map(|value| {
             value
                 .arrived_at
                 .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
         });
         let cursor_id = request
-            .cursor
-            .as_ref()
+            .cursor()
             .map(|value| article_key(workspace, value.article_id));
         // Keep the partial-index predicate literal even after PostgreSQL switches
         // a prepared statement to a generic plan. User input never becomes SQL.
-        let state_predicate = match request.view.as_str() {
-            "feed" => "NOT a.is_read",
-            "later" => "a.is_later",
-            "subscription" => "true",
-            _ => return Err(storage("unsupported article view")),
+        let state_predicate = match request.scope() {
+            ArticleScope::Feed => "NOT a.is_read",
+            ArticleScope::Later => "a.is_later",
+            ArticleScope::Subscription(_) => "true",
         };
         let predicate = format!("a.workspace_key=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$2)) AND {state_predicate}");
         let total_sql = format!("SELECT COUNT(*) FROM articles a WHERE {predicate}");
@@ -54,22 +54,23 @@ impl reader_application::ArticleRepository for PostgresRepository {
             .fetch_one(&self.pool)
             .await
             .map_err(storage)?;
-        let unread_total: i64 = if request.view == "feed" && subscription_id.is_none() {
-            total
-        } else {
-            sqlx::query_scalar(
-                "SELECT COUNT(*) FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read",
-            )
-            .bind(&workspace_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(storage)?
-        };
-        let comparison = match request.direction {
+        let unread_total: i64 =
+            if request.scope() == ArticleScope::Feed && subscription_id.is_none() {
+                total
+            } else {
+                sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read",
+                )
+                .bind(&workspace_id)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(storage)?
+            };
+        let comparison = match request.direction() {
             ArticlePageDirection::Older => "<",
             ArticlePageDirection::Newer => ">",
         };
-        let order = match request.direction {
+        let order = match request.direction() {
             ArticlePageDirection::Older => "DESC",
             ArticlePageDirection::Newer => "ASC",
         };
@@ -79,24 +80,16 @@ impl reader_application::ArticleRepository for PostgresRepository {
             .bind(&subscription_id)
             .bind(&cursor_time)
             .bind(&cursor_id)
-            .bind(
-                i64::try_from(
-                    request
-                        .limit
-                        .checked_add(1)
-                        .ok_or_else(|| storage("article page limit overflow"))?,
-                )
-                .map_err(storage)?,
-            )
+            .bind(request.limit().lookahead())
             .fetch_all(&self.pool)
             .await
             .map_err(storage)?
             .into_iter()
             .map(|value| serde_json::from_str(&value).map_err(storage))
             .collect::<Result<_, _>>()?;
-        let has_extra = articles.len() > request.limit;
-        articles.truncate(request.limit);
-        if request.direction == ArticlePageDirection::Newer {
+        let has_extra = articles.len() > request.limit().get();
+        articles.truncate(request.limit().get());
+        if request.direction() == ArticlePageDirection::Newer {
             articles.reverse();
         }
         let articles = self.summary_presentations(workspace, articles).await?;
@@ -104,10 +97,10 @@ impl reader_application::ArticleRepository for PostgresRepository {
             articles,
             total: usize::try_from(total).map_err(storage)?,
             unread_total: usize::try_from(unread_total).map_err(storage)?,
-            has_newer: request.cursor.is_some()
-                && (request.direction == ArticlePageDirection::Older || has_extra),
-            has_older: (request.cursor.is_some()
-                && request.direction == ArticlePageDirection::Newer)
+            has_newer: request.cursor().is_some()
+                && (request.direction() == ArticlePageDirection::Older || has_extra),
+            has_older: (request.cursor().is_some()
+                && request.direction() == ArticlePageDirection::Newer)
                 || has_extra,
         })
     }
@@ -168,6 +161,25 @@ impl reader_application::ArticleRepository for PostgresRepository {
             return Err(storage("article has no fetchable URL origin"));
         }
         tx.commit().await.map_err(storage)
+    }
+    async fn unread_selection(
+        &self,
+        workspace: WorkspaceId,
+        scope: ArticleScope,
+        limit: SelectionLimit,
+    ) -> Result<Vec<Article>, RepositoryError> {
+        let sql = "SELECT a.document FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read AND (NOT $2 OR a.is_later) AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$3)) ORDER BY a.arrival_order DESC, a.id DESC LIMIT $4";
+        sqlx::query_scalar::<_, String>(sql)
+            .bind(workspace.as_uuid().to_string())
+            .bind(scope == ArticleScope::Later)
+            .bind(scope.subscription().map(|id| id.as_uuid().to_string()))
+            .bind(limit.lookahead())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(storage)?
+            .into_iter()
+            .map(|value| serde_json::from_str(&value).map_err(storage))
+            .collect()
     }
     async fn mark_articles_read_atomic(
         &self,

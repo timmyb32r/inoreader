@@ -471,3 +471,16 @@ pub enum SourceTypeView {
     Web,
     BuiltIn,
 }
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationHistoryView {
+    pub days: Vec<PublicationDayView>,
+    pub undated: u64,
+    pub conflicting: u64,
+}
+#[derive(serde::Serialize, schemars::JsonSchema)]
+pub struct PublicationDayView {
+    pub date: String,
+    pub count: u64,
+}

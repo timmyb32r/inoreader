@@ -2,6 +2,10 @@ use reader_server_contracts::*;
 fn main() {
     let mut schemas = serde_json::Map::new();
     schemas.insert(
+        "PublicationHistoryView".into(),
+        serde_json::to_value(schemars::schema_for!(PublicationHistoryView)).unwrap(),
+    );
+    schemas.insert(
         "ReasonCommand".into(),
         serde_json::to_value(schemars::schema_for!(ReasonCommand)).expect("serializable schema"),
     );

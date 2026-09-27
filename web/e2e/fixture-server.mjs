@@ -205,7 +205,10 @@ createServer(async (request, response) => {
       if (draft.preview)
         return json(response, 200, {
           title: "Server selection",
-          kind: "rss",
+          availableItems: 1,
+          initialItems: 1,
+          incomplete: false,
+          kind: "web_feed",
           url: draft.url,
           articles: [
             { title: "Selected from live DOM", publishedAt: "2026-09-25" },

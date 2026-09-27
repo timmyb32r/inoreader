@@ -1,4 +1,4 @@
-import { assertWire, checkCriticalResponse } from "./decode";
+import { assertWire, decodeResponse } from "./decode";
 it("rejects incomplete and unknown critical state values without logging content", () => {
   expect(() =>
     assertWire("ArticlePageView", {
@@ -38,11 +38,14 @@ it("validates flattened AI states and rejects malformed lists", () => {
     assertWire("ParagraphJob", { ...job, status: "unexpected" }),
   ).toThrow();
   expect(() => assertWire("ParagraphJob", { status: "queued" })).toThrow();
-  expect(() => checkCriticalResponse("/api/subscriptions", {})).toThrow();
-  expect(() =>
-    checkCriticalResponse("/api/articles/a/translations", job, "POST"),
-  ).not.toThrow();
-  expect(() =>
-    checkCriticalResponse("/api/articles/a/translations", job, "GET"),
-  ).toThrow();
+  expect(() => decodeResponse("SubscriptionView[]", {})).toThrow();
+  expect(() => decodeResponse("ParagraphJob", job)).not.toThrow();
+  expect(() => decodeResponse("ParagraphJob[]", job)).toThrow();
+});
+
+it("rejects wrong no-content and scalar responses", () => {
+  expect(() => decodeResponse("empty", {})).toThrow();
+  expect(() => decodeResponse("string", {})).toThrow();
+  expect(decodeResponse("empty", undefined)).toBeUndefined();
+  expect(decodeResponse("string", "exact document")).toBe("exact document");
 });

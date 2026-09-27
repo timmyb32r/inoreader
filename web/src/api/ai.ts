@@ -30,6 +30,8 @@ export class AiClient {
   translations = (workspaceId: string, articleId: string) =>
     this.transport<ParagraphJob[]>(
       `/api/articles/${encodeURIComponent(articleId)}/translations?workspace_id=${encodeURIComponent(workspaceId)}`,
+      undefined,
+      "ParagraphJob[]",
     );
   translate = (
     workspaceId: string,
@@ -40,17 +42,33 @@ export class AiClient {
     this.transport<ParagraphJob>(
       `/api/articles/${encodeURIComponent(articleId)}/translations`,
       json("POST", { workspaceId, operationId, source }),
+      "ParagraphJob",
     );
-  profile = () => this.transport<AiProfile>("/api/ai/profile");
+  profile = () =>
+    this.transport<AiProfile>("/api/ai/profile", undefined, "AiProfile");
   saveKey = (apiKey: string) =>
-    this.transport<AiProfile>("/api/ai/profile", json("PUT", { apiKey }));
+    this.transport<AiProfile>(
+      "/api/ai/profile",
+      json("PUT", { apiKey }),
+      "AiProfile",
+    );
   removeKey = () =>
-    this.transport<AiProfile>("/api/ai/profile", { method: "DELETE" });
+    this.transport<AiProfile>(
+      "/api/ai/profile",
+      { method: "DELETE" },
+      "AiProfile",
+    );
   balance = () =>
-    this.transport<AiProfile>("/api/ai/balance", { method: "POST" });
+    this.transport<AiProfile>(
+      "/api/ai/balance",
+      { method: "POST" },
+      "AiProfile",
+    );
   versions = (workspaceId: string, articleId: string) =>
     this.transport<ArticleChat[]>(
       `/api/articles/${encodeURIComponent(articleId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
+      undefined,
+      "ArticleChat[]",
     );
   open = (
     workspaceId: string,
@@ -61,23 +79,31 @@ export class AiClient {
     this.transport<ArticleChat>(
       `/api/articles/${encodeURIComponent(articleId)}/chat`,
       json("POST", { workspaceId, operationId, regenerate }),
+      "ArticleChat",
     );
   get = (id: string) =>
-    this.transport<ArticleChat>(`/api/ai/chats/${encodeURIComponent(id)}`);
+    this.transport<ArticleChat>(
+      `/api/ai/chats/${encodeURIComponent(id)}`,
+      undefined,
+      "ArticleChat",
+    );
   send = (id: string, operationId: string, content: string) =>
     this.transport<ArticleChat>(
       `/api/ai/chats/${encodeURIComponent(id)}/messages`,
       json("POST", { operationId, content }),
+      "ArticleChat",
     );
   stop = (id: string) =>
     this.transport<ArticleChat>(
       `/api/ai/chats/${encodeURIComponent(id)}/stop`,
       { method: "POST" },
+      "ArticleChat",
     );
   retry = (id: string, operationId: string) =>
     this.transport<ArticleChat>(
       `/api/ai/chats/${encodeURIComponent(id)}/retry`,
       json("POST", { operationId }),
+      "ArticleChat",
     );
 }
 

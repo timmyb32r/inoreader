@@ -80,7 +80,7 @@ pub struct AppState<R> {
     auth_policy: AuthPolicy,
     external_origin: String,
     login_attempts_per_minute: u32,
-    bulk_mutation_limit: usize,
+    bulk_mutation_limit: reader_application::SelectionLimit,
 }
 impl<R> Clone for AppState<R> {
     fn clone(&self) -> Self {
@@ -105,7 +105,7 @@ impl<R> AppState<R> {
         auth_policy: AuthPolicy,
         external_origin: String,
         login_attempts_per_minute: u32,
-        bulk_mutation_limit: usize,
+        bulk_mutation_limit: reader_application::SelectionLimit,
     ) -> Self {
         Self {
             ai: None,

@@ -1,3 +1,4 @@
+use crate::{ArticlePageRequest, ArticleScope, SelectionLimit};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reader_core::{
@@ -73,14 +74,6 @@ pub enum ArticlePageDirection {
 pub struct ArticlePageCursor {
     pub arrived_at: DateTime<Utc>,
     pub article_id: ArticleId,
-}
-#[derive(Clone, Debug)]
-pub struct ArticlePageRequest {
-    pub view: String,
-    pub subscription_id: Option<SubscriptionId>,
-    pub cursor: Option<ArticlePageCursor>,
-    pub direction: ArticlePageDirection,
-    pub limit: usize,
 }
 #[derive(Clone, Debug)]
 pub struct ArticlePage {
@@ -199,11 +192,12 @@ pub trait ArticleRepository: Send + Sync {
         let unread_total = all.iter().filter(|value| !value.article.state.read).count();
         all.retain(|value| {
             request
-                .subscription_id
+                .scope()
+                .subscription()
                 .is_none_or(|subscription| value.subscription_ids.contains(&subscription))
-                && match request.view.as_str() {
-                    "feed" => !value.article.state.read,
-                    "later" => value.article.state.later,
+                && match request.scope() {
+                    ArticleScope::Feed => !value.article.state.read,
+                    ArticleScope::Later => value.article.state.later,
                     _ => true,
                 }
         });
@@ -215,29 +209,29 @@ pub trait ArticleRepository: Send + Sync {
         });
         let total = all.len();
         let matching = |value: &&ArticlePresentation| {
-            request.cursor.as_ref().is_none_or(|cursor| {
+            request.cursor().is_none_or(|cursor| {
                 let key = (value.article.first_arrived_at, value.article.id.as_uuid());
                 let boundary = (cursor.arrived_at, cursor.article_id.as_uuid());
-                match request.direction {
+                match request.direction() {
                     ArticlePageDirection::Older => key < boundary,
                     ArticlePageDirection::Newer => key > boundary,
                 }
             })
         };
         let mut selected: Vec<_> = all.iter().filter(matching).cloned().collect();
-        if request.direction == ArticlePageDirection::Newer {
+        if request.direction() == ArticlePageDirection::Newer {
             selected.reverse();
         }
-        let has_extra = selected.len() > request.limit;
-        selected.truncate(request.limit);
-        if request.direction == ArticlePageDirection::Newer {
+        let has_extra = selected.len() > request.limit().get();
+        selected.truncate(request.limit().get());
+        if request.direction() == ArticlePageDirection::Newer {
             selected.reverse();
         }
         Ok(ArticlePage {
-            has_newer: request.cursor.is_some()
-                && (request.direction == ArticlePageDirection::Older || has_extra),
-            has_older: (request.cursor.is_some()
-                && request.direction == ArticlePageDirection::Newer)
+            has_newer: request.cursor().is_some()
+                && (request.direction() == ArticlePageDirection::Older || has_extra),
+            has_older: (request.cursor().is_some()
+                && request.direction() == ArticlePageDirection::Newer)
                 || has_extra,
             articles: selected,
             total,
@@ -266,6 +260,14 @@ pub trait ArticleRepository: Send + Sync {
         workspace: WorkspaceId,
         value: &Article,
     ) -> Result<(), RepositoryError>;
+    /// Select only unread matching records, in stable lock order, with at most
+    /// limit + 1 rows. The lookahead detects an oversized atomic operation.
+    async fn unread_selection(
+        &self,
+        workspace: WorkspaceId,
+        scope: ArticleScope,
+        limit: SelectionLimit,
+    ) -> Result<Vec<Article>, RepositoryError>;
     async fn mark_articles_read_atomic(
         &self,
         workspace: WorkspaceId,

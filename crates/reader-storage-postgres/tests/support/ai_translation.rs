@@ -210,6 +210,38 @@ pub async fn verify(
         .execute(pool)
         .await
         .unwrap();
+    let late_reply = ProviderReply {
+        status: 200,
+        body: b"late paid response".to_vec(),
+        interrupted: false,
+    };
+    store
+        .retain_reply(ReplyKind::Translation, owner, retry.id, &late_reply)
+        .await
+        .unwrap();
+    store
+        .retain_reply(ReplyKind::Translation, owner, retry.id, &late_reply)
+        .await
+        .unwrap();
+    assert!(store
+        .retain_reply(ReplyKind::Translation, other, retry.id, &late_reply)
+        .await
+        .is_err());
+    let different = ProviderReply {
+        body: b"different".to_vec(),
+        ..late_reply.clone()
+    };
+    assert!(store
+        .retain_reply(ReplyKind::Translation, owner, retry.id, &different)
+        .await
+        .is_err());
+    let retained: Vec<u8> =
+        sqlx::query_scalar("SELECT raw_response FROM ai_translations WHERE id=$1")
+            .bind(retry.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(retained, late_reply.body);
     assert!(matches!(
         store
             .finish_translation(
@@ -217,7 +249,6 @@ pub async fn verify(
                 TranslationState::Failed {
                     error: "stale".into()
                 },
-                None,
                 None
             )
             .await,

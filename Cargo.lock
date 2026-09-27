@@ -2839,6 +2839,7 @@ dependencies = [
  "reader-core",
  "reader-glossary",
  "reader-ingest",
+ "reader-runtime",
  "reader-server",
  "reader-server-contracts",
  "reader-server-ui",

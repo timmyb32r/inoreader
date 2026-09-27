@@ -7,7 +7,8 @@ import {
   type View,
 } from "./readerLocation";
 
-/** Account-owned reader data. A generation is replaced whenever a page/workspace changes.
+/** Account-owned reader data. Writes outlive page and workspace navigation.
+ * A generation is replaced whenever a page/workspace changes.
  * Late reads, mutation failures and bulk rollbacks may only touch their original generation. */
 export function useReaderController(
   client: ApiClient,
@@ -62,6 +63,14 @@ export function useReaderController(
   const selectedRef = useRef<Article>();
   const mutationGeneration = useRef(new Map<string, number>());
   const mutationQueue = useRef(new Map<string, Promise<void>>());
+  // A page snapshot is publishable only after writes settle and no write began
+  // during its request. Never discard an in-flight write to accept a stale GET.
+  const writeVersion = useRef(0);
+  const inFlightWrites = useRef(new Set<Promise<void>>());
+  const waitForWrites = async () => {
+    while (inFlightWrites.current.size)
+      await Promise.all(inFlightWrites.current);
+  };
   articlesRef.current = articles;
   // Keep the fetched batch in place as it is read/bookmarked. The next request
   // applies the view filter; removing rows under the pointer would shift targets.
@@ -127,6 +136,7 @@ export function useReaderController(
     if (!before || !workspaceId || bulkLock.current) return;
     const mutationKeys = Object.keys(patch).map((key) => `${id}:${key}`);
     if (mutationKeys.some((key) => pending.current.has(key))) return;
+    writeVersion.current++;
     mutationKeys.forEach((key) => pending.current.add(key));
     setPendingArticleMutations(new Set(pending.current));
     const unreadDelta =
@@ -187,6 +197,7 @@ export function useReaderController(
         announce(error.message);
       })
       .finally(() => {
+        inFlightWrites.current.delete(request);
         if (scope !== epoch.current) return;
         mutationKeys.forEach((key) => pending.current.delete(key));
         setPendingArticleMutations((keys) => {
@@ -198,6 +209,7 @@ export function useReaderController(
           mutationQueue.current.delete(id);
       });
     mutationQueue.current.set(id, request);
+    inFlightWrites.current.add(request);
   };
   const open = (id: string) => {
     setSelectedId(id);
@@ -235,13 +247,21 @@ export function useReaderController(
     const scope = epoch.current,
       request = ++pageRequest.current;
     try {
-      const page = await client.listArticles(
-        workspaceId,
-        nextView,
-        subscriptionId ?? undefined,
-        cursor,
-        direction,
-      );
+      let page: ArticlePage;
+      for (;;) {
+        await waitForWrites();
+        if (scope !== epoch.current) return;
+        const version = writeVersion.current;
+        page = await client.listArticles(
+          workspaceId,
+          nextView,
+          subscriptionId ?? undefined,
+          cursor,
+          direction,
+        );
+        if (scope !== epoch.current) return;
+        if (version === writeVersion.current) break;
+      }
       if (scope !== epoch.current) return;
       applyPage(page, batch);
       setView(nextView);
@@ -274,6 +294,7 @@ export function useReaderController(
       filtered.filter((article) => !article.read).map((article) => article.id),
     );
     if (affected.size === 0) return;
+    writeVersion.current++;
     bulkLock.current = true;
     setPendingArticleMutations(
       new Set(articles.flatMap((a) => [`${a.id}:read`, `${a.id}:later`])),
@@ -287,7 +308,7 @@ export function useReaderController(
         affected.has(article.id) ? { ...article, read: true } : article,
       ),
     );
-    client
+    const request = client
       .markAllRead(requestWorkspace, view, selectedSubscriptionId ?? undefined)
       .then(async () => {
         if (scope !== epoch.current) return;
@@ -313,12 +334,14 @@ export function useReaderController(
         announce(error.message);
       })
       .finally(() => {
+        inFlightWrites.current.delete(request);
         if (scope === epoch.current) {
           bulkLock.current = false;
           setPendingArticleMutations(new Set());
           setMarkingAll(false);
         }
       });
+    inFlightWrites.current.add(request);
   };
 
   const replaceWorkspace = (id: string, page: ArticlePage) => {
@@ -356,5 +379,6 @@ export function useReaderController(
     loadPage,
     markAllRead,
     replaceWorkspace,
+    waitForWrites,
   };
 }

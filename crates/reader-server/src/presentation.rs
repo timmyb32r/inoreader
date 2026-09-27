@@ -130,30 +130,22 @@ pub(super) fn article_page_request(
     cursor: Option<&str>,
     direction: Option<&str>,
 ) -> Result<ArticlePageRequest, ApiFailure> {
-    if !matches!(view, "feed" | "subscription" | "later") {
-        return Err(ApiFailure::Validation("invalid article view"));
-    }
-    if (view == "subscription") != subscription_id.is_some() {
-        return Err(ApiFailure::Validation(
-            "subscription history requires a subscription; Feed and Read later are workspace views",
-        ));
-    }
+    let scope = reader_application::ArticleScope::from_wire(view, subscription_id)
+        .map_err(ApiFailure::Validation)?;
     let direction = match direction.unwrap_or("older") {
         "older" => ArticlePageDirection::Older,
         "newer" => ArticlePageDirection::Newer,
         _ => return Err(ApiFailure::Validation("invalid article page direction")),
     };
     let cursor = cursor.map(decode_article_cursor).transpose()?;
-    if direction == ArticlePageDirection::Newer && cursor.is_none() {
-        return Err(ApiFailure::Validation("newer direction requires a cursor"));
-    }
-    Ok(ArticlePageRequest {
-        view: view.to_owned(),
-        subscription_id,
+    ArticlePageRequest::new(
+        scope,
         cursor,
         direction,
-        limit: ARTICLE_PAGE_SIZE,
-    })
+        reader_application::SelectionLimit::new(ARTICLE_PAGE_SIZE)
+            .map_err(ApiFailure::Validation)?,
+    )
+    .map_err(ApiFailure::Validation)
 }
 
 pub(super) fn article_page_view(page: reader_application::ArticlePage) -> ArticlePageView {

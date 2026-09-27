@@ -1,3 +1,5 @@
+#[path = "browser_ai.rs"]
+mod ai;
 use super::*;
 use reader_application::{token_hash, Argon2idPolicy, AuthPolicy, SessionRecord};
 use std::sync::Arc;
@@ -72,6 +74,16 @@ pub async fn verify(pool: &PgPool) {
         )
         .await
         .unwrap();
+    let ai_service = ai::service(
+        pool,
+        repository.clone(),
+        account.id,
+        workspace.id(),
+        article.id,
+    )
+    .await;
+    let mut workers = reader_runtime::TaskSupervisor::new();
+    ai_service.spawn_workers(&mut workers);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let state = reader_server::AppState::new(
@@ -86,8 +98,9 @@ pub async fn verify(pool: &PgPool) {
         },
         origin.clone(),
         100,
-        1000,
-    );
+        reader_application::SelectionLimit::new(1000).unwrap(),
+    )
+    .with_ai(ai_service);
     let app = reader_server::router(state).fallback(|uri: axum::http::Uri| async move {
         match reader_server_ui::asset(uri.path()) {
             Some(asset) => axum::http::Response::builder()
@@ -125,6 +138,8 @@ pub async fn verify(pool: &PgPool) {
     .unwrap();
     let _ = stop_tx.send(());
     server.await.unwrap().unwrap();
+    workers.request_shutdown();
+    workers.drain().await.unwrap();
     assert_success("real browser + Rust + PostgreSQL acceptance", &output);
     let saved = repository
         .article(workspace.id(), article.id)

@@ -26,6 +26,8 @@ mod glossary_tests;
 
 #[path = "support/browser.rs"]
 mod browser_tests;
+#[path = "support/bulk_read.rs"]
+mod bulk_read;
 #[path = "support/read_projection.rs"]
 mod read_projection;
 
@@ -272,6 +274,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_article_state_conversion(&pool).await;
     ai_tests::verify(&pool).await;
     glossary_tests::verify(&pool).await;
+    bulk_read::verify(&pool).await;
     browser_tests::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
 }
@@ -319,12 +322,14 @@ async fn verify_article_state_conversion(pool: &PgPool) {
             .await
             .unwrap();
     assert_eq!(serde_json::from_str::<Article>(&copy).unwrap(), converted);
-    let request = |view: &str| reader_application::ArticlePageRequest {
-        view: view.into(),
-        subscription_id: None,
-        cursor: None,
-        direction: reader_application::ArticlePageDirection::Older,
-        limit: 50,
+    let request = |view: &str| {
+        reader_application::ArticlePageRequest::new(
+            reader_application::ArticleScope::from_wire(view, None).unwrap(),
+            None,
+            reader_application::ArticlePageDirection::Older,
+            reader_application::SelectionLimit::new(50).unwrap(),
+        )
+        .unwrap()
     };
     assert!(repository
         .article_summary_page(workspace, request("feed"))

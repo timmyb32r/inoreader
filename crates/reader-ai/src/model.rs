@@ -356,8 +356,23 @@ pub struct Usage {
     pub estimated_cost_usd: Option<String>,
 }
 
+/// One immutable provider response per non-streaming attempt. Publication rights
+/// can expire without discarding the paid response; retries use a new job id.
+#[derive(Clone, Copy)]
+pub enum ReplyKind {
+    Translation,
+    Definitions,
+}
+
 #[async_trait]
 pub trait AiStore: Send + Sync {
+    async fn retain_reply(
+        &self,
+        kind: ReplyKind,
+        owner: Uuid,
+        job: Uuid,
+        reply: &crate::ProviderReply,
+    ) -> Result<(), AiError>;
     async fn definitions(
         &self,
         owner: Uuid,
@@ -379,7 +394,6 @@ pub trait AiStore: Send + Sync {
         claim: &crate::ClaimedDefinitions,
         state: crate::DefinitionState,
         usage: Option<Usage>,
-        reply: Option<crate::ProviderReply>,
     ) -> Result<(), AiError>;
 
     async fn translations(
@@ -401,7 +415,6 @@ pub trait AiStore: Send + Sync {
         claim: &crate::ClaimedTranslation,
         state: crate::TranslationState,
         usage: Option<Usage>,
-        reply: Option<crate::ProviderReply>,
     ) -> Result<(), AiError>;
 
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError>;

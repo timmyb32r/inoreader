@@ -1,0 +1,6 @@
+{
+  "fixture": "local PostgreSQL + Rust HTTP + Chromium; three warmups, twenty sequential samples",
+  "apiP95Ms": 500,
+  "maxInitialArticleRequests": 3,
+  "maxPageArticles": 50
+}

@@ -8,3 +8,6 @@ pub use publication_history::*;
 pub use service::*;
 
 pub mod article_commands;
+
+mod article_query;
+pub use article_query::*;

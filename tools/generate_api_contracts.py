@@ -3,6 +3,27 @@
 import argparse, json, pathlib, subprocess
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
+# Closed validator vocabulary. Format is an annotation in JSON Schema 2020-12;
+# syntax/identity validation belongs to backend constructors, not JS coercion.
+SUPPORTED = {"$schema", "$defs", "$ref", "title", "description", "default", "format",
+             "type", "properties", "required", "additionalProperties", "items",
+             "minimum", "maximum", "enum", "const", "anyOf", "oneOf", "allOf"}
+FORMATS = {"uint", "uint64", "uint32", "int64", "double", "date-time", "uuid"}
+def validate_schema(schema):
+    if isinstance(schema, bool): return
+    unknown = set(schema) - SUPPORTED
+    if unknown: raise ValueError("Unsupported runtime schema keywords: " + ", ".join(sorted(unknown)))
+    if "format" in schema and schema["format"] not in FORMATS:
+        raise ValueError("Unsupported format annotation: " + schema["format"])
+    if "$ref" in schema and not schema["$ref"].startswith("#/$defs/"):
+        raise ValueError("Only local definitions are supported")
+    for key in ("$defs", "properties"):
+        for child in schema.get(key, {}).values(): validate_schema(child)
+    for key in ("items", "additionalProperties"):
+        if key in schema: validate_schema(schema[key])
+    for key in ("anyOf", "oneOf", "allOf"):
+        for child in schema.get(key, []): validate_schema(child)
+
 def ts(schema):
     if schema is True: return 'unknown'
     if schema is False: return 'never'
@@ -32,6 +53,7 @@ def generate():
     schemas.update(json.loads(subprocess.check_output(['cargo','run','--offline','--quiet','-p','reader-ai','--features','schema','--bin','export_ai_contracts'],cwd=ROOT)))
     all_types={}
     for name,schema in schemas.items():
+        validate_schema(schema)
         for child,value in schema.get('$defs',{}).items():
             if child in all_types and all_types[child]!=value:raise ValueError('Conflicting definition '+child)
             all_types[child]=value

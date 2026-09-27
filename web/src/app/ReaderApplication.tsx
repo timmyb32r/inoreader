@@ -12,7 +12,7 @@ import { ModalDialog } from "../ui/ModalDialog";
 import { ActivityDashboard, useActivityTracker } from "./ActivityDashboard";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { ArticleReader } from "./ArticleReader";
-import { ArticleRow, EmptyState } from "./ArticleRow";
+import { ArticleListPanel } from "./ArticleListPanel";
 import type { Subscription, Workspace } from "./data";
 import { RulesDialog } from "./RulesDialog";
 import {
@@ -84,7 +84,6 @@ export function ReaderApplication({
   const aiProfile = aiProfileState.profile;
   const chat = useArticleChat(client.ai, account.id, aiProfile);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [refreshingSubscription, setRefreshingSubscription] = useState(false);
   const [editingRecipe, setEditingRecipe] = useState<WebFeedRecipeView | null>(
     null,
   );
@@ -197,6 +196,7 @@ export function ReaderApplication({
       setMobilePanel("list");
     },
     announce,
+    reader.waitForWrites,
   );
   const goHome = () => {
     navigate("/");
@@ -573,202 +573,21 @@ export function ReaderApplication({
             />
           ) : (
             <>
-              <section
-                class={`article-list panel-mobile-${mobilePanel === "list" ? "show" : "hide"}`}
-                aria-label="Article list"
-              >
-                <header class="list-header">
-                  <div class="list-header__title">
-                    {selectedSubscription ? (
-                      <a
-                        class="subscription-heading"
-                        href={`/subscriptions/${encodeURIComponent(selectedSubscription.id)}`}
-                        aria-label={`Open settings for ${selectedSubscription.name}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          navigate(
-                            `/subscriptions/${encodeURIComponent(selectedSubscription.id)}`,
-                          );
-                        }}
-                      >
-                        <p class="eyebrow">Subscription</p>
-                        <h1>{selectedSubscription.name}</h1>
-                      </a>
-                    ) : (
-                      <>
-                        <p class="eyebrow">{workspace}</p>
-                        <h1>
-                          {view === "feed"
-                            ? `Feed (${unreadTotal})`
-                            : views.find((v) => v.id === view)?.label}
-                        </h1>
-                      </>
-                    )}
-                  </div>
-                  <div class="list-header__tools">
-                    <button
-                      class="icon-button"
-                      aria-label="Refresh subscription"
-                      aria-busy={refreshingSubscription}
-                      disabled={!selectedSubscription || refreshingSubscription}
-                      title={
-                        selectedSubscription
-                          ? "Refresh this subscription"
-                          : "Choose a subscription to refresh"
-                      }
-                      onClick={() => {
-                        if (!selectedSubscription || refreshingSubscription)
-                          return;
-                        setRefreshingSubscription(true);
-                        client
-                          .refreshSubscription(selectedSubscription.id)
-                          .then(() => announce("Refresh queued"))
-                          .catch((error: Error) => announce(error.message))
-                          .finally(() => setRefreshingSubscription(false));
-                      }}
-                    >
-                      {refreshingSubscription ? (
-                        <span class="spinner" />
-                      ) : (
-                        <Icon name="refresh" />
-                      )}
-                    </button>
-                  </div>
-                </header>
-                {archived && (
-                  <div class="archive-strip">
-                    <Icon name="archive" />
-                    <span>
-                      This workspace is archived.{" "}
-                      {workspaces.find((item) => item.id === workspaceId)
-                        ?.archiveReason
-                        ? `Reason: ${workspaces.find((item) => item.id === workspaceId)?.archiveReason}. `
-                        : ""}
-                      Your library remains readable.
-                    </span>
-                  </div>
-                )}
-                {selectedSubscription?.status === "paused" && (
-                  <div class="archive-strip">
-                    <Icon name="pause" />
-                    <span>
-                      Paused
-                      {selectedSubscription.reason
-                        ? `: ${selectedSubscription.reason}`
-                        : ""}
-                      {selectedSubscription.reasonAt
-                        ? ` · ${new Date(selectedSubscription.reasonAt).toLocaleString("en-US")}`
-                        : ""}
-                    </span>
-                  </div>
-                )}
-                {newCount > 0 && (
-                  <button
-                    class="new-items"
-                    disabled={paging}
-                    aria-busy={paging}
-                    onClick={() =>
-                      loadPage(
-                        view,
-                        selectedSubscriptionId,
-                        undefined,
-                        undefined,
-                        1,
-                      )
-                    }
-                  >
-                    <span>
-                      {paging ? (
-                        <>
-                          <span class="spinner" />
-                          Loading…
-                        </>
-                      ) : (
-                        `${newCount} new articles`
-                      )}
-                    </span>
-                    <span>Show now</span>
-                  </button>
-                )}
-                <div class="list-controls">
-                  <button
-                    disabled={
-                      markingAll ||
-                      pendingArticleMutations.size > 0 ||
-                      !filtered.some((article) => !article.read)
-                    }
-                    aria-busy={markingAll}
-                    onClick={markAllRead}
-                  >
-                    {markingAll ? (
-                      <span class="spinner" />
-                    ) : (
-                      <Icon name="check" size={15} />
-                    )}{" "}
-                    {markingAll ? "Marking…" : "Mark all read"}
-                  </button>
-                  <span>
-                    {pageTotal
-                      ? `${(pageNumber - 1) * 50 + 1}–${Math.min(pageNumber * 50, pageTotal)} of ${pageTotal}`
-                      : "0 articles"}
-                  </span>
-                  <span>Newest first</span>
-                </div>
-                <div class="article-scroll">
-                  {filtered.length ? (
-                    filtered.map((article) => (
-                      <ArticleRow
-                        article={article}
-                        selected={article.id === selected?.id}
-                        laterPending={pendingArticleMutations.has(
-                          `${article.id}:later`,
-                        )}
-                        onOpen={() => open(article.id)}
-                        onLater={() =>
-                          update(article.id, { later: !article.later })
-                        }
-                      />
-                    ))
-                  ) : (
-                    <EmptyState />
-                  )}
-                </div>
-                <nav class="article-pager" aria-label="Article pages">
-                  <button
-                    disabled={!newerCursor || paging}
-                    aria-busy={paging}
-                    onClick={() =>
-                      newerCursor &&
-                      loadPage(
-                        view,
-                        selectedSubscriptionId,
-                        newerCursor,
-                        "newer",
-                        Math.max(1, pageNumber - 1),
-                      )
-                    }
-                  >
-                    ← Newer
-                  </button>
-                  <span>50 articles per request</span>
-                  <button
-                    disabled={!olderCursor || paging}
-                    aria-busy={paging}
-                    onClick={() =>
-                      olderCursor &&
-                      loadPage(
-                        view,
-                        selectedSubscriptionId,
-                        olderCursor,
-                        "older",
-                        pageNumber + 1,
-                      )
-                    }
-                  >
-                    Older →
-                  </button>
-                </nav>
-              </section>
+              <ArticleListPanel
+                reader={reader}
+                client={client}
+                workspace={workspace}
+                selectedSubscription={selectedSubscription}
+                archived={archived}
+                archiveReason={
+                  workspaces.find((item) => item.id === workspaceId)
+                    ?.archiveReason
+                }
+                mobilePanel={mobilePanel}
+                newCount={newCount}
+                navigate={navigate}
+                announce={announce}
+              />
               {selected ? (
                 <ArticleReader
                   key={`${account.id}:${workspaceId}:${selected.id}`}

@@ -44,14 +44,13 @@ pub async fn verify(
         body: raw.clone(),
         interrupted: false,
     };
+    store
+        .retain_reply(ReplyKind::Definitions, owner, job.id, &reply)
+        .await
+        .unwrap();
     let result = reply.definition_result(&snapshot).unwrap();
     store
-        .finish_definitions(
-            &claim,
-            DefinitionState::Completed { result },
-            reply.usage(),
-            Some(reply),
-        )
+        .finish_definitions(&claim, DefinitionState::Completed { result }, reply.usage())
         .await
         .unwrap();
     assert!(matches!(
@@ -103,7 +102,6 @@ pub async fn verify(
                 error: "explicit attempt".into(),
             },
             None,
-            None,
         )
         .await
         .unwrap();
@@ -128,18 +126,26 @@ pub async fn verify(
         .execute(pool)
         .await
         .unwrap();
+    store
+        .retain_reply(
+            ReplyKind::Definitions,
+            owner,
+            failed.id,
+            &ProviderReply {
+                status: 200,
+                body: b"partial raw".to_vec(),
+                interrupted: true,
+            },
+        )
+        .await
+        .unwrap();
     assert!(store
         .finish_definitions(
             &claim,
             DefinitionState::Failed {
                 error: "invalid JSON".into()
             },
-            None,
-            Some(ProviderReply {
-                status: 200,
-                body: b"partial raw".to_vec(),
-                interrupted: true
-            })
+            None
         )
         .await
         .is_err());

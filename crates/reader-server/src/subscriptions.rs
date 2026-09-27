@@ -139,13 +139,24 @@ pub(super) async fn publication_history<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-) -> Result<Json<reader_application::PublicationHistory>, ApiFailure> {
+) -> Result<Json<PublicationHistoryView>, ApiFailure> {
     let actor = auth(&s, &headers).await?;
-    Ok(Json(
-        s.repository
-            .publication_history(actor.account.id, SubscriptionId::from_uuid(id))
-            .await?,
-    ))
+    let history = s
+        .repository
+        .publication_history(actor.account.id, SubscriptionId::from_uuid(id))
+        .await?;
+    Ok(Json(PublicationHistoryView {
+        days: history
+            .days
+            .into_iter()
+            .map(|day| PublicationDayView {
+                date: day.date.to_string(),
+                count: day.count,
+            })
+            .collect(),
+        undated: history.undated,
+        conflicting: history.conflicting,
+    }))
 }
 pub(super) async fn subscription_extraction<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,

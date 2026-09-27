@@ -10,6 +10,7 @@ chrono.workspace = true
 murmur3.workspace = true
 reader-application = { path = "../reader-application" }
 reader-ai = { path = "../reader-ai" }
+reader-runtime = { path = "../reader-runtime" }
 reader-glossary = { path = "../reader-glossary" }
 reader-core = { path = "../reader-core" }
 reader-ingest = { path = "../reader-ingest" }

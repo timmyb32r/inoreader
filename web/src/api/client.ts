@@ -1,7 +1,7 @@
 import type { Article, Subscription, Workspace } from "../app/data";
 import { reportApiRequest } from "../performanceDiagnostics";
 import { AiClient } from "./ai";
-import { checkCriticalResponse } from "./decode";
+import { decodeResponse, type ResponseContract } from "./decode";
 import type * as Wire from "./generated";
 import { GlossaryClient } from "./glossary";
 
@@ -127,7 +127,11 @@ export type SubscriptionDetail = Subscription & {
   activity?: SubscriptionActivity[];
   rules?: SubscriptionRuleView[];
 };
-export type Transport = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type Transport = <T>(
+  path: string,
+  init: RequestInit | undefined,
+  contract: ResponseContract,
+) => Promise<T>;
 
 export class ApiError extends Error {
   constructor(
@@ -146,18 +150,24 @@ export class ApiClient {
     this.glossary = new GlossaryClient(transport);
   }
   bootstrap = (position?: ArticlePagePosition) =>
-    this.transport<Bootstrap>(`/api/bootstrap${articlePageQuery(position)}`);
+    this.transport<Bootstrap>(
+      `/api/bootstrap${articlePageQuery(position)}`,
+      undefined,
+      "BootstrapResponse",
+    );
   signIn = (username: string, password: string) =>
     this.transport<void>(
       "/api/auth/sessions",
       json("POST", { username, password }),
+      "SessionResponse",
     );
   signOut = () =>
-    this.transport<void>("/api/auth/sessions", { method: "DELETE" });
+    this.transport<void>("/api/auth/sessions", { method: "DELETE" }, "empty");
   acceptInvite = (token: string, username: string, password: string) =>
     this.transport<void>(
       "/api/auth/invites/accept",
       json("POST", { token, username, password }),
+      "empty",
     );
   changePassword = (currentPassword: string, newPassword: string) =>
     this.transport<void>(
@@ -166,11 +176,13 @@ export class ApiClient {
         current_password: currentPassword,
         new_password: newPassword,
       }),
+      "empty",
     );
   resetPassword = (token: string, newPassword: string) =>
     this.transport<void>(
       "/api/auth/password/reset",
       json("POST", { token, new_password: newPassword }),
+      "empty",
     );
   listArticles = (
     workspaceId: string,
@@ -181,43 +193,62 @@ export class ApiClient {
   ) =>
     this.transport<ArticlePage>(
       `/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}${cursor ? `&cursor=${enc(cursor)}&direction=${direction ?? "older"}` : ""}`,
+      undefined,
+      "ArticlePageView",
     );
   getArticle = (workspaceId: string, articleId: string) =>
     this.transport<Article>(
       `/api/articles/${enc(articleId)}?workspace_id=${enc(workspaceId)}`,
+      undefined,
+      "ArticleView",
     );
   listSubscriptions = (workspaceId: string) =>
     this.transport<Subscription[]>(
       `/api/subscriptions?workspace_id=${enc(workspaceId)}`,
+      undefined,
+      "SubscriptionView[]",
     );
   getSubscription = (id: string) =>
-    this.transport<SubscriptionDetail>(`/api/subscriptions/${enc(id)}`);
+    this.transport<SubscriptionDetail>(
+      `/api/subscriptions/${enc(id)}`,
+      undefined,
+      "SubscriptionView",
+    );
   saveSubscriptionNote = (id: string, note: string) =>
     this.transport<SubscriptionDetail>(
       `/api/subscriptions/${enc(id)}/note`,
       json("PUT", { note }),
+      "SubscriptionView",
     );
   subscriptionActivity = (id: string) =>
     this.transport<SubscriptionActivity[]>(
       `/api/subscriptions/${enc(id)}/activity`,
+      undefined,
+      "SubscriptionActivityView[]",
     );
   publicationHistory = (id: string) =>
     this.transport<PublicationHistory>(
       `/api/subscriptions/${enc(id)}/publication-history`,
+      undefined,
+      "PublicationHistoryView",
     );
   subscriptionExtraction = (id: string) =>
     this.transport<SubscriptionExtraction>(
       `/api/subscriptions/${enc(id)}/extraction`,
+      undefined,
+      "SubscriptionExtractionView",
     );
   previewSubscriptionSourceUrl = (id: string, url: string) =>
     this.transport<SourceUrlPreview>(
       `/api/subscriptions/${enc(id)}/source-url/preview`,
       json("POST", { url }),
+      "SourceUrlPreviewResponse",
     );
   commitSubscriptionSourceUrl = (id: string, previewToken: string) =>
     this.transport<Subscription>(
       `/api/subscriptions/${enc(id)}/source-url`,
       json("PUT", { previewToken }),
+      "SubscriptionView",
     );
   updateArticle = (
     workspaceId: string,
@@ -227,91 +258,137 @@ export class ApiClient {
     this.transport<Article>(
       `/api/articles/${enc(articleId)}/state?workspace_id=${enc(workspaceId)}`,
       json("POST", state),
+      "ArticleView",
     );
   markAllRead = (workspaceId: string, view: string, subscriptionId?: string) =>
     this.transport<void>(
       `/api/workspaces/${enc(workspaceId)}/articles/mark-all-read`,
       json("POST", { view, subscription_id: subscriptionId }),
+      "empty",
     );
   renameWorkspace = (id: string, name: string) =>
     this.transport<Workspace>(
       `/api/workspaces/${enc(id)}`,
       json("PATCH", { name }),
+      "WorkspaceView",
     );
   createWorkspace = (name: string) =>
-    this.transport<Workspace>("/api/workspaces", json("POST", { name }));
+    this.transport<Workspace>(
+      "/api/workspaces",
+      json("POST", { name }),
+      "WorkspaceView",
+    );
   archiveWorkspace = (id: string, reason: string) =>
     this.transport<void>(
       `/api/workspaces/${enc(id)}/archive`,
       json("POST", { reason }),
+      "empty",
     );
   restoreWorkspace = (id: string) =>
-    this.transport<void>(`/api/workspaces/${enc(id)}/restore`, {
-      method: "POST",
-    });
+    this.transport<void>(
+      `/api/workspaces/${enc(id)}/restore`,
+      {
+        method: "POST",
+      },
+      "empty",
+    );
   discoverFeed = (url: string) =>
-    this.transport<FeedPreview>("/api/feeds/discover", json("POST", { url }));
+    this.transport<FeedPreview>(
+      "/api/feeds/discover",
+      json("POST", { url }),
+      "FeedPreviewResponse",
+    );
   addSubscription = (workspaceId: string, url: string, title?: string) =>
     this.transport<Subscription>(
       "/api/subscriptions",
       json("POST", { workspace_id: workspaceId, url, title }),
+      "SubscriptionView",
     );
   refreshSubscription = (id: string) =>
-    this.transport<void>(`/api/subscriptions/${enc(id)}/refresh`, {
-      method: "POST",
-    });
+    this.transport<void>(
+      `/api/subscriptions/${enc(id)}/refresh`,
+      {
+        method: "POST",
+      },
+      "empty",
+    );
   refreshFullText = (workspaceId: string, articleId: string) =>
     this.transport<void>(
       `/api/articles/${enc(articleId)}/full-text/refresh?workspace_id=${enc(workspaceId)}`,
       { method: "POST" },
+      "empty",
     );
   pauseSubscription = (id: string, reason: string) =>
     this.transport<void>(
       `/api/subscriptions/${enc(id)}/pause`,
       json("POST", { reason }),
+      "empty",
     );
   resumeSubscription = (id: string) =>
-    this.transport<void>(`/api/subscriptions/${enc(id)}/resume`, {
-      method: "POST",
-    });
+    this.transport<void>(
+      `/api/subscriptions/${enc(id)}/resume`,
+      {
+        method: "POST",
+      },
+      "empty",
+    );
   renameSubscription = (id: string, name: string) =>
     this.transport<Subscription>(
       `/api/subscriptions/${enc(id)}`,
       json("PATCH", { name }),
+      "SubscriptionView",
     );
   unsubscribe = (id: string) =>
-    this.transport<Subscription>(`/api/subscriptions/${enc(id)}`, {
-      method: "DELETE",
-    });
+    this.transport<Subscription>(
+      `/api/subscriptions/${enc(id)}`,
+      {
+        method: "DELETE",
+      },
+      "SubscriptionView",
+    );
   restoreSubscription = (id: string) =>
-    this.transport<Subscription>(`/api/subscriptions/${enc(id)}/restore`, {
-      method: "POST",
-    });
+    this.transport<Subscription>(
+      `/api/subscriptions/${enc(id)}/restore`,
+      {
+        method: "POST",
+      },
+      "SubscriptionView",
+    );
   listRules = (workspaceId: string) =>
-    this.transport<RuleDraft[]>(`/api/rules?workspace_id=${enc(workspaceId)}`);
+    this.transport<RuleDraft[]>(
+      `/api/rules?workspace_id=${enc(workspaceId)}`,
+      undefined,
+      "RuleDraft[]",
+    );
   saveRule = (workspaceId: string, rule: RuleDraft) =>
     this.transport<RuleDraft>(
       `/api/rules${rule.id ? `/${enc(rule.id)}` : ""}?workspace_id=${enc(workspaceId)}`,
       json(rule.id ? "PUT" : "POST", rule),
+      "RuleDraft",
     );
   previewRule = (workspaceId: string, rule: RuleDraft) =>
     this.transport<RulePreview>(
       `/api/rules/preview?workspace_id=${enc(workspaceId)}`,
       json("POST", rule),
+      "RulePreviewResponse",
     );
   applyRule = (workspaceId: string, id: string) =>
     this.transport<RuleApplicationAccepted>(
       `/api/rules/${enc(id)}/apply?workspace_id=${enc(workspaceId)}`,
       { method: "POST" },
+      "RuleApplicationAccepted",
     );
   ruleApplicationStatus = (workspaceId: string, operationId: string) =>
     this.transport<RuleApplicationStatus>(
       `/api/rule-applications/${enc(operationId)}?workspace_id=${enc(workspaceId)}`,
+      undefined,
+      "RuleApplicationStatus",
     );
   deleteRule = (workspaceId: string, id: string) =>
     this.transport<void>(
       `/api/rules/${enc(id)}?workspace_id=${enc(workspaceId)}`,
       { method: "DELETE" },
+      "empty",
     );
   importOpml = (workspaceId: string, document: string, previewId?: string) =>
     this.transport<OpmlPreview>(
@@ -322,19 +399,31 @@ export class ApiClient {
         apply: previewId !== undefined,
         preview_id: previewId,
       }),
+      "OpmlImportResponse",
     );
   exportOpml = (workspaceId: string) =>
-    this.transport<string>(`/api/opml/export?workspace_id=${enc(workspaceId)}`);
+    this.transport<string>(
+      `/api/opml/export?workspace_id=${enc(workspaceId)}`,
+      undefined,
+      "string",
+    );
   previewWebFeed = (draft: WebFeedDraft) =>
     this.transport<FeedPreview>(
       "/api/web-feeds/recipes",
       json("POST", { ...draft, preview: true }),
+      "FeedPreviewResponse",
     );
   createWebFeed = (draft: WebFeedDraft) =>
-    this.transport<Subscription>("/api/web-feeds/recipes", json("POST", draft));
+    this.transport<Subscription>(
+      "/api/web-feeds/recipes",
+      json("POST", draft),
+      "SubscriptionView",
+    );
   getWebFeedRecipe = (subscriptionId: string) =>
     this.transport<WebFeedRecipeView>(
       `/api/web-feeds/recipes/${enc(subscriptionId)}`,
+      undefined,
+      "WebFeedRecipeView",
     );
   updateWebFeedRecipe = (
     subscriptionId: string,
@@ -344,6 +433,7 @@ export class ApiClient {
     this.transport<WebFeedRecipeView>(
       `/api/web-feeds/recipes/${enc(subscriptionId)}`,
       json("PUT", { expectedVersion, draft }),
+      "WebFeedRecipeView",
     );
   visualPreview = (
     workspaceId: string,
@@ -353,6 +443,7 @@ export class ApiClient {
     this.transport<VisualPreview>(
       "/api/web-feeds/visual-previews",
       json("POST", { workspaceId, url, viewport }),
+      "VisualPreviewResponse",
     );
   visualSelect = (
     workspaceId: string,
@@ -363,22 +454,26 @@ export class ApiClient {
     this.transport<VisualSelection>(
       "/api/web-feeds/visual-selections",
       json("POST", { workspaceId, snapshotToken, x, y }),
+      "VisualSelectionResponse",
     );
   createInvite = (username: string) =>
     this.transport<{ url: string; expires_at: string }>(
       "/api/auth/invites",
       json("POST", { username }),
+      "InviteResponse",
     );
   createPasswordReset = (username: string) =>
     this.transport<{ url: string; expires_at: string }>(
       "/api/auth/password-resets",
       json("POST", { username }),
+      "PasswordResetResponse",
     );
 }
 
 export const fetchTransport: Transport = async <T>(
   path: string,
-  init?: RequestInit,
+  init: RequestInit | undefined,
+  contract: ResponseContract,
 ) => {
   const method = init?.method ?? "GET";
   const startedAt = performance.now();
@@ -402,8 +497,10 @@ export const fetchTransport: Transport = async <T>(
       }
       throw new ApiError(response.status, message);
     }
-    if (response.status === 204) return undefined as T;
-    return checkCriticalResponse(path, await response.json(), method) as T;
+    return decodeResponse(
+      contract,
+      response.status === 204 ? undefined : await response.json(),
+    ) as T;
   } finally {
     reportApiRequest(path, method, startedAt, status);
   }

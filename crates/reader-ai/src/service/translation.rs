@@ -72,8 +72,16 @@ impl AiService {
                     .await
                 }
                 .await;
-                let (state, usage, reply) = match result {
+                let (state, usage) = match result {
                     Ok(reply) => {
+                        self.store
+                            .retain_reply(
+                                crate::ReplyKind::Translation,
+                                claim.record.owner,
+                                claim.record.job.id,
+                                &reply,
+                            )
+                            .await?;
                         let mut usage = reply.usage();
                         if let Some(usage) = &mut usage {
                             usage.estimated_cost_usd = Some(claim.record.cost_rates.cost(usage)?);
@@ -87,19 +95,16 @@ impl AiService {
                                 error: error.to_string(),
                             },
                         };
-                        (state, usage, Some(reply))
+                        (state, usage)
                     }
                     Err(error) => (
                         TranslationState::Failed {
                             error: error.to_string(),
                         },
                         None,
-                        None,
                     ),
                 };
-                self.store
-                    .finish_translation(&claim, state, usage, reply)
-                    .await?;
+                self.store.finish_translation(&claim, state, usage).await?;
                 Ok(true)
             })
             .await

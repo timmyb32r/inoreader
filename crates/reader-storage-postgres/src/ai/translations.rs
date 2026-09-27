@@ -168,7 +168,6 @@ impl PostgresAiStore {
         claim: &ClaimedTranslation,
         state: TranslationState,
         usage: Option<Usage>,
-        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
         let status = match &state {
             TranslationState::Completed { result } => {
@@ -183,11 +182,8 @@ impl PostgresAiStore {
         let mut record = claim.record.clone();
         record.job.state = state;
         record.job.usage = usage;
-        let (raw, response_status, interrupted) = reply
-            .map(|r| (Some(r.body), Some(i32::from(r.status)), Some(r.interrupted)))
-            .unwrap_or((None, None, None));
-        let n=sqlx::query("UPDATE ai_translations t SET raw_response=$6,response_status=$7,response_interrupted=$8,status=$4,document=$5,lease=NULL,lease_until=NULL FROM workspaces w WHERE t.id=$1 AND t.owner=$2 AND t.lease=$3 AND t.lease_until>now() AND t.status='generating' AND w.id=t.workspace::text AND w.document::jsonb->>'owner'=$2::text")
-            .bind(record.job.id).bind(record.owner).bind(claim.lease).bind(status).bind(encode(&record)?).bind(raw).bind(response_status).bind(interrupted).execute(&self.pool).await.map_err(storage)?.rows_affected();
+        let n=sqlx::query("UPDATE ai_translations t SET status=$4,document=$5,lease=NULL,lease_until=NULL FROM workspaces w WHERE t.id=$1 AND t.owner=$2 AND t.lease=$3 AND t.lease_until>now() AND t.status='generating' AND w.id=t.workspace::text AND w.document::jsonb->>'owner'=$2::text")
+            .bind(record.job.id).bind(record.owner).bind(claim.lease).bind(status).bind(encode(&record)?).execute(&self.pool).await.map_err(storage)?.rows_affected();
         if n != 1 {
             return Err(AiError::Cancelled);
         }

@@ -98,46 +98,32 @@ pub(super) async fn mark_all_read<R: ReaderRepository + 'static>(
     csrf(&s, &headers)?;
     let actor = auth(&s, &headers).await?;
     let workspace = WorkspaceId::from_uuid(id);
-    owned_workspace(&s, workspace, actor.account.id).await?;
-    let subscription = body.subscription_id.map(SubscriptionId::from_uuid);
-    if let Some(subscription) = subscription {
-        let value = owned_subscription(&s, subscription, actor.account.id).await?;
-        if value.workspace_id() != workspace {
-            return Err(ApiFailure::Forbidden);
+    let owned = reader_application::article_commands::OwnedWorkspace::resolve(
+        s.repository.as_ref(),
+        actor.account.id,
+        workspace,
+    )
+    .await?;
+    let scope = reader_application::ArticleScope::from_wire(
+        &body.view,
+        body.subscription_id.map(SubscriptionId::from_uuid),
+    )
+    .map_err(ApiFailure::Validation)?;
+    let limit = s.bulk_mutation_limit;
+    reader_application::article_commands::mark_articles_read(
+        s.repository.as_ref(),
+        &owned,
+        scope,
+        limit,
+    )
+    .await
+    .map_err(|error| match error {
+        reader_application::article_commands::MarkReadError::Repository(error) => {
+            ApiFailure::Repository(error)
         }
-    }
-    article_page_request(&body.view, subscription, None, None)?;
-    let mut selected = Vec::new();
-    for presentation in s
-        .repository
-        .article_summaries_by_workspace(workspace)
-        .await?
-    {
-        if subscription
-            .is_some_and(|subscription| !presentation.subscription_ids.contains(&subscription))
-        {
-            continue;
+        reader_application::article_commands::MarkReadError::Limit => {
+            ApiFailure::Validation("selection exceeds configured bulk mutation limit")
         }
-        let mut value = presentation.article;
-        let matches = match body.view.as_str() {
-            "feed" => !value.state.read,
-            "subscription" => true,
-            "later" => value.state.later,
-            _ => return Err(ApiFailure::Validation("unknown article view")),
-        };
-        if matches && !value.state.read {
-            value.state.read = true;
-            value.revision += 1;
-            selected.push(value)
-        }
-    }
-    if selected.len() > s.bulk_mutation_limit {
-        return Err(ApiFailure::Validation(
-            "selection exceeds configured bulk mutation limit",
-        ));
-    }
-    s.repository
-        .mark_articles_read_atomic(workspace, selected)
-        .await?;
+    })?;
     Ok(StatusCode::NO_CONTENT)
 }

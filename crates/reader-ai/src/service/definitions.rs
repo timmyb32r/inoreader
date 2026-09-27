@@ -65,8 +65,16 @@ impl AiService {
                     .await
                 }
                 .await;
-                let (state, usage, reply) = match response {
+                let (state, usage) = match response {
                     Ok(reply) => {
+                        self.store
+                            .retain_reply(
+                                crate::ReplyKind::Definitions,
+                                claim.record.owner(),
+                                claim.record.job().id,
+                                &reply,
+                            )
+                            .await?;
                         let mut usage = reply.usage();
                         if let Some(value) = &mut usage {
                             value.estimated_cost_usd = Some(claim.record.cost_rates().cost(value)?);
@@ -80,19 +88,16 @@ impl AiService {
                                 error: error.to_string(),
                             },
                         };
-                        (state, usage, Some(reply))
+                        (state, usage)
                     }
                     Err(error) => (
                         DefinitionState::Failed {
                             error: error.to_string(),
                         },
                         None,
-                        None,
                     ),
                 };
-                self.store
-                    .finish_definitions(&claim, state, usage, reply)
-                    .await?;
+                self.store.finish_definitions(&claim, state, usage).await?;
                 Ok(true)
             })
             .await

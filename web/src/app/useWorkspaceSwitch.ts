@@ -8,6 +8,7 @@ export function useWorkspaceSwitch(
   currentId: string,
   apply: (id: string, page: ArticlePage, subscriptions: Subscription[]) => void,
   announce: (message: string) => void,
+  waitForWrites: () => Promise<void>,
 ) {
   const generation = useRef(0),
     locked = useRef(false);
@@ -24,6 +25,8 @@ export function useWorkspaceSwitch(
     setSwitchingWorkspace(true);
     const request = ++generation.current;
     try {
+      await waitForWrites();
+      if (request !== generation.current) return;
       const [page, subscriptions] = await Promise.all([
         client.listArticles(id, "feed"),
         client.listSubscriptions(id),

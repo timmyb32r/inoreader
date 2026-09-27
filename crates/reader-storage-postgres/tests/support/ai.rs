@@ -84,7 +84,7 @@ impl AiProvider for Provider {
         )
     }
 }
-fn policy(owner: Uuid) -> AiPolicy {
+pub(super) fn policy(owner: Uuid) -> AiPolicy {
     AiPolicy::new(
         AiConfig {
             prompt_approved: true,

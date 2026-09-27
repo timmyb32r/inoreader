@@ -99,3 +99,19 @@ it("uses explicit reversible subscription lifecycle routes", async () => {
     { path: "/api/subscriptions/sub/restore", method: "POST", body: undefined },
   ]);
 });
+
+it("requires the article response contract for state mutations", async () => {
+  const contracts: unknown[] = [];
+  const client = new ApiClient(
+    async <T>(
+      path: string,
+      init: RequestInit | undefined,
+      contract: import("./decode").ResponseContract,
+    ) => {
+      contracts.push(contract);
+      return undefined as T;
+    },
+  );
+  await client.updateArticle("workspace", "article", { read: true });
+  expect(contracts).toEqual(["ArticleView"]);
+});

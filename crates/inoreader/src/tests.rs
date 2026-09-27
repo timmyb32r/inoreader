@@ -205,3 +205,12 @@ fn unknown_fields_fail() {
         "removed database settings must fail explicitly"
     );
 }
+
+#[test]
+fn bulk_selection_limit_rejects_invalid_configuration_before_connecting() {
+    for size in [0, usize::MAX] {
+        let mut config = example();
+        config.ingest.batch_items = size;
+        assert!(config.validate().is_err());
+    }
+}

@@ -323,6 +323,7 @@ async fn postgres_pool(config: &Config) -> Result<sqlx::PgPool, Box<dyn std::err
         .username(&config.database.postgres.username)
         .password(&password);
     let pool = PgPoolOptions::new()
+        .acquire_time_level(log::LevelFilter::Info)
         .max_connections(config.database.postgres.max_connections)
         .acquire_timeout(Duration::from_secs(
             config.database.postgres.acquire_timeout_seconds,
@@ -554,7 +555,7 @@ async fn serve(
         auth_policy(config)?,
         config.server.external_origin.clone(),
         config.auth.login_attempts_per_minute,
-        config.ingest.batch_items,
+        reader_application::SelectionLimit::new(config.ingest.batch_items)?,
     );
     if let Some(ai) = &ai_service {
         server_state = server_state.with_ai(ai.clone());

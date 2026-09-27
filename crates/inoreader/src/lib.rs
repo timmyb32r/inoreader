@@ -331,6 +331,8 @@ impl Config {
                 return Err(ConfigError::Invalid(n));
             }
         }
+        reader_application::SelectionLimit::new(self.ingest.batch_items)
+            .map_err(|_| ConfigError::Invalid("ingest.batch_items"))?;
         if self.http.redirect_hops == 0
             || self.scheduler.retry_attempts == 0
             || self.database.postgres.max_connections == 0

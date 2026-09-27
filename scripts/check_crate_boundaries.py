@@ -25,7 +25,7 @@ ALLOWED: dict[str, set[str]] = {
     "reader-server-contracts": set(),
     "reader-server": {"reader-runtime","reader-core", "reader-application", "reader-server-contracts", "reader-web-runtime", "reader-ai", "reader-glossary"},
     "reader-server-ui": set(),
-    "reader-storage-postgres": {"reader-core", "reader-application", "reader-ingest", "reader-ai", "reader-glossary"},
+    "reader-storage-postgres": {"reader-runtime", "reader-core", "reader-application", "reader-ingest", "reader-ai", "reader-glossary"},
     "inoreader": {
         "reader-runtime",
         "reader-core", "reader-application", "reader-collectors", "reader-ingest",

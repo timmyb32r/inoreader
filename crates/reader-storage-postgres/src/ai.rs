@@ -203,6 +203,36 @@ fn set_attempt(record: &mut ChatRecord, state: MessageStatus) -> Result<(), AiEr
 
 #[async_trait]
 impl AiStore for PostgresAiStore {
+    async fn retain_reply(
+        &self,
+        kind: ReplyKind,
+        owner: Uuid,
+        job: Uuid,
+        reply: &ProviderReply,
+    ) -> Result<(), AiError> {
+        let table = match kind {
+            ReplyKind::Translation => "ai_translations",
+            ReplyKind::Definitions => "ai_definitions",
+        };
+        // Immutable, idempotent capture: different bytes for the same attempt are
+        // corruption, never a last-write-wins overwrite. Do not require a lease.
+        let sql = format!("UPDATE {table} t SET raw_response=$3,response_status=$4,response_interrupted=$5 FROM workspaces w WHERE t.id=$1 AND t.owner=$2 AND w.id=t.workspace::text AND w.document::jsonb->>'owner'=$2::text AND (t.raw_response IS NULL OR (t.raw_response=$3 AND t.response_status=$4 AND t.response_interrupted=$5))");
+        let changed = sqlx::query(&sql)
+            .bind(job)
+            .bind(owner)
+            .bind(&reply.body)
+            .bind(i32::from(reply.status))
+            .bind(reply.interrupted)
+            .execute(&self.pool)
+            .await
+            .map_err(storage)?
+            .rows_affected();
+        if changed != 1 {
+            return Err(AiError::Storage);
+        }
+        Ok(())
+    }
+
     async fn definitions(
         &self,
         owner: Uuid,
@@ -230,9 +260,8 @@ impl AiStore for PostgresAiStore {
         claim: &ClaimedDefinitions,
         state: DefinitionState,
         usage: Option<Usage>,
-        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
-        self.complete_definitions(claim, state, usage, reply).await
+        self.complete_definitions(claim, state, usage).await
     }
 
     async fn translations(
@@ -257,9 +286,8 @@ impl AiStore for PostgresAiStore {
         claim: &ClaimedTranslation,
         state: TranslationState,
         usage: Option<Usage>,
-        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
-        self.complete_translation(claim, state, usage, reply).await
+        self.complete_translation(claim, state, usage).await
     }
 
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError> {

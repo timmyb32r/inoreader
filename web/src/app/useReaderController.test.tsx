@@ -106,3 +106,94 @@ it("ignores pending failures after the account controller unmounts", async () =>
   });
   expect(notice).not.toHaveBeenCalled();
 });
+
+for (const failure of [false, true])
+  it(`keeps pending writes when paging and reconciles ${failure ? "failure" : "success"}`, async () => {
+    const client = mockClient(),
+      bootstrap = await client.bootstrap();
+    const write = deferred<any>();
+    vi.spyOn(client, "getArticle").mockResolvedValue(articles[0]);
+    vi.spyOn(client, "updateArticle").mockReturnValue(write.promise);
+    const list = vi
+      .spyOn(client, "listArticles")
+      .mockResolvedValue(bootstrap.articlePage);
+    const notice = vi.fn();
+    const { result } = renderHook(() =>
+      useReaderController(client, bootstrap, [], notice, vi.fn()),
+    );
+    act(() => {
+      result.current.update("1", { read: true });
+      void result.current.loadPage("later", null);
+      void result.current.loadPage("later", null);
+    });
+    expect(result.current.paging).toBe(true);
+    expect(result.current.pendingArticleMutations.has("1:read")).toBe(true);
+    expect(list).not.toHaveBeenCalled();
+    await act(async () => {
+      if (failure) write.reject(new Error("write failed"));
+      else write.resolve({ ...articles[0], read: true });
+      await write.promise.catch(() => {});
+    });
+    await waitFor(() => expect(result.current.paging).toBe(false));
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(notice).toHaveBeenCalledTimes(failure ? 1 : 0);
+    expect(result.current.pendingArticleMutations.size).toBe(0);
+  });
+
+it("refetches a page whose snapshot overlaps a mutation", async () => {
+  const client = mockClient(),
+    bootstrap = await client.bootstrap();
+  const stale = deferred<ArticlePage>(),
+    write = deferred<any>();
+  const fresh = { ...bootstrap.articlePage, unreadTotal: 17 };
+  const list = vi
+    .spyOn(client, "listArticles")
+    .mockReturnValueOnce(stale.promise)
+    .mockResolvedValue(fresh);
+  vi.spyOn(client, "updateArticle").mockReturnValue(write.promise);
+  const { result } = renderHook(() =>
+    useReaderController(client, bootstrap, [], vi.fn(), vi.fn()),
+  );
+  act(() => {
+    void result.current.loadPage("later", null);
+  });
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  act(() => result.current.update("1", { read: true }));
+  await act(async () => {
+    stale.resolve(bootstrap.articlePage);
+    await stale.promise;
+  });
+  expect(result.current.pendingArticleMutations.has("1:read")).toBe(true);
+  expect(result.current.paging).toBe(true);
+  await act(async () => {
+    write.resolve({ ...articles[0], read: true });
+    await write.promise;
+  });
+  await waitFor(() => expect(result.current.paging).toBe(false));
+  expect(list).toHaveBeenCalledTimes(2);
+  expect(result.current.unreadTotal).toBe(17);
+});
+
+it("retains the account write barrier across workspace replacement", async () => {
+  const client = mockClient(),
+    bootstrap = await client.bootstrap(),
+    write = deferred<any>();
+  vi.spyOn(client, "updateArticle").mockReturnValue(write.promise);
+  const list = vi.spyOn(client, "listArticles").mockResolvedValue(replacement);
+  const { result } = renderHook(() =>
+    useReaderController(client, bootstrap, [], vi.fn(), vi.fn()),
+  );
+  act(() => result.current.update("1", { read: true }));
+  await waitFor(() => expect(client.updateArticle).toHaveBeenCalled());
+  act(() => result.current.replaceWorkspace("other", replacement));
+  act(() => {
+    void result.current.loadPage("feed", null);
+  });
+  expect(list).not.toHaveBeenCalled();
+  await act(async () => {
+    write.resolve({ ...articles[0], read: true });
+    await write.promise;
+  });
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+  expect(result.current.selected?.read).toBe(false);
+});

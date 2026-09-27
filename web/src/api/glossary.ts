@@ -19,20 +19,26 @@ export class GlossaryClient {
   status = (workspace: string) =>
     this.transport<ChannelStatus>(
       `/api/glossary/channel?workspace_id=${encodeURIComponent(workspace)}`,
+      undefined,
+      "ChannelStatus",
     );
   configure = (workspaceId: string, token: string) =>
     this.transport<ChannelStatus>(
       "/api/glossary/channel",
       json("PUT", { workspaceId, token }),
+      "ChannelStatus",
     );
   sync = (workspaceId: string) =>
     this.transport<ChannelStatus>(
       "/api/glossary/channel/sync",
       json("POST", { workspaceId }),
+      "ChannelStatus",
     );
   get = (workspace: string, article: string) =>
     this.transport<DefinitionsView>(
       `/api/articles/${encodeURIComponent(article)}/definitions?workspace_id=${encodeURIComponent(workspace)}`,
+      undefined,
+      "DefinitionsView",
     );
   generate = (
     workspaceId: string,
@@ -43,5 +49,6 @@ export class GlossaryClient {
     this.transport<DefinitionsView>(
       `/api/articles/${encodeURIComponent(article)}/definitions`,
       json("POST", { workspaceId, operationId, regenerate }),
+      "DefinitionsView",
     );
 }
