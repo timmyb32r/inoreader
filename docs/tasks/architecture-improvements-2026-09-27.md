@@ -6,15 +6,15 @@ and stable interaction geometry. Keep Rust/PostgreSQL/Preact modular monolith.
 
 | # | Obligation | Acceptance criteria | Status |
 |---|---|---|---|
-| 1 | Frontend ownership and stale-response protection | Reader/session/workspace concerns extracted; request scope protects pagination, mutations and counters; delayed-response and account-switch regressions | verified locally |
-| 2 | Background lifecycle | SIGINT/SIGTERM; supervised AI/glossary/icons/ingest; stop admission and await active work; bounded shutdown; fair AI work classes; tests | verified locally |
-| 3 | API contract source of truth | Generated TS contract from server definitions; closed state enums; runtime decoding for critical responses; CI drift checks | verified locally |
-| 4 | Backend boundaries | Feature-owned routes and repositories; narrow repository ports; use-case-owned article mutations and checked ownership; regression coverage | verified locally |
-| 5 | PostgreSQL read model | Indexed lossless read projection for Feed/subscriptions; exact source preserved; 10k/100k/1m reproducible query measurements; consistency/restore tests | verified locally |
-| 6 | AI attempt lifecycle | Frozen prompt/model/parameters/validator identity for translation and consistent attempt provenance; raw-response retention; replay validation without paid calls; cache identity and failure-isolation tests | verified locally |
-| 7 | Shared UI primitives | FloatingPanel/AsyncButton/StatusRegion shared mechanics; canonical checked theme tokens; formatting; layout/pending/dedup regression tests | verified locally |
-| 8 | Real application acceptance | Browser + real Rust API + PostgreSQL in release gate; persisted mutation, tenant isolation, delayed navigation, queue/idempotency coverage with deterministic provider | verified locally |
-| 9 | Correlated diagnostics | Request/operation/job correlation through API, SQL and provider; queue/provider/validation durations; bounded metric labels and redaction tests | verified locally |
+| 1 | Frontend ownership and stale-response protection | Reader/session/workspace concerns extracted; request scope protects pagination, mutations and counters; delayed-response and account-switch regressions | verified |
+| 2 | Background lifecycle | SIGINT/SIGTERM; supervised AI/glossary/icons/ingest; stop admission and await active work; bounded shutdown; fair AI work classes; tests | verified |
+| 3 | API contract source of truth | Generated TS contract from server definitions; closed state enums; runtime decoding for critical responses; CI drift checks | verified |
+| 4 | Backend boundaries | Feature-owned routes and repositories; narrow repository ports; use-case-owned article mutations and checked ownership; regression coverage | verified |
+| 5 | PostgreSQL read model | Indexed lossless read projection for Feed/subscriptions; exact source preserved; 10k/100k/1m reproducible query measurements; consistency/restore tests | verified |
+| 6 | AI attempt lifecycle | Frozen prompt/model/parameters/validator identity for translation and consistent attempt provenance; raw-response retention; replay validation without paid calls; cache identity and failure-isolation tests | verified |
+| 7 | Shared UI primitives | FloatingPanel/AsyncButton/StatusRegion shared mechanics; canonical checked theme tokens; formatting; layout/pending/dedup regression tests | verified |
+| 8 | Real application acceptance | Browser + real Rust API + PostgreSQL in release gate; persisted mutation, tenant isolation, delayed navigation, queue/idempotency coverage with deterministic provider | verified |
+| 9 | Correlated diagnostics | Request/operation/job correlation through API, SQL and provider; queue/provider/validation durations; bounded metric labels and redaction tests | verified |
 
 Final gates: affected compilation, complete release gate, separate final diff review,
 backup/read-model preservation checks, deploy to authorized 158.160.186.87,
@@ -38,17 +38,29 @@ file was split or a mock-only test passed.
 - Final review corrected CI to build embedded UI before acceptance and reject
   generated contract drift. Shared source formatting is intentional.
 
-## Rollout status
+## Rollout verified
 
-- Production backup completed (840 MiB, archive catalog verified) at private server path
+- User explicitly reconfirmed source transfer and deployment to 158.160.186.87;
+  the approval restriction was lifted and transfer/build completed.
+- Production backup: 840 MiB at private server path
   `.inoreader-state/deployments/architecture-20260927/before.dump`.
-- Automatic approval review rejected the source transfer twice despite the
-  previous standing authorization. Explicit fresh confirmation was requested;
-  do not bypass the restriction or claim deployment until it is lifted.
-- Final code review completed; `git diff --check` passed.
-- Implementation committed as `32ead27`; final affected check passed in 5.784s.
-- Production backup restored successfully into a separate temporary database:
-  9,794 articles and 211 subscriptions; the verification database was then removed.
-  The backup and production database are retained.
-- Still required: confirmed source transfer, container build/rollout and production
-  smoke. Deployment remains blocked on approval, not on local tests.
+  Restored into a separate database: 9,794 articles, 211 subscriptions. The
+  verification database was removed; backup and production data are retained.
+- Deployment compared `id,revision,document` exports of every article before and
+  after schema preparation with `cmp`: byte-identical. New read columns exist.
+- Final image `inoreader-app:architecture-stats-20260927` is running and healthy;
+  its image ID matches the built artifact. Previous images retained for rollback.
+  Server build inputs were synchronized; superseded frontend modules removed.
+- API smoke passed: unauthenticated denial, authenticated bootstrap/subscriptions,
+  article/translation/definitions/chat/profile/channel reads, and foreign-workspace
+  denial. Every response carries a request ID. Temporary session was deleted.
+- Real browser smoke passed: Feed opens, subscription popup opens/closes back to
+  the reader, no JavaScript page errors. No paid provider request was made.
+- Post-deployment diagnostics found costly aggregation of icon payloads. The
+  measured, result-equivalent correction and plan regression were added in
+  `ab758a0`; full `just check-release` passed again before the final image rollout.
+- Server timings after the final rollout: bootstrap 63–67 ms (previous ~907 ms),
+  subscription list 46 ms (previous ~897 ms). Network/client transfer time is not
+  included. The query-only comparison was 917.564 → 35.916 ms.
+- Main implementation: `32ead27`; verification record: `1d6acd1`; final SQL fix:
+  `ab758a0`. All nine obligations verified; no pending implementation or rollout.
