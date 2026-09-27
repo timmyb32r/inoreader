@@ -110,23 +110,8 @@
 .glossary-panel footer small {
   display: block;
 }
-.glossary-panel button:active,
-.glossary-trigger:active {
+.glossary-panel button:active {
   background: var(--accent-soft);
-}
-.glossary-trigger {
-  height: 38px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  white-space: nowrap;
-}
-.glossary-trigger .spinner {
-  width: 16px;
-  height: 16px;
 }
 .glossary-settings {
   min-height: 280px;

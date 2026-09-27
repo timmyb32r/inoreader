@@ -32,6 +32,12 @@ Reader layout uses three stable regions on desktop: navigation, article list,
 and article content. Narrow screens show one region at a time with an explicit
 back action. Source text is never translated or reformatted silently.
 
+Article toolbar controls share a 36px height, 12px semibold labels, 16px icons
+and the same neutral surface and border. Icon-only controls are square; the
+translation character is an icon, not a separate label style. Only enabled
+toggle states use the selected teal surface; Summarize and Terms are ordinary
+actions. Hover and press feedback changes color without scaling the control.
+Loading spinners occupy the same space as the icons they replace.
 
 The article chat reserves its header, 36px status row and 80px composer. Copy and
 send use icon buttons; request accounting and version selection are not part of

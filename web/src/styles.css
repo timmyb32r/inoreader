@@ -764,24 +764,6 @@ select:focus-visible {
   flex-direction: column;
   overflow: hidden;
 }
-.reader-toolbar {
-  height: 56px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  padding: 0 18px;
-  border-bottom: 1px solid var(--line);
-}
-.reader-toolbar__states {
-  display: flex;
-  gap: 2px;
-}
-.reader-toolbar > a {
-  margin-left: auto;
-}
-.reader-back {
-  display: none;
-}
 .reader-body {
   width: min(720px, calc(100% - 70px));
   margin: 0 auto;
@@ -1978,12 +1960,6 @@ select:focus-visible {
   }
   .article-list {
     border: 0;
-  }
-  .reader-back {
-    display: grid;
-  }
-  .reader-toolbar {
-    padding: 0 10px;
   }
   .reader-body {
     width: calc(100% - 34px);

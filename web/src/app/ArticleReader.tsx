@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import "../ai/deepseek.css";
+import "./article-toolbar.css";
 import type { AiClient } from "../api/ai";
 import { ParagraphReader } from "../translation/ParagraphReader";
 import { AsyncButton } from "../ui/AsyncButton";
@@ -56,7 +57,7 @@ export function ArticleReader({
     <article class={`article-reader ${className}`} aria-label="Article reader">
       <header class="reader-toolbar">
         <button
-          class="icon-button reader-back"
+          class="reader-toolbar-button reader-toolbar-button--icon reader-back"
           aria-label="Back to articles"
           onClick={onBack}
         >
@@ -78,7 +79,7 @@ export function ArticleReader({
             onClick={() => onUpdate({ later: !article.later })}
           />
           <button
-            class="summarize-button"
+            class="reader-toolbar-button"
             disabled={summaryPending}
             aria-busy={summaryPending}
             onClick={onSummarize}
@@ -91,7 +92,7 @@ export function ArticleReader({
             Summarize
           </button>
           <button
-            class="translate-paragraph-button toolbar-tooltip"
+            class="reader-toolbar-button reader-toolbar-button--icon toolbar-tooltip"
             disabled={!translationEnabled || article.fullText !== "ready"}
             aria-label="Translate paragraphs"
             data-tooltip={
@@ -106,10 +107,12 @@ export function ArticleReader({
             aria-pressed={translating}
             onClick={() => setTranslating((value) => !value)}
           >
-            文
+            <span class="reader-toolbar-button__glyph" aria-hidden="true">
+              文
+            </span>
           </button>
           <button
-            class="glossary-trigger toolbar-tooltip"
+            class="reader-toolbar-button toolbar-tooltip"
             aria-label="Terms"
             disabled={definitionsPending}
             aria-disabled={
@@ -146,14 +149,14 @@ export function ArticleReader({
           </button>
         </div>
         <a
-          class="icon-button toolbar-tooltip toolbar-tooltip--right"
+          class="reader-toolbar-button reader-toolbar-button--icon toolbar-tooltip toolbar-tooltip--right"
           data-tooltip="Open original"
           aria-label="Open original"
           href={article.url}
           target="_blank"
           rel="noopener noreferrer"
         >
-          <Icon name="external" />
+          <Icon name="external" size={16} />
         </a>
       </header>
       <div class="reader-body">
@@ -247,7 +250,7 @@ function StateButton({
 }) {
   return (
     <button
-      class={`icon-button toolbar-tooltip ${active ? "active" : ""}`}
+      class="reader-toolbar-button reader-toolbar-button--icon toolbar-tooltip"
       data-tooltip={label}
       disabled={pending}
       aria-busy={pending}
@@ -255,7 +258,7 @@ function StateButton({
       aria-pressed={active}
       onClick={onClick}
     >
-      {pending ? <span class="spinner" /> : <Icon name={icon} />}
+      {pending ? <span class="spinner" /> : <Icon name={icon} size={16} />}
     </button>
   );
 }
