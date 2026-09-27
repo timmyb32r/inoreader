@@ -1,3 +1,5 @@
+import ts from "typescript";
+import { imports, sourceGraph, violations } from "../../tools/architecture";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -50,20 +52,53 @@ it("keeps the subscriptions dialog on an opaque themed background", () => {
   expect(stylesheet).not.toContain("var(--app-bg)");
 });
 
-it("keeps feature modules independent from the App shell", () => {
-  const src = join(process.cwd(), "src");
-  const offenders = files(src)
-    .filter(
-      (path) =>
-        /\.tsx?$/.test(path) &&
-        !/\.test\.tsx?$/.test(path) &&
-        !path.endsWith("main.tsx"),
-    )
-    .filter((path) =>
-      /from\s+["'][^"']*\/App["']/.test(readFileSync(path, "utf8")),
-    )
-    .map((path) => relative(src, path));
-  expect(offenders).toEqual([]);
+it("enforces resolved feature boundaries and runtime import acyclicity", () => {
+  const root = join(process.cwd(), "src");
+  const config = ts.readConfigFile(
+    join(process.cwd(), "tsconfig.json"),
+    ts.sys.readFile,
+  );
+  const options = ts.parseJsonConfigFileContent(
+    config.config,
+    ts.sys,
+    process.cwd(),
+  ).options;
+  const production = files(root).filter(
+    (path) =>
+      /\.tsx?$/.test(path) &&
+      !/\.test\.tsx?$/.test(path) &&
+      !path.includes("/test/") &&
+      !path.includes("/tests/"),
+  );
+  expect(violations(sourceGraph(production, root, options))).toEqual([]);
+});
+it("detects renamed, re-exported and dynamic imports and cycles", () => {
+  expect(
+    imports(
+      'import type { X as Y } from "../app/ReaderApplication"; export { z } from "./z"; import("./lazy");',
+    ),
+  ).toEqual([
+    { target: "../app/ReaderApplication", runtime: false },
+    { target: "./z", runtime: true },
+    { target: "./lazy", runtime: true },
+  ]);
+  expect(
+    violations(
+      new Map([
+        [
+          "api/example.ts",
+          [{ target: "app/ReaderApplication.tsx", runtime: false }],
+        ],
+        ["ai/a.ts", [{ target: "ai/b.ts", runtime: true }]],
+        ["ai/b.ts", [{ target: "ai/a.ts", runtime: true }]],
+      ]),
+    ),
+  ).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("api/example.ts must not import"),
+      expect.stringContaining("Runtime import cycle"),
+    ]),
+  );
 });
 
 it("resolves every CSS custom property to an authored token or explicit fallback", () => {

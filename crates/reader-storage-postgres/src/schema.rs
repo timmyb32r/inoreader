@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS staged_content_chunks (
     refresh_id TEXT NOT NULL,
     representation TEXT NOT NULL,
     ordinal BIGINT NOT NULL CHECK (ordinal >= 0),
-    bytes TEXT NOT NULL,
+    bytes BYTEA NOT NULL,
     PRIMARY KEY (record_id, refresh_id, representation, ordinal)
 );
 
@@ -293,24 +293,86 @@ CREATE TABLE IF NOT EXISTS rule_evaluations (
 );
 "#;
 
-/// Creates the complete schema atomically. The DDL is idempotent, so callers
-/// may safely invoke this on every process startup.
+/// Initialize an empty database explicitly. Existing installations must already
+/// match this release; initialization never upgrades an unknown schema.
 pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let present: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='schema_releases')").fetch_one(pool).await?;
+    if present {
+        return verify_schema(pool).await;
+    }
     let mut transaction = pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(492871020)")
+        .execute(&mut *transaction)
+        .await?;
+    let occupied: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema())").fetch_one(&mut *transaction).await?;
+    if occupied {
+        return Err(sqlx::Error::Protocol(
+            "unversioned database: run explicit upgrade-schema after verified backup".into(),
+        ));
+    }
     execute_schema(&mut transaction).await?;
-    sqlx::query(
-        "CREATE UNIQUE INDEX IF NOT EXISTS subscriptions_by_workspace_exact_url \
-         ON subscriptions ((document::jsonb ->> 'workspace_id'), (document::jsonb ->> 'source_url'))",
-    )
-    .execute(&mut *transaction)
-    .await?;
+    sqlx::raw_sql(RELEASE_TABLE)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
+        .bind(VERSION)
+        .bind(RELEASE)
+        .execute(&mut *transaction)
+        .await?;
     transaction.commit().await
+}
+
+pub const VERSION: i64 = 1;
+pub const RELEASE: &str = "architecture-contracts-2026-09-27";
+const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
+
+/// Read-only startup preflight. No listener or worker may start on a different
+/// schema. The journal owns deployment identity; physical types detect drift.
+pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
+    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='schema_releases')").fetch_one(pool).await?;
+    if !exists {
+        return Err(sqlx::Error::Protocol("schema version missing: use prepare-schema for an empty database or explicit upgrade-schema for an existing installation".into()));
+    }
+    let version: Option<(i64, String)> =
+        sqlx::query_as("SELECT version,release FROM schema_releases ORDER BY version DESC LIMIT 1")
+            .fetch_optional(pool)
+            .await?;
+    if version != Some((VERSION, RELEASE.into())) {
+        return Err(sqlx::Error::Protocol(
+            "database schema version does not match application release".into(),
+        ));
+    }
+    let valid: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='staged_content_chunks' AND column_name='bytes' AND data_type='bytea') OR (table_name='ai_chats' AND column_name IN ('inputs','public_view') AND data_type='text' AND is_nullable='NO') OR (table_name='ai_chats' AND column_name='public_revision' AND data_type='bigint'))").fetch_one(pool).await?;
+    if !valid {
+        return Err(sqlx::Error::Protocol(
+            "database schema differs from its recorded version".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Explicit one-way upgrade of the preceding unversioned release. It is not a
+/// runtime compatibility reader. All bytes are validated before transaction commit.
+pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Result<(), sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    sqlx::raw_sql(include_str!("../../../tools/upgrade_binary_content.sql"))
+        .execute(&mut *transaction)
+        .await?;
+    crate::ai::backfill_public_views(&mut transaction, batch).await?;
+    sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
+        .bind(VERSION)
+        .bind(RELEASE)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    verify_schema(pool).await
 }
 
 async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     sqlx::raw_sql(SCHEMA_SQL)
         .execute(&mut **transaction)
         .await?;
+    sqlx::query("CREATE UNIQUE INDEX subscriptions_by_workspace_exact_url ON subscriptions ((document::jsonb ->> 'workspace_id'), (document::jsonb ->> 'source_url'))").execute(&mut **transaction).await?;
     sqlx::raw_sql(crate::ai::SCHEMA)
         .execute(&mut **transaction)
         .await?;

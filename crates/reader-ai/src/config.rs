@@ -48,6 +48,9 @@ pub struct AiConfig {
 
     pub lease_seconds: u64,
 
+    /// Maximum expired jobs recovered per transaction and work class.
+    pub recovery_batch: u32,
+
     pub input_usd_per_million_tokens: String,
 
     pub cached_input_usd_per_million_tokens: String,
@@ -82,6 +85,7 @@ impl AiConfig {
             || self.max_message_bytes == 0
             || self.max_response_bytes == 0
             || self.workers == 0
+            || self.recovery_batch == 0
             || self.poll_milliseconds == 0
             || self.connect_timeout_seconds == 0
             || self.connect_timeout_seconds > self.request_timeout_seconds

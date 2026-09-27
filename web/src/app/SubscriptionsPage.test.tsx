@@ -6,7 +6,7 @@ import {
   type SubscriptionDetail,
   type Transport,
 } from "../api/client";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import { SubscriptionsPage } from "./SubscriptionsPage";
 
 const subscriptions: Subscription[] = [

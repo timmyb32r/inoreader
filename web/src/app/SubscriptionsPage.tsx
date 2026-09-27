@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "preact/hooks";
 import type { ApiClient, WebFeedRecipeView } from "../api/client";
 import { Icon } from "../ui/Icon";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import { SubscriptionCatalog } from "./SubscriptionCatalog";
 import { SubscriptionDetails, type DetailTab } from "./SubscriptionDetails";
 export function SubscriptionsPage({

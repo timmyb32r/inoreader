@@ -10,7 +10,7 @@ import type {
 import { Icon } from "../ui/Icon";
 import { ModalDialog } from "../ui/ModalDialog";
 import { AutofillResistantField, AutofillResistantSelect } from "../ui/fields";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 
 type Language = SelectorDraft["language"];
 type Loading = WebFeedDraft["loading"];

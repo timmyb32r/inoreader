@@ -204,7 +204,7 @@ where
                         *rule_version,
                         *after_article,
                         *through_article,
-                        self.limits.fanout_batch,
+                        self.limits.fanout_batch(),
                     )
                     .await?;
                 Ok(())
@@ -226,7 +226,7 @@ where
         }
         if let Some(pending) = self
             .store
-            .pending_poll(source_id, self.limits.fanout_batch)
+            .pending_poll(source_id, self.limits.fanout_batch())
             .await?
         {
             self.store.commit_poll(lease, pending).await?;
@@ -235,7 +235,7 @@ where
         let source = self.store.source(source_id).await?;
         let validators = self.store.source_validators(source_id).await?;
         let page = self.feeds.fetch(source.url(), &validators).await?;
-        if page.body.len() > self.limits.max_input_bytes {
+        if page.body.len() > self.limits.max_input_bytes() {
             return Err(IngestError::Parse(
                 "feed exceeds configured max_input_bytes".into(),
             ));
@@ -276,7 +276,7 @@ where
         }
         .map_err(|error| IngestError::Parse(error.to_string()))?;
         let is_initial = !self.store.has_committed_poll(source_id).await?;
-        let incomplete = is_initial && parsed.len() > self.limits.initial_feed_items;
+        let incomplete = is_initial && parsed.len() > self.limits.initial_feed_items();
         let mut records = Vec::new();
         let mut upstream_ids = std::collections::HashSet::new();
         for parsed in parsed {
@@ -314,8 +314,8 @@ where
             };
             records.push(value);
         }
-        let remainder = if is_initial && records.len() > self.limits.initial_feed_items {
-            records.split_off(self.limits.initial_feed_items)
+        let remainder = if is_initial && records.len() > self.limits.initial_feed_items() {
+            records.split_off(self.limits.initial_feed_items())
         } else {
             Vec::new()
         };
@@ -351,7 +351,7 @@ where
         let record = self.store.record(record_id).await?;
         let targets = self
             .store
-            .delivery_targets(source_id, after, self.limits.fanout_batch)
+            .delivery_targets(source_id, after, self.limits.fanout_batch())
             .await?;
         let mut last = None;
         for target in targets {
@@ -387,25 +387,25 @@ where
     ) -> Result<(), IngestError> {
         let result = async {
             let page = self.fulltext.extract(url).await?;
-            if page.body.len() > self.limits.max_input_bytes {
+            if page.body.len() > self.limits.max_input_bytes() {
                 return Err(IngestError::Parse(
                     "fulltext response exceeds configured max_input_bytes".into(),
                 ));
             }
-            let raw = chunks(&page.body, self.limits.content_chunk_bytes);
+            let raw = chunks(&page.body, self.limits.content_chunk_bytes());
             // Character-set decoding belongs at the fetch boundary. Until it
             // can prove a lossless decoding, invalid input fails visibly
             // instead of inserting replacement characters into user data.
             let source = crate::web_feed::decode_html(&page.body, page.content_type.as_deref())
                 .map_err(|error| IngestError::Parse(error.to_string()))?;
             let readable = crate::web_feed::readable_fragment(&source);
-            if readable.len() > self.limits.max_extracted_bytes {
+            if readable.len() > self.limits.max_extracted_bytes() {
                 return Err(IngestError::Parse(
                     "extracted content exceeds configured max_extracted_bytes".into(),
                 ));
             }
             let safe = SafeRenderedContent::from_untrusted_html(&readable);
-            let safe = chunks(safe.html().as_bytes(), self.limits.content_chunk_bytes);
+            let safe = chunks(safe.html().as_bytes(), self.limits.content_chunk_bytes());
             self.store
                 .publish_content(
                     lease,
@@ -447,7 +447,7 @@ where
         }
         if let Some(pending) = self
             .store
-            .pending_poll(source_id, self.limits.fanout_batch)
+            .pending_poll(source_id, self.limits.fanout_batch())
             .await?
         {
             self.store.commit_poll(lease, pending).await?;
@@ -472,7 +472,7 @@ where
         if !is_initial && collected.is_empty() {
             return Err(IngestError::Parse("web_feed_empty_after_success".into()));
         }
-        let incomplete = is_initial && collected.len() > self.limits.initial_feed_items;
+        let incomplete = is_initial && collected.len() > self.limits.initial_feed_items();
         let mut upstream_ids = std::collections::HashSet::new();
         for proposed in collected {
             if !upstream_ids.insert(proposed.upstream_id().to_owned()) {
@@ -508,8 +508,8 @@ where
             };
             records.push(value);
         }
-        let remainder = if is_initial && records.len() > self.limits.initial_feed_items {
-            records.split_off(self.limits.initial_feed_items)
+        let remainder = if is_initial && records.len() > self.limits.initial_feed_items() {
+            records.split_off(self.limits.initial_feed_items())
         } else {
             Vec::new()
         };

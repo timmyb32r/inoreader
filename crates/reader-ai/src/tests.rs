@@ -618,6 +618,7 @@ async fn provider_rejects_bad_key_and_absent_usage_without_retry() {
 
 pub(super) fn translation_config() -> AiConfig {
     AiConfig {
+        recovery_batch: 2,
         prompt_approved: true,
         prompt_path: "test".into(),
         prompt_version: "test".into(),
@@ -848,4 +849,11 @@ fn streaming_segments_reject_non_object_items_before_publishing() {
     assert!(stream
         .push(r#"{"segments":["invalid",{"kind":"text","content":"unchecked"}]}"#)
         .is_err());
+}
+
+#[test]
+fn recovery_batch_is_required_and_positive_before_policy_construction() {
+    let mut config = translation_config();
+    config.recovery_batch = 0;
+    assert!(AiPolicy::new(config, "prompt".into(), "review".into()).is_err());
 }

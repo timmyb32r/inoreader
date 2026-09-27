@@ -68,6 +68,12 @@ export class AiClient {
       json("POST", { workspaceId, operationId, regenerate }),
       "ArticleChat",
     );
+  poll = (id: string, after?: string) =>
+    this.transport(
+      `/api/ai/chats/${encodeURIComponent(id)}/changes${after === undefined ? "" : `?after=${encodeURIComponent(after)}`}`,
+      undefined,
+      "ChatPoll",
+    );
   get = (id: string) =>
     this.transport(
       `/api/ai/chats/${encodeURIComponent(id)}`,

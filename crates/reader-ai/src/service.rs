@@ -108,15 +108,22 @@ impl AiService {
         workspace: Uuid,
         article: Uuid,
     ) -> Result<Vec<ArticleChat>, AiError> {
-        self.store
-            .chats(owner, workspace, article)
-            .await?
-            .into_iter()
-            .map(ChatRecord::into_public_view)
-            .collect()
+        self.store.public_chats(owner, workspace, article).await
     }
     pub async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ArticleChat, AiError> {
-        self.store.chat(owner, id).await?.into_public_view()
+        self.store
+            .public_chat(owner, id, None)
+            .await?
+            .chat
+            .ok_or(AiError::Storage)
+    }
+    pub async fn poll_chat(
+        &self,
+        owner: Uuid,
+        id: Uuid,
+        after: Option<&str>,
+    ) -> Result<ChatPoll, AiError> {
+        self.store.public_chat(owner, id, after).await
     }
     pub async fn start(
         &self,

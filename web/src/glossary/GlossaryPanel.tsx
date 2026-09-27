@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
-import { ChatCopyButton } from "../ai/ChatCopyButton";
+import { CopyButton } from "../ui/CopyButton";
 import type {
   DefinitionsView,
   EntityDefinition,
@@ -177,7 +177,7 @@ export function GlossaryPanel({
         >
           <Icon name="refresh" />
         </AsyncButton>
-        <ChatCopyButton
+        <CopyButton
           label="Скопировать все новые определения"
           text={fresh
             .map((e) => `**${e.name}** — ${e.explanation}`)
@@ -206,7 +206,7 @@ function NewDefinition({ entity: e }: { entity: EntityDefinition }) {
           Недостаточно контекста для уверенного определения
         </small>
       )}
-      <ChatCopyButton
+      <CopyButton
         label={`Скопировать ${e.name}`}
         text={`**${e.name}** — ${e.explanation}`}
         html={() => `<p>${paragraph.current?.innerHTML ?? ""}</p>`}
@@ -229,7 +229,7 @@ function Known({ value: k }: { value: KnownDefinition }) {
           Есть конфликт обновления — показана сохранённая версия
         </small>
       )}
-      <ChatCopyButton
+      <CopyButton
         label={`Скопировать известное определение ${k.definition.term}`}
         text={k.definition.paragraph.text}
         html={() => paragraph.current?.innerHTML ?? ""}

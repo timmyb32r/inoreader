@@ -13,7 +13,7 @@ import {
   AutofillResistantTextarea,
 } from "../ui/fields";
 import { ModalDialog } from "../ui/ModalDialog";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import { LatestArticles } from "./LatestArticles";
 import { PublicationHistory } from "./PublicationHistory";
 import { formatKind } from "./subscriptionCatalogModel";

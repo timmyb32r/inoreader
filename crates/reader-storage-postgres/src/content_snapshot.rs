@@ -16,13 +16,11 @@ pub(crate) async fn read(
     workspace: Uuid,
     article: Uuid,
 ) -> Result<Option<ContentSnapshot>, sqlx::Error> {
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT m.id,m.document,
-          (SELECT json_agg(json_build_array(c.ordinal,c.bytes) ORDER BY c.ordinal)::text
-           FROM staged_content_chunks c WHERE c.record_id=m.id
-             AND c.refresh_id=m.document::jsonb->>'refresh_id' AND c.representation='safe')
+    let row: Option<SnapshotRow> = sqlx::query_as(
+        "SELECT m.id,m.document,c.ordinals,c.chunks
          FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id
          JOIN content_manifests m ON m.id=o.source_record_id
+         LEFT JOIN LATERAL (SELECT array_agg(ordinal ORDER BY ordinal) AS ordinals, array_agg(bytes ORDER BY ordinal) AS chunks FROM staged_content_chunks WHERE record_id=m.id AND refresh_id=m.document::jsonb->>'refresh_id' AND representation='safe') c ON true
          WHERE o.workspace_id=$1 AND o.article_id=$2 AND s.document::jsonb->>'workspace_id'=$1
          ORDER BY (m.document::jsonb->>'fetched_at')::timestamptz DESC,m.id DESC LIMIT 1",
     )
@@ -39,13 +37,11 @@ pub(crate) async fn read_origins(
     connection: &mut sqlx::PgConnection,
     records: &[String],
 ) -> Result<Vec<ContentSnapshot>, sqlx::Error> {
-    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT m.id,m.document,
-          (SELECT json_agg(json_build_array(c.ordinal,c.bytes) ORDER BY c.ordinal)::text
-           FROM staged_content_chunks c WHERE c.record_id=m.id
-             AND c.refresh_id=m.document::jsonb->>'refresh_id' AND c.representation='safe')
+    let rows: Vec<SnapshotRow> = sqlx::query_as(
+        "SELECT m.id,m.document,c.ordinals,c.chunks
          FROM unnest($1::text[]) WITH ORDINALITY AS input(id,position)
-         JOIN content_manifests m ON m.id=input.id ORDER BY input.position",
+         JOIN content_manifests m ON m.id=input.id
+         LEFT JOIN LATERAL (SELECT array_agg(ordinal ORDER BY ordinal) AS ordinals, array_agg(bytes ORDER BY ordinal) AS chunks FROM staged_content_chunks WHERE record_id=m.id AND refresh_id=m.document::jsonb->>'refresh_id' AND representation='safe') c ON true ORDER BY input.position",
     )
     .bind(records)
     .fetch_all(connection)
@@ -53,8 +49,10 @@ pub(crate) async fn read_origins(
     rows.into_iter().map(decode).collect()
 }
 
+type SnapshotRow = (String, String, Option<Vec<i64>>, Option<Vec<Vec<u8>>>);
+
 fn decode(
-    (record, manifest, chunks): (String, String, Option<String>),
+    (record, manifest, ordinals, chunks): SnapshotRow,
 ) -> Result<ContentSnapshot, sqlx::Error> {
     let invalid = || {
         sqlx::Error::Protocol(format!(
@@ -62,19 +60,20 @@ fn decode(
         ))
     };
     let pointer: ContentManifestPointer = serde_json::from_str(&manifest).map_err(|_| invalid())?;
-    let chunks: Vec<(u32, String)> =
-        serde_json::from_str(chunks.as_deref().unwrap_or("[]")).map_err(|_| invalid())?;
+    let chunks = chunks.unwrap_or_default();
+    let ordinals = ordinals.unwrap_or_default();
     if pointer.record_id.as_uuid().to_string() != record
         || chunks.len() != pointer.safe_html_chunks as usize
+        || ordinals.len() != chunks.len()
     {
         return Err(invalid());
     }
-    let mut bytes = Vec::new();
-    for (expected, (ordinal, chunk)) in chunks.into_iter().enumerate() {
-        if ordinal as usize != expected {
+    let mut bytes = Vec::with_capacity(chunks.iter().map(Vec::len).sum());
+    for (expected, (ordinal, chunk)) in ordinals.into_iter().zip(chunks).enumerate() {
+        if usize::try_from(ordinal).ok() != Some(expected) {
             return Err(invalid());
         }
-        bytes.extend(serde_json::from_str::<Vec<u8>>(&chunk).map_err(|_| invalid())?);
+        bytes.extend(chunk);
     }
     let html = String::from_utf8(bytes).map_err(|_| invalid())?;
     Ok(ContentSnapshot {

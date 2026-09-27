@@ -1,7 +1,13 @@
+mod content;
+mod delivery;
+mod poll;
+mod queue;
+mod rules;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reader_core::*;
 use reader_ingest::*;
+use rules::enqueue_article_rule_jobs;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgConnectOptions, PgPool, Postgres, Row, Transaction};
 mod backlog;
@@ -25,10 +31,11 @@ impl PostgresIngestStore {
         per_origin_concurrency: usize,
         max_retry_age: chrono::Duration,
     ) -> Result<Self, StoreError> {
+        validate_scheduler_limits(poll_interval, per_origin_concurrency, max_retry_age)?;
         let pool = PgPool::connect_with(crate::instrument_postgres(options))
             .await
             .map_err(storage)?;
-        crate::prepare_schema(&pool).await.map_err(storage)?;
+        crate::verify_schema(&pool).await.map_err(storage)?;
         Self::new(pool, poll_interval, per_origin_concurrency, max_retry_age)
     }
 
@@ -38,11 +45,7 @@ impl PostgresIngestStore {
         per_origin_concurrency: usize,
         max_retry_age: chrono::Duration,
     ) -> Result<Self, StoreError> {
-        if per_origin_concurrency == 0 || max_retry_age <= chrono::Duration::zero() {
-            return Err(StoreError::Unavailable(
-                "scheduler limits must be positive".into(),
-            ));
-        }
+        validate_scheduler_limits(poll_interval, per_origin_concurrency, max_retry_age)?;
         Ok(Self {
             pool,
             poll_interval,
@@ -556,110 +559,7 @@ impl IngestStore for PostgresIngestStore {
         now: DateTime<Utc>,
         lease_until: DateTime<Utc>,
     ) -> Result<Option<LeasedWork>, StoreError> {
-        let token = LeaseToken::new();
-        let now_ms = millis(now);
-        let oldest_ms = millis(now - self.max_retry_age);
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        // Origin reservations are transaction-scoped. A hash collision only
-        // serializes admission; hashes never stand in for source identity.
-        let mut excluded = Vec::<String>::new();
-        loop {
-            let row = sqlx::query(
-                "SELECT j.id,j.item,j.attempt,j.first_attempt_ms,j.origin_key
-                 FROM ingest_jobs j
-                 WHERE ((j.status='ready' AND j.run_at_ms <= $1)
-                    OR (j.status='leased' AND j.lease_deadline_ms < $1))
-                 AND NOT (j.origin_key = ANY($2))
-                 AND (SELECT count(*) FROM ingest_jobs a WHERE a.status='leased'
-                      AND a.origin_key=j.origin_key AND a.lease_deadline_ms >= $1) < $3
-                 AND NOT EXISTS (
-                    SELECT 1 FROM ingest_jobs a WHERE a.status='leased' AND a.lease_deadline_ms >= $1
-                    AND COALESCE(a.item::jsonb#>>'{PollSource,source_id}',a.item::jsonb#>>'{RefreshSource,source_id}',a.item::jsonb#>>'{CollectWebFeed,source_id}')
-                      = COALESCE(j.item::jsonb#>>'{PollSource,source_id}',j.item::jsonb#>>'{RefreshSource,source_id}',j.item::jsonb#>>'{CollectWebFeed,source_id}'))
-                 ORDER BY CASE WHEN j.status='ready' THEN 0 ELSE 1 END,j.run_at_ms,j.id
-                 LIMIT 1 FOR UPDATE OF j SKIP LOCKED",
-            ).bind(now_ms).bind(&excluded)
-             .bind(i64::try_from(self.per_origin_concurrency).map_err(storage)?)
-             .fetch_optional(&mut *tx).await.map_err(storage)?;
-            let Some(row) = row else {
-                break;
-            };
-            let origin: String = row.try_get("origin_key").map_err(storage)?;
-            let reserved: bool =
-                sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(1919246692,hashtext($1))")
-                    .bind(&origin)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(storage)?;
-            if !reserved {
-                excluded.push(origin);
-                continue;
-            }
-            let id: String = row.try_get("id").map_err(storage)?;
-            let first_attempt_ms: i64 = row.try_get("first_attempt_ms").map_err(storage)?;
-            if retry_age_exceeded(first_attempt_ms, oldest_ms) {
-                sqlx::query(
-                    "UPDATE ingest_jobs
-                     SET status = 'failed', lease_token = NULL, lease_deadline_ms = NULL,
-                         diagnostic = 'maximum retry age exceeded', revision = revision + 1
-                     WHERE id = $1",
-                )
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-                continue;
-            }
-            let origin: String = row.try_get("origin_key").map_err(storage)?;
-            let active: i64 = sqlx::query_scalar(
-                "SELECT count(*) FROM ingest_jobs
-                 WHERE status = 'leased' AND origin_key = $1 AND lease_deadline_ms >= $2",
-            )
-            .bind(&origin)
-            .bind(now_ms)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(storage)?;
-            if !origin_has_capacity(active as usize, self.per_origin_concurrency) {
-                excluded.push(origin);
-                continue;
-            }
-            let source_busy: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM ingest_jobs a,ingest_jobs j WHERE j.id=$1
-                 AND a.status='leased' AND a.lease_deadline_ms >= $2
-                 AND COALESCE(a.item::jsonb#>>'{PollSource,source_id}',a.item::jsonb#>>'{RefreshSource,source_id}',a.item::jsonb#>>'{CollectWebFeed,source_id}')
-                   = COALESCE(j.item::jsonb#>>'{PollSource,source_id}',j.item::jsonb#>>'{RefreshSource,source_id}',j.item::jsonb#>>'{CollectWebFeed,source_id}'))")
-                .bind(&id).bind(now_ms).fetch_one(&mut *tx).await.map_err(storage)?;
-            if source_busy {
-                excluded.push(origin);
-                continue;
-            }
-            sqlx::query(
-                "UPDATE ingest_jobs
-                 SET status = 'leased', lease_token = $1, lease_deadline_ms = $2,
-                     revision = revision + 1
-                 WHERE id = $3",
-            )
-            .bind(token.as_uuid().to_string())
-            .bind(millis(lease_until))
-            .bind(&id)
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-            let item: WorkItem = decode(row.try_get("item").map_err(storage)?)?;
-            let attempt = to_u32(row.try_get("attempt").map_err(storage)?, "job attempt")?;
-            let job_id = JobId::from_uuid(uuid::Uuid::parse_str(&id).map_err(storage)?);
-            tx.commit().await.map_err(storage)?;
-            return Ok(Some(LeasedWork {
-                job_id,
-                item,
-                token,
-                deadline: lease_until,
-                attempt,
-            }));
-        }
-        tx.commit().await.map_err(storage)?;
-        Ok(None)
+        queue::claim(self, _worker, now, lease_until).await
     }
 
     async fn renew(
@@ -668,12 +568,11 @@ impl IngestStore for PostgresIngestStore {
         token: LeaseToken,
         lease_until: DateTime<Utc>,
     ) -> Result<(), StoreError> {
-        self.lease_update(job, token, "leased", Some(millis(lease_until)), None, None)
-            .await
+        queue::renew(self, job, token, lease_until).await
     }
 
     async fn complete(&self, job: JobId, token: LeaseToken) -> Result<(), StoreError> {
-        self.finish(job, token).await
+        queue::complete(self, job, token).await
     }
 
     async fn retry(
@@ -683,15 +582,7 @@ impl IngestStore for PostgresIngestStore {
         run_at: DateTime<Utc>,
         diagnostic: &str,
     ) -> Result<(), StoreError> {
-        self.lease_update(
-            job,
-            token,
-            "ready",
-            None,
-            Some(millis(run_at)),
-            Some(diagnostic),
-        )
-        .await
+        queue::retry(self, job, token, run_at, diagnostic).await
     }
 
     async fn fail(
@@ -700,236 +591,34 @@ impl IngestStore for PostgresIngestStore {
         token: LeaseToken,
         diagnostic: &str,
     ) -> Result<(), StoreError> {
-        self.lease_update(job, token, "failed", None, None, Some(diagnostic))
-            .await
+        queue::fail(self, job, token, diagnostic).await
     }
 
     async fn source(&self, id: SourceId) -> Result<SourceDefinition, StoreError> {
-        let document: String = sqlx::query_scalar("SELECT document FROM sources WHERE id = $1")
-            .bind(id.as_uuid().to_string())
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(storage)?
-            .ok_or(StoreError::NotFound)?;
-        decode(&document)
+        poll::source(self, id).await
     }
 
     async fn has_committed_poll(&self, source: SourceId) -> Result<bool, StoreError> {
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM content_refresh_state WHERE id = $1)",
-        )
-        .bind(format!("source/{}", source.as_uuid()))
-        .fetch_one(&self.pool)
-        .await
-        .map_err(storage)
+        poll::has_committed_poll(self, source).await
     }
 
     async fn source_validators(&self, source: SourceId) -> Result<CacheValidators, StoreError> {
-        let document = sqlx::query_scalar::<_, String>(
-            "SELECT document FROM content_refresh_state WHERE id = $1",
-        )
-        .bind(format!("source/{}", source.as_uuid()))
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(storage)?;
-        match document {
-            Some(document) => decode::<SourcePollState>(&document)
-                .map(|state| state.validators)
-                .or_else(|_| decode(&document)),
-            None => Ok(CacheValidators::default()),
-        }
+        poll::source_validators(self, source).await
     }
     async fn pending_poll(
         &self,
         source: SourceId,
         limit: usize,
     ) -> Result<Option<PollCommit>, StoreError> {
-        self.pending_poll_batch(source, limit).await
+        poll::pending_poll(self, source, limit).await
     }
 
     async fn active_delivery_count(&self, source: SourceId) -> Result<u64, StoreError> {
-        let documents = sqlx::query_scalar::<_, String>(
-            "SELECT s.document
-             FROM subscription_sources AS link
-             JOIN subscriptions AS s ON s.id = link.subscription_id
-             WHERE link.source_id = $1",
-        )
-        .bind(source.as_uuid().to_string())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage)?;
-        let mut count = 0;
-        for document in documents {
-            let subscription: Subscription = decode(&document)?;
-            let workspace_document =
-                sqlx::query_scalar::<_, String>("SELECT document FROM workspaces WHERE id = $1")
-                    .bind(subscription.workspace_id().as_uuid().to_string())
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(storage)?
-                    .ok_or(StoreError::NotFound)?;
-            let workspace: Workspace = decode(&workspace_document)?;
-            if matches!(subscription.status(), SubscriptionStatus::Active)
-                && workspace.accepts_delivery()
-            {
-                count += 1;
-            }
-        }
-        Ok(count)
+        poll::active_delivery_count(self, source).await
     }
 
     async fn commit_poll(&self, lease: &LeasedWork, commit: PollCommit) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        backlog::persist(&mut tx, &commit).await?;
-        let observed_at_ms = commit.fetched_at.timestamp_millis();
-        let discovered_items = commit.records.len();
-        let now_ms = Utc::now().timestamp_millis();
-        for polled in &commit.records {
-            let record = &polled.record;
-            let revision = to_i64(record.revision(), "source record revision")?;
-            let document = encode(record)?;
-            sqlx::query(
-                "INSERT INTO source_records (id, revision, document) VALUES ($1, $2, $3)
-                 ON CONFLICT (id) DO UPDATE
-                 SET revision = EXCLUDED.revision, document = EXCLUDED.document",
-            )
-            .bind(record.id().as_uuid().to_string())
-            .bind(revision)
-            .bind(&document)
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-            sqlx::query(
-                "INSERT INTO source_record_identity
-                 (source_id, upstream_id, record_id, observed_at_ms, revision, document)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (source_id, upstream_id) DO UPDATE
-                 SET record_id = EXCLUDED.record_id, observed_at_ms = EXCLUDED.observed_at_ms,
-                     revision = EXCLUDED.revision, document = EXCLUDED.document",
-            )
-            .bind(record.source_id().as_uuid().to_string())
-            .bind(record.upstream_id())
-            .bind(record.id().as_uuid().to_string())
-            .bind(observed_at_ms)
-            .bind(revision)
-            .bind(&document)
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-
-            if matches!(polled.action, PollAction::Deliver | PollAction::Regroup) {
-                let item = WorkItem::FanOut {
-                    source_id: record.source_id(),
-                    record_id: record.id(),
-                    after_subscription: None,
-                };
-                enqueue_work(
-                    &mut tx,
-                    record_job("fanout", record.id(), record.revision())
-                        .as_uuid()
-                        .to_string(),
-                    &item,
-                    now_ms,
-                )
-                .await?;
-            }
-            if let Some(url) = record.key().location.fetch_url() {
-                let item = WorkItem::ExtractFullText {
-                    record_id: record.id(),
-                    source_revision: record.revision(),
-                    url: url.clone(),
-                    manual: false,
-                };
-                let id = record_job("fulltext", record.id(), record.revision())
-                    .as_uuid()
-                    .to_string();
-                let document = encode(&item)?;
-                if let Some(existing) = sqlx::query_scalar::<_, String>(
-                    "SELECT item FROM ingest_jobs WHERE id = $1 FOR UPDATE",
-                )
-                .bind(&id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?
-                {
-                    if existing != document {
-                        return Err(StoreError::Conflict);
-                    }
-                } else {
-                    sqlx::query(
-                        "INSERT INTO ingest_jobs
-                         (id, status, run_at_ms, first_attempt_ms, origin_key, attempt, item, revision)
-                         VALUES ($1, 'ready', $2, $3, $4, 0, $5, 0)",
-                    )
-                    .bind(id)
-                    .bind(initial_job_run_at(&item))
-                    .bind(now_ms)
-                    .bind(http_origin(url)?)
-                    .bind(document)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(storage)?;
-                }
-            }
-        }
-
-        let state = SourcePollState {
-            validators: commit.validators,
-            incomplete: commit.incomplete,
-            last_success_ms: Some(observed_at_ms),
-        };
-        sqlx::query(
-            "INSERT INTO content_refresh_state (id, revision, document) VALUES ($1, 0, $2)
-             ON CONFLICT (id) DO UPDATE SET revision = 0, document = EXCLUDED.document",
-        )
-        .bind(format!("source/{}", commit.source_id.as_uuid()))
-        .bind(encode(&state)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(storage)?;
-        record_source_success_state(
-            &mut tx,
-            commit.source_id,
-            commit.fetched_at,
-            commit.incomplete,
-        )
-        .await?;
-        record_subscription_activity(
-            &mut tx,
-            commit.source_id,
-            true,
-            Some(commit.duration_ms),
-            Some(discovered_items),
-            None,
-            commit.fetched_at,
-        )
-        .await?;
-        if commit.incomplete {
-            let item = WorkItem::RefreshSource {
-                source_id: commit.source_id,
-            };
-            enqueue_work(
-                &mut tx,
-                record_job(
-                    "backfill",
-                    commit
-                        .records
-                        .last()
-                        .ok_or_else(|| {
-                            StoreError::Unavailable("incomplete poll has no progress".into())
-                        })?
-                        .id(),
-                    commit.source_revision,
-                )
-                .as_uuid()
-                .to_string(),
-                &item,
-                now_ms,
-            )
-            .await?;
-        }
-        tx.commit().await.map_err(storage)
+        poll::commit_poll(self, lease, commit).await
     }
 
     async fn record_source_success(
@@ -940,23 +629,11 @@ impl IngestStore for PostgresIngestStore {
         incomplete: bool,
         duration_ms: u64,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        record_source_success_state(&mut tx, source, at, incomplete).await?;
-        record_subscription_activity(&mut tx, source, true, Some(duration_ms), None, None, at)
-            .await?;
-        tx.commit().await.map_err(storage)
+        poll::record_source_success(self, lease, source, at, incomplete, duration_ms).await
     }
 
     async fn record(&self, id: SourceRecordId) -> Result<SourceRecord, StoreError> {
-        let document: String =
-            sqlx::query_scalar("SELECT document FROM source_records WHERE id = $1")
-                .bind(id.as_uuid().to_string())
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(storage)?
-                .ok_or(StoreError::NotFound)?;
-        decode(&document)
+        poll::record(self, id).await
     }
 
     async fn record_by_upstream(
@@ -964,18 +641,7 @@ impl IngestStore for PostgresIngestStore {
         source: SourceId,
         upstream_id: &str,
     ) -> Result<Option<SourceRecord>, StoreError> {
-        sqlx::query_scalar::<_, String>(
-            "SELECT document FROM source_record_identity
-             WHERE source_id = $1 AND upstream_id = $2",
-        )
-        .bind(source.as_uuid().to_string())
-        .bind(upstream_id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(storage)?
-        .as_deref()
-        .map(decode)
-        .transpose()
+        poll::record_by_upstream(self, source, upstream_id).await
     }
 
     async fn delivery_targets(
@@ -984,43 +650,7 @@ impl IngestStore for PostgresIngestStore {
         after: Option<SubscriptionId>,
         limit: usize,
     ) -> Result<Vec<DeliveryTarget>, StoreError> {
-        let after = after.map(|id| id.as_uuid().to_string()).unwrap_or_default();
-        let rows = sqlx::query(
-            "SELECT s.document
-             FROM subscription_sources AS link
-             JOIN subscriptions AS s ON s.id = link.subscription_id
-             WHERE link.source_id = $1 AND link.subscription_id > $2
-             ORDER BY link.subscription_id
-             LIMIT $3",
-        )
-        .bind(source.as_uuid().to_string())
-        .bind(after)
-        .bind(i64::try_from(limit).map_err(storage)?)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage)?;
-        let mut targets = Vec::with_capacity(rows.len());
-        for row in rows {
-            let subscription: Subscription = decode(row.try_get("document").map_err(storage)?)?;
-            if !matches!(subscription.status(), SubscriptionStatus::Active) {
-                continue;
-            }
-            let workspace_document =
-                sqlx::query_scalar::<_, String>("SELECT document FROM workspaces WHERE id = $1")
-                    .bind(subscription.workspace_id().as_uuid().to_string())
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(storage)?
-                    .ok_or(StoreError::NotFound)?;
-            let workspace: Workspace = decode(&workspace_document)?;
-            if workspace.accepts_delivery() {
-                targets.push(DeliveryTarget {
-                    workspace_id: subscription.workspace_id(),
-                    subscription_id: subscription.id(),
-                });
-            }
-        }
-        Ok(targets)
+        delivery::delivery_targets(self, source, after, limit).await
     }
 
     async fn deliver(
@@ -1028,259 +658,7 @@ impl IngestStore for PostgresIngestStore {
         lease: &LeasedWork,
         commit: DeliveryCommit,
     ) -> Result<DeliveryResult, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let workspace_id = commit.target.workspace_id;
-        let workspace = workspace_id.as_uuid().to_string();
-        let subscription = commit.target.subscription_id.as_uuid().to_string();
-        let sub_document: String =
-            sqlx::query_scalar("SELECT document FROM subscriptions WHERE id = $1 FOR UPDATE")
-                .bind(&subscription)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?
-                .ok_or(StoreError::NotFound)?;
-        let sub_value: Subscription = decode(&sub_document)?;
-        let workspace_document: String =
-            sqlx::query_scalar("SELECT document FROM workspaces WHERE id = $1 FOR UPDATE")
-                .bind(&workspace)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?
-                .ok_or(StoreError::NotFound)?;
-        let workspace_value: Workspace = decode(&workspace_document)?;
-        if sub_value.workspace_id() != workspace_id || workspace_value.id() != workspace_id {
-            return Err(StoreError::NotFound);
-        }
-        if !matches!(sub_value.status(), SubscriptionStatus::Active)
-            || !workspace_value.accepts_delivery()
-        {
-            tx.commit().await.map_err(storage)?;
-            return Ok(DeliveryResult::SkippedInactive);
-        }
-
-        let record = commit.record;
-        let origin_rows = sqlx::query(
-            "SELECT article_id, subscription_id FROM library_origins
-             WHERE workspace_id = $1 AND source_record_id = $2
-             FOR UPDATE",
-        )
-        .bind(&workspace)
-        .bind(record.id().as_uuid().to_string())
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(storage)?;
-        let mut prior_by_article = std::collections::BTreeMap::<String, Vec<String>>::new();
-        for row in origin_rows {
-            prior_by_article
-                .entry(row.try_get("article_id").map_err(storage)?)
-                .or_default()
-                .push(row.try_get("subscription_id").map_err(storage)?);
-        }
-        let mut inherited = Vec::new();
-        let mut moved_articles = Vec::new();
-        let mut moved_subscriptions = Vec::new();
-        let mut retained_identity = None;
-        for (old_id, subscriptions) in prior_by_article {
-            let old_key = format!("{workspace}/{old_id}");
-            let old_document: String =
-                sqlx::query_scalar("SELECT document FROM articles WHERE id = $1 FOR UPDATE")
-                    .bind(&old_key)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .map_err(storage)?
-                    .ok_or_else(|| {
-                        StoreError::Unavailable(
-                            "library origin references a missing article".into(),
-                        )
-                    })?;
-            let mut old: Article = decode(&old_document)?;
-            if old.key == *record.key() {
-                continue;
-            }
-            moved_articles.push(old.id);
-            inherited.push((old.state, old.first_arrived_at));
-            old.detach_origin(record.id());
-            if old.origins.is_empty() && retained_identity.is_none() {
-                let mut retained = old.clone();
-                retained.key = record.key().clone();
-                retained_identity = Some(retained);
-            }
-            sqlx::query(
-                "DELETE FROM library_origins
-                 WHERE workspace_id = $1 AND article_id = $2 AND source_record_id = $3",
-            )
-            .bind(&workspace)
-            .bind(&old_id)
-            .bind(record.id().as_uuid().to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-            for linked in subscriptions {
-                if !moved_subscriptions.contains(&linked) {
-                    moved_subscriptions.push(linked);
-                }
-            }
-            let old_dedup = encode(&old.key)?;
-            if old.origins.is_empty() {
-                sqlx::query("DELETE FROM articles WHERE id = $1")
-                    .bind(old_key)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(storage)?;
-                sqlx::query(
-                    "DELETE FROM library_dedup \
-                     WHERE workspace_id = $1 AND dedup_hash = $2 AND dedup_key = $3",
-                )
-                .bind(&workspace)
-                .bind(dedup_fingerprint(&old_dedup))
-                .bind(old_dedup)
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-            } else {
-                upsert_article(&mut tx, &workspace, &old, &old_dedup).await?;
-            }
-        }
-
-        let dedup_key = encode(record.key())?;
-        let dedup_hash = dedup_fingerprint(&dedup_key);
-        let found = sqlx::query_as::<_, (String, String)>(
-            "SELECT dedup_key, article_id FROM library_dedup
-             WHERE workspace_id = $1 AND dedup_hash = $2 FOR UPDATE",
-        )
-        .bind(&workspace)
-        .bind(&dedup_hash)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(storage)?;
-        let found = match found {
-            Some((stored_key, _)) if stored_key != dedup_key => {
-                return Err(StoreError::Unavailable(format!(
-                    "dedup fingerprint collision in workspace {workspace}"
-                )));
-            }
-            Some((_, id)) => {
-                // The index identifies an article; it never owns mutable user
-                // state. Lock the authoritative row against concurrent commands.
-                let document: String =
-                    sqlx::query_scalar("SELECT document FROM articles WHERE id = $1 FOR UPDATE")
-                        .bind(format!("{workspace}/{id}"))
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(storage)?
-                        .ok_or_else(|| {
-                            StoreError::Unavailable(
-                                "dedup index references a missing article".into(),
-                            )
-                        })?;
-                let article: Article = decode(&document)?;
-                if article.id.as_uuid().to_string() != id || article.key != *record.key() {
-                    return Err(StoreError::Unavailable(
-                        "dedup index disagrees with article identity".into(),
-                    ));
-                }
-                Some(article)
-            }
-            None => None,
-        };
-        let inherited_time = inherited.iter().map(|(_, time)| *time).min();
-        let inherited_state = ArticleState::merge(inherited.into_iter().map(|(state, _)| state));
-        let found = match (found, inherited_state) {
-            (Some(mut article), Some(state)) => {
-                article.state = ArticleState::merge([article.state, state]).expect("two states");
-                if let Some(time) = inherited_time {
-                    article.first_arrived_at = article.first_arrived_at.min(time);
-                }
-                Some(article)
-            }
-            (Some(article), None) => Some(article),
-            (None, Some(state)) => {
-                let mut article = retained_identity.unwrap_or(Article {
-                    id: commit.proposed_article_id,
-                    key: record.key().clone(),
-                    state,
-                    first_arrived_at: inherited_time.unwrap_or(commit.delivered_at),
-                    origins: vec![],
-                    revision: 0,
-                });
-                article.state = state;
-                article.first_arrived_at = inherited_time.unwrap_or(article.first_arrived_at);
-                Some(article)
-            }
-            (None, None) => None,
-        };
-        let (mut article, result) = match found {
-            Some(article) => {
-                let id = article.id;
-                (article, DeliveryResult::AlreadyDelivered(id))
-            }
-            None => (
-                Article {
-                    id: commit.proposed_article_id,
-                    key: record.key().clone(),
-                    state: ArticleState::default(),
-                    first_arrived_at: commit.delivered_at,
-                    origins: vec![],
-                    revision: 0,
-                },
-                DeliveryResult::Delivered(commit.proposed_article_id),
-            ),
-        };
-        article.attach_origin(record.id());
-        upsert_article(&mut tx, &workspace, &article, &dedup_key).await?;
-
-        if !moved_subscriptions.contains(&subscription) {
-            moved_subscriptions.push(subscription);
-        }
-        for linked in &moved_subscriptions {
-            sqlx::query(
-                "INSERT INTO library_origins
-                 (workspace_id, article_id, subscription_id, source_record_id)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT DO NOTHING",
-            )
-            .bind(&workspace)
-            .bind(article.id.as_uuid().to_string())
-            .bind(linked)
-            .bind(record.id().as_uuid().to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-        }
-
-        migrate_rule_provenance(&mut tx, &workspace, article.id, &moved_articles).await?;
-        for old in &moved_articles {
-            if *old != article.id {
-                // History is immutable and can belong to both branches of a
-                // split. Record lineage instead of rewriting paid job inputs
-                // or racing their workers. Edges are workspace-scoped closure.
-                sqlx::query(
-                    "INSERT INTO article_history_links(workspace_id,article_id,history_article_id)
-                     SELECT $1,$2,$3 UNION
-                     SELECT workspace_id,$2,history_article_id FROM article_history_links
-                     WHERE workspace_id=$1 AND article_id=$3
-                     ON CONFLICT DO NOTHING",
-                )
-                .bind(&workspace)
-                .bind(article.id.as_uuid().to_string())
-                .bind(old.as_uuid().to_string())
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-            }
-        }
-        enqueue_article_rule_jobs(
-            &mut tx,
-            workspace_id,
-            &sub_value,
-            &article,
-            &record,
-            moved_subscriptions,
-        )
-        .await?;
-        tx.commit().await.map_err(storage)?;
-        Ok(result)
+        delivery::deliver(self, lease, commit).await
     }
 
     async fn advance_fanout(
@@ -1288,34 +666,7 @@ impl IngestStore for PostgresIngestStore {
         lease: &LeasedWork,
         after: SubscriptionId,
     ) -> Result<(), StoreError> {
-        let WorkItem::FanOut {
-            source_id,
-            record_id,
-            ..
-        } = lease.item
-        else {
-            return Ok(());
-        };
-        let item = WorkItem::FanOut {
-            source_id,
-            record_id,
-            after_subscription: Some(after),
-        };
-        let id = durable_job_id(&format!(
-            "fanout-continuation/{}/{}",
-            lease.job_id.as_uuid(),
-            after.as_uuid()
-        ));
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        enqueue_work(
-            &mut tx,
-            id.as_uuid().to_string(),
-            &item,
-            Utc::now().timestamp_millis(),
-        )
-        .await?;
-        tx.commit().await.map_err(storage)
+        delivery::advance_fanout(self, lease, after).await
     }
 
     async fn publish_content(
@@ -1323,79 +674,7 @@ impl IngestStore for PostgresIngestStore {
         lease: &LeasedWork,
         revision: ContentRevision,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let record = revision.record_id.as_uuid().to_string();
-        let current = sqlx::query_scalar::<_, String>(
-            "SELECT document FROM content_manifests WHERE id = $1 FOR UPDATE",
-        )
-        .bind(&record)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(storage)?
-        .as_deref()
-        .map(decode::<ContentManifestPointer>)
-        .transpose()?;
-        if current
-            .as_ref()
-            .is_some_and(|value| manifest_is_current_or_newer(value, &revision))
-        {
-            tx.commit().await.map_err(storage)?;
-            return Ok(());
-        }
-        for (representation, chunks) in [
-            ("raw", &revision.raw_chunks),
-            ("safe", &revision.safe_html_chunks),
-        ] {
-            for chunk in chunks {
-                sqlx::query(
-                    "INSERT INTO staged_content_chunks
-                     (record_id, refresh_id, representation, ordinal, bytes)
-                     VALUES ($1, $2, $3, $4, $5)
-                     ON CONFLICT (record_id, refresh_id, representation, ordinal)
-                     DO UPDATE SET bytes = EXCLUDED.bytes",
-                )
-                .bind(&record)
-                .bind(revision.refresh_id.to_string())
-                .bind(representation)
-                .bind(i64::from(chunk.ordinal))
-                .bind(encode(&chunk.bytes)?)
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-            }
-        }
-        let pointer = ContentManifestPointer::from(&revision);
-        sqlx::query(
-            "INSERT INTO content_manifests (id, revision, document) VALUES ($1, $2, $3)
-             ON CONFLICT (id) DO UPDATE
-             SET revision = EXCLUDED.revision, document = EXCLUDED.document",
-        )
-        .bind(&record)
-        .bind(to_i64(revision.source_revision, "content source revision")?)
-        .bind(encode(&pointer)?)
-        .execute(&mut *tx)
-        .await
-        .map_err(storage)?;
-        sqlx::query("DELETE FROM content_refresh_state WHERE id = $1")
-            .bind(format!("failure/{record}"))
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-        let cleanup = WorkItem::CleanupContent {
-            record_id: revision.record_id,
-            keep_refresh_id: revision.refresh_id,
-        };
-        enqueue_work(
-            &mut tx,
-            cleanup_job(revision.record_id, revision.refresh_id)
-                .as_uuid()
-                .to_string(),
-            &cleanup,
-            Utc::now().timestamp_millis(),
-        )
-        .await?;
-        tx.commit().await.map_err(storage)
+        content::publish_content(self, lease, revision).await
     }
 
     async fn cleanup_content(
@@ -1404,25 +683,7 @@ impl IngestStore for PostgresIngestStore {
         record: SourceRecordId,
         _requested_keep: uuid::Uuid,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let manifest: String =
-            sqlx::query_scalar("SELECT document FROM content_manifests WHERE id = $1 FOR UPDATE")
-                .bind(record.as_uuid().to_string())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?
-                .ok_or_else(|| {
-                    StoreError::Unavailable("content cleanup has no current manifest".into())
-                })?;
-        let current: ContentManifestPointer = decode(&manifest)?;
-        sqlx::query("DELETE FROM staged_content_chunks WHERE record_id = $1 AND refresh_id <> $2")
-            .bind(record.as_uuid().to_string())
-            .bind(current.refresh_id.to_string())
-            .execute(&mut *tx)
-            .await
-            .map_err(storage)?;
-        tx.commit().await.map_err(storage)
+        content::cleanup_content(self, lease, record, _requested_keep).await
     }
 
     async fn record_refresh_failure(
@@ -1431,25 +692,7 @@ impl IngestStore for PostgresIngestStore {
         record: SourceRecordId,
         diagnostic: &str,
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let key = format!("failure/{}", record.as_uuid());
-        sqlx::query(
-            "INSERT INTO content_refresh_state (id, revision, document)
-             VALUES ($1, 1, $2)
-             ON CONFLICT (id) DO UPDATE
-             SET revision = content_refresh_state.revision + 1,
-                 document = EXCLUDED.document",
-        )
-        .bind(key)
-        .bind(encode(&serde_json::json!({
-            "diagnostic": diagnostic,
-            "job": lease.job_id.as_uuid().to_string(),
-        }))?)
-        .execute(&mut *tx)
-        .await
-        .map_err(storage)?;
-        tx.commit().await.map_err(storage)
+        content::record_refresh_failure(self, lease, record, diagnostic).await
     }
 
     async fn evaluate_article_rules(
@@ -1459,75 +702,7 @@ impl IngestStore for PostgresIngestStore {
         article: ArticleId,
         evaluations: &[PendingRuleEvaluation],
     ) -> Result<(), StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let workspace_text = workspace.as_uuid().to_string();
-        let article_text = article.as_uuid().to_string();
-        let key = format!("{workspace_text}/{article_text}");
-        let Some(document) = sqlx::query_scalar::<_, String>(
-            "SELECT document FROM articles WHERE id = $1 FOR UPDATE",
-        )
-        .bind(&key)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(storage)?
-        else {
-            tx.commit().await.map_err(storage)?;
-            return Ok(());
-        };
-        let mut article: Article = decode(&document)?;
-        let original_state = article.state;
-        let (full_text, generations) = article_full_text(&mut tx, &article).await?;
-        for pending in evaluations {
-            let rule_key = format!("{workspace_text}/{}", pending.rule_id.as_uuid());
-            let Some(rule_document) =
-                sqlx::query_scalar::<_, String>("SELECT document FROM rules WHERE id = $1")
-                    .bind(rule_key)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .map_err(storage)?
-            else {
-                continue;
-            };
-            let rule: Rule = decode(&rule_document)?;
-            rule.validate().map_err(storage)?;
-            if !pending.still_valid_for(&rule) {
-                continue;
-            }
-            ensure_rule_content(&rule, &article, full_text.as_deref())?;
-            let matched = rule.matches(&article.key.title, full_text.as_deref());
-            let before = article.state;
-            if matched {
-                rule.apply(&mut article.state);
-            }
-            let reason = encode(&serde_json::json!({
-                "matched": matched,
-                "action": rule.action,
-                "state_changed": before != article.state,
-                "manual_override_preserved": matched && before == article.state,
-                "content_generations": generations,
-            }))?;
-            upsert_rule_evaluation(
-                &mut tx,
-                &workspace_text,
-                &article_text,
-                rule.id,
-                rule.version,
-                &reason,
-            )
-            .await?;
-        }
-        if article.state != original_state {
-            article.revision = article.revision.saturating_add(1);
-            sqlx::query("UPDATE articles SET revision = $1, document = $2 WHERE id = $3")
-                .bind(to_i64(article.revision, "article revision")?)
-                .bind(encode(&article)?)
-                .bind(key)
-                .execute(&mut *tx)
-                .await
-                .map_err(storage)?;
-        }
-        tx.commit().await.map_err(storage)
+        rules::evaluate_article_rules(self, lease, workspace, article, evaluations).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1541,400 +716,30 @@ impl IngestStore for PostgresIngestStore {
         through_id: Option<ArticleId>,
         limit: usize,
     ) -> Result<Option<ArticleId>, StoreError> {
-        let mut tx = self.pool.begin().await.map_err(storage)?;
-        assert_lease(&mut tx, lease).await?;
-        let workspace = workspace_id.as_uuid().to_string();
-        let rule_text = rule_id.as_uuid().to_string();
-        let Some(rule_document) =
-            sqlx::query_scalar::<_, String>("SELECT document FROM rules WHERE id = $1 FOR UPDATE")
-                .bind(format!("{workspace}/{rule_text}"))
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?
-        else {
-            tx.commit().await.map_err(storage)?;
-            return Ok(None);
-        };
-        let rule: Rule = decode(&rule_document)?;
-        rule.validate().map_err(storage)?;
-        if !rule.enabled || rule.version != version {
-            tx.commit().await.map_err(storage)?;
-            return Ok(None);
-        }
-        let prefix = format!("{workspace}/");
-        let upper = format!("{workspace}0");
-        let after = after_id
-            .map(|value| format!("{workspace}/{}", value.as_uuid()))
-            .unwrap_or_else(|| prefix.clone());
-        let through = match through_id {
-            Some(value) => value,
-            None => {
-                let boundary = sqlx::query_scalar::<_, String>(
-                    "SELECT id FROM articles
-                     WHERE id > $1 AND id < $2 ORDER BY id DESC LIMIT 1",
-                )
-                .bind(&prefix)
-                .bind(&upper)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(storage)?;
-                let Some(boundary) = boundary else {
-                    tx.commit().await.map_err(storage)?;
-                    return Ok(None);
-                };
-                ArticleId::from_uuid(
-                    uuid::Uuid::parse_str(boundary.rsplit('/').next().unwrap_or_default())
-                        .map_err(storage)?,
-                )
-            }
-        };
-        let rows = sqlx::query(
-            "SELECT id, document FROM articles
-             WHERE id > $1 AND id <= $2 ORDER BY id LIMIT $3 FOR UPDATE",
+        rules::apply_rule_batch(
+            self,
+            lease,
+            workspace_id,
+            rule_id,
+            version,
+            after_id,
+            through_id,
+            limit,
         )
-        .bind(after)
-        .bind(format!("{workspace}/{}", through.as_uuid()))
-        .bind(i64::try_from(limit).map_err(storage)?)
-        .fetch_all(&mut *tx)
         .await
-        .map_err(storage)?;
-        let count = rows.len();
-        let mut last = None;
-        for row in rows {
-            let key: String = row.try_get("id").map_err(storage)?;
-            let mut article: Article = decode(row.try_get("document").map_err(storage)?)?;
-            let before = article.state;
-            let (full_text, _) = article_full_text(&mut tx, &article).await?;
-            ensure_rule_content(&rule, &article, full_text.as_deref())?;
-            let matched = rule.matches(&article.key.title, full_text.as_deref());
-            if matched {
-                rule.apply(&mut article.state);
-            }
-            if article.state != before {
-                article.revision = article.revision.saturating_add(1);
-                sqlx::query("UPDATE articles SET revision = $1, document = $2 WHERE id = $3")
-                    .bind(to_i64(article.revision, "article revision")?)
-                    .bind(encode(&article)?)
-                    .bind(key)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(storage)?;
-            }
-            let reason = encode(&serde_json::json!({
-                "matched": matched,
-                "action": rule.action,
-                "state_changed": before != article.state,
-                "manual_override_preserved": matched && before == article.state,
-            }))?;
-            upsert_rule_evaluation(
-                &mut tx,
-                &workspace,
-                &article.id.as_uuid().to_string(),
-                rule.id,
-                version,
-                &reason,
-            )
-            .await?;
-            last = Some(article.id);
-        }
-        if count == limit {
-            if let Some(cursor) = last {
-                if cursor != through {
-                    let next = WorkItem::ApplyRule {
-                        workspace_id,
-                        rule_id: rule.id,
-                        rule_version: version,
-                        after_article: Some(cursor),
-                        through_article: Some(through),
-                    };
-                    enqueue_work(
-                        &mut tx,
-                        rule_job(rule.id, version, cursor).as_uuid().to_string(),
-                        &next,
-                        Utc::now().timestamp_millis(),
-                    )
-                    .await?;
-                }
-            }
-        }
-        tx.commit().await.map_err(storage)?;
-        Ok(last)
     }
 }
 
-async fn record_source_success_state(
-    tx: &mut Transaction<'_, Postgres>,
-    source: SourceId,
-    at: DateTime<Utc>,
-    incomplete: bool,
+/// Scheduler durations and concurrency must be positive before opening a pool.
+fn validate_scheduler_limits(
+    poll: chrono::Duration,
+    concurrency: usize,
+    retry: chrono::Duration,
 ) -> Result<(), StoreError> {
-    let source_text = source.as_uuid().to_string();
-    let prior = sqlx::query_scalar::<_, String>(
-        "SELECT document FROM source_health WHERE source_id = $1 FOR UPDATE",
-    )
-    .bind(&source_text)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(storage)?
-    .as_deref()
-    .map(decode::<SourceHealth>)
-    .transpose()?;
-    let health = SourceHealth {
-        last_success_ms: Some(at.timestamp_millis()),
-        incomplete,
-        error: None,
-        last_error_ms: prior.and_then(|value| value.last_error_ms),
-        consecutive_failures: 0,
-    };
-    sqlx::query(
-        "INSERT INTO source_health (source_id, document) VALUES ($1, $2)
-         ON CONFLICT (source_id) DO UPDATE SET document = EXCLUDED.document",
-    )
-    .bind(source_text)
-    .bind(encode(&health)?)
-    .execute(&mut **tx)
-    .await
-    .map_err(storage)?;
-    Ok(())
-}
-
-async fn upsert_article(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace: &str,
-    article: &Article,
-    dedup_key: &str,
-) -> Result<(), StoreError> {
-    let document = encode(article)?;
-    let revision = to_i64(article.revision, "article revision")?;
-    let dedup_hash = dedup_fingerprint(dedup_key);
-    sqlx::query(
-        "INSERT INTO articles (id, revision, document) VALUES ($1, $2, $3)
-         ON CONFLICT (id) DO UPDATE
-         SET revision = EXCLUDED.revision, document = EXCLUDED.document",
-    )
-    .bind(format!("{workspace}/{}", article.id.as_uuid()))
-    .bind(revision)
-    .bind(&document)
-    .execute(&mut **tx)
-    .await
-    .map_err(storage)?;
-    let result = sqlx::query(
-        "INSERT INTO library_dedup
-         (workspace_id, dedup_hash, dedup_key, article_id)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (workspace_id, dedup_hash) DO UPDATE
-         SET article_id = EXCLUDED.article_id
-         WHERE library_dedup.dedup_key = EXCLUDED.dedup_key",
-    )
-    .bind(workspace)
-    .bind(dedup_hash)
-    .bind(dedup_key)
-    .bind(article.id.as_uuid().to_string())
-    .execute(&mut **tx)
-    .await
-    .map_err(storage)?
-    .rows_affected();
-    if result == 0 {
-        return Err(StoreError::Unavailable(format!(
-            "dedup fingerprint collision in workspace {workspace}"
-        )));
-    }
-    Ok(())
-}
-
-async fn migrate_rule_provenance(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace: &str,
-    article: ArticleId,
-    moved_articles: &[ArticleId],
-) -> Result<(), StoreError> {
-    for old_article in moved_articles {
-        if *old_article == article {
-            continue;
-        }
-        let rows = sqlx::query(
-            "SELECT rule_id, rule_version, document FROM rule_evaluations
-             WHERE workspace_id = $1 AND article_id = $2 FOR UPDATE",
-        )
-        .bind(workspace)
-        .bind(old_article.as_uuid().to_string())
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(storage)?;
-        for row in rows {
-            let rule_id: String = row.try_get("rule_id").map_err(storage)?;
-            let version: i64 = row.try_get("rule_version").map_err(storage)?;
-            let old_document: String = row.try_get("document").map_err(storage)?;
-            let existing = sqlx::query_scalar::<_, String>(
-                "SELECT document FROM rule_evaluations
-                 WHERE workspace_id = $1 AND article_id = $2
-                   AND rule_id = $3 AND rule_version = $4 FOR UPDATE",
-            )
-            .bind(workspace)
-            .bind(article.as_uuid().to_string())
-            .bind(&rule_id)
-            .bind(version)
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(storage)?;
-            let document = match existing {
-                Some(current) => encode(&serde_json::json!({
-                    "merged_provenance": [
-                        serde_json::from_str::<serde_json::Value>(&current).map_err(storage)?,
-                        serde_json::from_str::<serde_json::Value>(&old_document).map_err(storage)?,
-                    ],
-                }))?,
-                None => old_document,
-            };
-            sqlx::query(
-                "INSERT INTO rule_evaluations
-                 (workspace_id, article_id, rule_id, rule_version, document)
-                 VALUES ($1, $2, $3, $4, $5)
-                 ON CONFLICT (workspace_id, article_id, rule_id, rule_version)
-                 DO UPDATE SET document = EXCLUDED.document",
-            )
-            .bind(workspace)
-            .bind(article.as_uuid().to_string())
-            .bind(&rule_id)
-            .bind(version)
-            .bind(document)
-            .execute(&mut **tx)
-            .await
-            .map_err(storage)?;
-            sqlx::query(
-                "DELETE FROM rule_evaluations
-                 WHERE workspace_id = $1 AND article_id = $2
-                   AND rule_id = $3 AND rule_version = $4",
-            )
-            .bind(workspace)
-            .bind(old_article.as_uuid().to_string())
-            .bind(rule_id)
-            .bind(version)
-            .execute(&mut **tx)
-            .await
-            .map_err(storage)?;
-        }
-    }
-    Ok(())
-}
-
-async fn enqueue_article_rule_jobs(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace: WorkspaceId,
-    subscription: &Subscription,
-    article: &Article,
-    record: &SourceRecord,
-    subscriptions: Vec<String>,
-) -> Result<(), StoreError> {
-    let prefix = format!("{}/", workspace.as_uuid());
-    let upper = format!("{}0", workspace.as_uuid());
-    let documents =
-        sqlx::query_scalar::<_, String>("SELECT document FROM rules WHERE id >= $1 AND id < $2")
-            .bind(prefix)
-            .bind(upper)
-            .fetch_all(&mut **tx)
-            .await
-            .map_err(storage)?;
-    let mut rules = Vec::new();
-    for document in documents {
-        let rule: Rule = decode(&document)?;
-        rule.validate().map_err(storage)?;
-        if rule.enabled {
-            rules.push(rule);
-        }
-    }
-    for linked in subscriptions {
-        let linked = SubscriptionId::from_uuid(uuid::Uuid::parse_str(&linked).map_err(storage)?);
-        let evaluations = rules
-            .iter()
-            .filter(|rule| rule.subscription_id == linked)
-            .map(|rule| PendingRuleEvaluation {
-                rule_id: rule.id,
-                rule_version: rule.version,
-                subscription_id: rule.subscription_id,
-            })
-            .collect::<Vec<_>>();
-        if evaluations.is_empty() {
-            continue;
-        }
-        let item = WorkItem::EvaluateArticleRules {
-            workspace_id: subscription.workspace_id(),
-            article_id: article.id,
-            evaluations,
-        };
-        enqueue_work(
-            tx,
-            article_rule_job(article.id, linked, record.id(), record.revision())
-                .as_uuid()
-                .to_string(),
-            &item,
-            Utc::now().timestamp_millis(),
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-async fn article_full_text(
-    tx: &mut Transaction<'_, Postgres>,
-    article: &Article,
-) -> Result<(Option<String>, Vec<uuid::Uuid>), StoreError> {
-    let records: Vec<String> = article
-        .origins
-        .iter()
-        .map(|id| id.as_uuid().to_string())
-        .collect();
-    let snapshots = crate::content_snapshot::read_origins(tx, &records)
-        .await
-        .map_err(storage)?;
-    let mut text = String::new();
-    let mut generations = Vec::with_capacity(snapshots.len());
-    for snapshot in snapshots {
-        text.push_str(&snapshot.html);
-        generations.push(snapshot.pointer.refresh_id);
-    }
-    Ok(((!text.is_empty()).then_some(text), generations))
-}
-
-fn ensure_rule_content(
-    rule: &Rule,
-    article: &Article,
-    full_text: Option<&str>,
-) -> Result<(), StoreError> {
-    let title_match = rule.matches(&article.key.title, None);
-    if full_text.is_none()
-        && (matches!(rule.field, RuleField::Text)
-            || (matches!(rule.field, RuleField::Both) && !title_match))
-    {
+    if poll <= chrono::Duration::zero() || concurrency == 0 || retry <= chrono::Duration::zero() {
         return Err(StoreError::Unavailable(
-            "rule evaluation awaits fulltext".into(),
+            "scheduler limits must be positive".into(),
         ));
     }
-    Ok(())
-}
-
-async fn upsert_rule_evaluation(
-    tx: &mut Transaction<'_, Postgres>,
-    workspace: &str,
-    article: &str,
-    rule: RuleId,
-    version: u64,
-    document: &str,
-) -> Result<(), StoreError> {
-    sqlx::query(
-        "INSERT INTO rule_evaluations
-         (workspace_id, article_id, rule_id, rule_version, document)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (workspace_id, article_id, rule_id, rule_version)
-         DO UPDATE SET document = EXCLUDED.document",
-    )
-    .bind(workspace)
-    .bind(article)
-    .bind(rule.as_uuid().to_string())
-    .bind(to_i64(version, "rule version")?)
-    .bind(document)
-    .execute(&mut **tx)
-    .await
-    .map_err(storage)?;
     Ok(())
 }

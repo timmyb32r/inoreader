@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ApiClient, ArticlePage } from "../api/client";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 
 /** Load both halves before publishing a workspace. Unmount invalidates the entire request. */
 export function useWorkspaceSwitch(

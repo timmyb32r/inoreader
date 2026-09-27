@@ -13,6 +13,7 @@ use crate::PostgresRepository;
 
 mod calls;
 mod chat_document;
+pub(crate) use chat_document::backfill_public_views;
 mod definitions;
 mod quarantine;
 mod translations;
@@ -57,6 +58,8 @@ CREATE TABLE IF NOT EXISTS ai_chats (
     status TEXT NOT NULL,
     document TEXT NOT NULL,
     inputs TEXT NOT NULL,
+    public_view TEXT NOT NULL,
+    public_revision BIGINT NOT NULL DEFAULT 0 CHECK(public_revision>=0),
     lease UUID,
     lease_until TIMESTAMPTZ
 );
@@ -74,10 +77,19 @@ CREATE TABLE IF NOT EXISTS ai_operations (
 pub struct PostgresAiStore {
     pool: PgPool,
     reader: Arc<PostgresRepository>,
+    recovery_batch: std::num::NonZeroU32,
 }
 impl PostgresAiStore {
-    pub fn new(pool: PgPool, reader: Arc<PostgresRepository>) -> Self {
-        Self { pool, reader }
+    pub fn new(
+        pool: PgPool,
+        reader: Arc<PostgresRepository>,
+        recovery_batch: std::num::NonZeroU32,
+    ) -> Self {
+        Self {
+            pool,
+            reader,
+            recovery_batch,
+        }
     }
 }
 fn storage(_: impl std::fmt::Display) -> AiError {
@@ -88,6 +100,18 @@ fn encode(value: &impl Serialize) -> Result<String, AiError> {
 }
 fn decode<T: DeserializeOwned>(value: &str) -> Result<T, AiError> {
     serde_json::from_str(value).map_err(storage)
+}
+fn checked_public(
+    id: Uuid,
+    workspace: Uuid,
+    article: Uuid,
+    raw: &str,
+) -> Result<ArticleChat, AiError> {
+    let view: ArticleChat = decode(raw)?;
+    if view.id != id || view.workspace_id != workspace || view.article_id != article {
+        return Err(AiError::Storage);
+    }
+    Ok(view)
 }
 fn status(value: ChatStatus) -> &'static str {
     match value {
@@ -134,9 +158,9 @@ async fn write_record(
     record: &ChatRecord,
 ) -> Result<(), AiError> {
     let (document, inputs) = chat_document::encode(record)?;
-    let changed = sqlx::query("UPDATE ai_chats SET document=$3,status=$4,inputs=CASE WHEN inputs::jsonb=$5::jsonb THEN inputs ELSE $5 END WHERE id=$1 AND owner=$2 AND (inputs::jsonb=$5::jsonb OR (inputs::jsonb->'snapshot'='null'::jsonb AND inputs::jsonb-'snapshot'=$5::jsonb-'snapshot'))")
+    let changed = sqlx::query("UPDATE ai_chats SET document=$3,status=$4,inputs=CASE WHEN inputs::jsonb=$5::jsonb THEN inputs ELSE $5 END,public_view=$6,public_revision=public_revision+1 WHERE id=$1 AND owner=$2 AND (inputs::jsonb=$5::jsonb OR (inputs::jsonb->'snapshot'='null'::jsonb AND inputs::jsonb-'snapshot'=$5::jsonb-'snapshot'))")
         .bind(record.view.id).bind(record.owner).bind(document)
-        .bind(status(record.view.status)).bind(inputs)
+        .bind(status(record.view.status)).bind(inputs).bind(encode(&record.clone().into_public_view()?)?)
         .execute(&mut **tx).await.map_err(storage)?.rows_affected();
     if changed != 1 {
         return Err(AiError::Conflict);
@@ -189,14 +213,13 @@ async fn save_operation(
         .map_err(storage)?;
     Ok(())
 }
-fn set_attempt(record: &mut ChatRecord, state: MessageStatus) -> Result<(), AiError> {
-    let id = record
-        .operations
-        .last()
-        .ok_or(AiError::Storage)?
-        .assistant_id;
-    let message = record
-        .view
+fn set_attempt(
+    view: &mut ArticleChat,
+    operations: &[Operation],
+    state: MessageStatus,
+) -> Result<(), AiError> {
+    let id = operations.last().ok_or(AiError::Storage)?.assistant_id;
+    let message = view
         .messages
         .iter_mut()
         .find(|m| m.id == id)
@@ -338,8 +361,12 @@ impl AiStore for PostgresAiStore {
             let mut record: ChatRecord = chat_document::decode(&document)?;
             record.view.status = ChatStatus::Cancelled;
             record.view.error = Some(AiError::MissingKey.to_string());
-            calls::interrupt(&mut record);
-            set_attempt(&mut record, MessageStatus::Interrupted)?;
+            calls::interrupt(&mut record.view);
+            set_attempt(
+                &mut record.view,
+                &record.operations,
+                MessageStatus::Interrupted,
+            )?;
             write_record(&mut tx, &record).await?;
         }
         tx.commit().await.map_err(storage)
@@ -481,8 +508,8 @@ impl AiStore for PostgresAiStore {
             }
         }
         let (document, inputs) = chat_document::encode(&record)?;
-        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document,inputs) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(document).bind(inputs).execute(&mut *tx).await.map_err(storage)?;
+        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document,inputs,public_view) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
+            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(document).bind(inputs).bind(encode(&record.clone().into_public_view()?)?).execute(&mut *tx).await.map_err(storage)?;
         save_operation(&mut tx, owner, record.view.id, operation, &kind).await?;
         tx.commit().await.map_err(storage)?;
         Ok(record)
@@ -505,6 +532,50 @@ impl AiStore for PostgresAiStore {
             .map_err(|_| AiError::NotFound)?;
         let rows: Vec<String> = sqlx::query_scalar("SELECT json_build_array(document,inputs)::text FROM ai_chats WHERE owner=$1 AND workspace=$2 AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC").bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
         rows.iter().map(|v| chat_document::decode(v)).collect()
+    }
+    async fn public_chats(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Vec<ArticleChat>, AiError> {
+        owned_workspace(&self.pool, owner, workspace).await?;
+        self.reader
+            .article(
+                WorkspaceId::from_uuid(workspace),
+                ArticleId::from_uuid(article),
+            )
+            .await
+            .map_err(|_| AiError::NotFound)?;
+        let rows: Vec<(Uuid,Uuid,Uuid,String,String)> = sqlx::query_as("SELECT id,workspace,article,public_view,status FROM ai_chats WHERE owner=$1 AND workspace=$2 AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC")
+            .bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
+        rows.into_iter()
+            .map(|(id, workspace, article, raw, state)| {
+                if state == "quarantined" {
+                    return Err(AiError::Storage);
+                }
+                checked_public(id, workspace, article, &raw)
+            })
+            .collect()
+    }
+    async fn public_chat(
+        &self,
+        owner: Uuid,
+        id: Uuid,
+        after: Option<&str>,
+    ) -> Result<ChatPoll, AiError> {
+        let row: Option<(Uuid,Uuid,String,Option<String>,String)> = sqlx::query_as("SELECT c.workspace,c.article,c.public_revision::text,CASE WHEN c.public_revision::text=$3 THEN NULL ELSE c.public_view END,c.status FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text")
+            .bind(id).bind(owner).bind(after).fetch_optional(&self.pool).await.map_err(storage)?;
+        let (workspace, article, revision, raw, state) = row.ok_or(AiError::NotFound)?;
+        if state == "quarantined" {
+            return Err(AiError::Storage);
+        }
+        Ok(ChatPoll {
+            revision,
+            chat: raw
+                .map(|raw| checked_public(id, workspace, article, &raw))
+                .transpose()?,
+        })
     }
     async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ChatRecord, AiError> {
         let document: Option<String> = sqlx::query_scalar("SELECT json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text").bind(id).bind(owner).fetch_optional(&self.pool).await.map_err(storage)?;
@@ -607,8 +678,12 @@ impl AiStore for PostgresAiStore {
         let mut record = locked(&mut tx, owner, id).await?;
         if record.view.status.pending() {
             record.view.status = ChatStatus::Cancelled;
-            calls::interrupt(&mut record);
-            set_attempt(&mut record, MessageStatus::Interrupted)?;
+            calls::interrupt(&mut record.view);
+            set_attempt(
+                &mut record.view,
+                &record.operations,
+                MessageStatus::Interrupted,
+            )?;
             write_record(&mut tx, &record).await?;
         }
         tx.commit().await.map_err(storage)?;
@@ -618,14 +693,17 @@ impl AiStore for PostgresAiStore {
         let mut tx = self.pool.begin().await.map_err(storage)?;
         // A previous process may have submitted a billable request. Expiry is an
         // interruption, not permission to repeat it automatically.
-        let expired: Vec<quarantine::ChatRow> = sqlx::query_as("SELECT id,owner,workspace,article,json_build_array(document,inputs)::text FROM ai_chats WHERE lease_until<now() AND status IN ('generating','verifying','queued','waiting_content') FOR UPDATE SKIP LOCKED").fetch_all(&mut *tx).await.map_err(storage)?;
+        let expired: Vec<quarantine::ChatRow> = sqlx::query_as("SELECT id,owner,workspace,article,json_build_array(document,inputs)::text FROM ai_chats WHERE lease_until<now() AND status IN ('generating','verifying','queued','waiting_content') ORDER BY lease_until,id LIMIT $1 FOR UPDATE SKIP LOCKED").bind(i64::from(self.recovery_batch.get())).fetch_all(&mut *tx).await.map_err(storage)?;
         for row in expired {
             let id = row.0;
             let recovered = quarantine::checked_chat(row).and_then(|mut record| {
                 record.view.status = ChatStatus::Interrupted;
                 record.view.error = Some("The worker was interrupted; provider billing may be unknown. Retry explicitly.".into());
-                calls::interrupt(&mut record);
-                set_attempt(&mut record, MessageStatus::Interrupted)?;
+                calls::interrupt(&mut record.view);
+                set_attempt(&mut record.view, &record.operations, MessageStatus::Interrupted)?;
+                // A decodable record can still contain a corrupt retained draft.
+                // Quarantine it before a projection failure aborts healthy recovery.
+                record.clone().into_public_view()?;
                 Ok(record)
             });
             match recovered {
@@ -692,7 +770,10 @@ impl AiStore for PostgresAiStore {
         error: Option<&str>,
     ) -> Result<(), AiError> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        let mut record = locked(&mut tx, claim.record.owner, claim.record.view.id).await?;
+        let mut state =
+            chat_document::locked_progress(&mut tx, claim.record.owner, claim.record.view.id)
+                .await?;
+        let record = &mut state.record;
         let valid: bool = sqlx::query_scalar("SELECT COALESCE(lease=$2 AND lease_until>now() AND status IN ('queued','waiting_content','generating','verifying'),false) FROM ai_chats WHERE id=$1").bind(record.view.id).bind(claim.lease).fetch_one(&mut *tx).await.map_err(storage)?;
         if !valid {
             return Err(AiError::Cancelled);
@@ -725,21 +806,30 @@ impl AiStore for PostgresAiStore {
                     .as_str();
                 validate_summary_title(
                     content.unwrap_or(current_content),
-                    &record.snapshot.as_ref().ok_or(AiError::Storage)?.title,
+                    &claim
+                        .record
+                        .snapshot
+                        .as_ref()
+                        .ok_or(AiError::Storage)?
+                        .title,
                 )?;
             }
         }
         if let Some(snapshot) = snapshot {
-            if record.snapshot.is_some() {
+            if claim.record.snapshot.is_some() {
                 return Err(AiError::Conflict);
             }
             record.view.title = snapshot.title.clone();
             record.view.source_url = snapshot.source_url.clone();
-            record.snapshot = Some(snapshot.clone());
+            let changed = sqlx::query("UPDATE ai_chats SET inputs=jsonb_set(inputs::jsonb,'{snapshot}',$2::jsonb)::text WHERE id=$1 AND inputs::jsonb->'snapshot'='null'::jsonb")
+                .bind(record.view.id).bind(encode(snapshot)?).execute(&mut *tx).await.map_err(storage)?.rows_affected();
+            if changed != 1 {
+                return Err(AiError::Conflict);
+            }
         }
         record.view.status = next;
         if !next.pending() {
-            calls::interrupt(&mut record);
+            calls::interrupt(&mut record.view);
         }
         record.view.error = error.map(str::to_owned);
         let assistant_id = record
@@ -757,7 +847,8 @@ impl AiStore for PostgresAiStore {
                 .content = content.to_owned();
         }
         set_attempt(
-            &mut record,
+            &mut record.view,
+            &record.operations,
             match next {
                 ChatStatus::Completed => MessageStatus::Complete,
                 ChatStatus::Generating | ChatStatus::Verifying => MessageStatus::Streaming,
@@ -766,12 +857,13 @@ impl AiStore for PostgresAiStore {
                 _ => MessageStatus::Pending,
             },
         )?;
-        write_record(&mut tx, &record).await?;
+        let id = record.view.id;
+        chat_document::write_progress(&mut tx, &state).await?;
         if !matches!(next, ChatStatus::Generating | ChatStatus::Verifying) {
             sqlx::query(
                 "UPDATE ai_chats SET lease=NULL,lease_until=NULL,scheduled_at=now() WHERE id=$1",
             )
-            .bind(record.view.id)
+            .bind(id)
             .execute(&mut *tx)
             .await
             .map_err(storage)?;

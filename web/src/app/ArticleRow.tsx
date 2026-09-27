@@ -1,6 +1,6 @@
 import { formatArticleDate } from "../ui/formatArticleDate";
 import { Icon } from "../ui/Icon";
-import type { Article } from "./data";
+import type { Article } from "../api/viewModels";
 export function ArticleRow({
   article,
   selected,

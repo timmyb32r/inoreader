@@ -5,7 +5,7 @@ import { FloatingPanel } from "../ui/FloatingPanel";
 import { Icon } from "../ui/Icon";
 import { StatusRegion } from "../ui/StatusRegion";
 import { useFloatingPanel } from "../ui/useFloatingPanel";
-import { ChatCopyButton } from "./ChatCopyButton";
+import { CopyButton } from "../ui/CopyButton";
 import { ChatMarkdown } from "./ChatMarkdown";
 import {
   chatProgress,
@@ -166,7 +166,7 @@ export function ArticleChatWidget({
                               : "Summary"
                           : "DeepSeek"}
                     </span>
-                    <ChatCopyButton
+                    <CopyButton
                       text={content}
                       label={
                         message.role === "assistant"

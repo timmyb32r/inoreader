@@ -1,4 +1,4 @@
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import {
   compareSubscriptions,
   isProblem,

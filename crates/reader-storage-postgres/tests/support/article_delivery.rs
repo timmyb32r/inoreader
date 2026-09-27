@@ -137,6 +137,7 @@ pub async fn verify(pool: &PgPool) {
         std::sync::Arc::new(
             PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20).unwrap(),
         ),
+        std::num::NonZeroU32::new(2).unwrap(),
     );
     let operation = Uuid::new_v4();
     let chat = super::ai_tests::record(

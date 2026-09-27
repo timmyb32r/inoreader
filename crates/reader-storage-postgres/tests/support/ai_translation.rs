@@ -204,7 +204,39 @@ pub async fn verify(
         .await
         .unwrap();
     assert_ne!(retry.id, job.id);
+    // Recovery is bounded at two rows per transaction. Invalid expired JSON
+    // must be quarantined without blocking the healthy queued translation.
+    let mut poisoned = Vec::new();
+    for _ in 0..3 {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO ai_translations(id,owner,workspace,article,status,document,lease,lease_until) VALUES($1,$2,$3,$4,'generating','broken expired original',$5,now()-interval '1 day')")
+            .bind(id).bind(owner).bind(workspace).bind(article).bind(Uuid::new_v4()).execute(pool).await.unwrap();
+        poisoned.push(id);
+    }
     let claim = store.claim_translation(5).await.unwrap().unwrap();
+    let recovered: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_translations WHERE id=ANY($1) AND status='quarantined'",
+    )
+    .bind(&poisoned)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recovered, 2);
+    assert_eq!(claim.record.job.id, retry.id);
+    assert!(store.claim_translation(5).await.unwrap().is_none());
+    let originals: Vec<String> =
+        sqlx::query_scalar("SELECT document FROM ai_translations WHERE id=ANY($1)")
+            .bind(&poisoned)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(originals, vec!["broken expired original"; 3]);
+    sqlx::query("DELETE FROM ai_translations WHERE id=ANY($1)")
+        .bind(&poisoned)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("UPDATE ai_translations SET lease_until=now()-interval '1 second' WHERE id=$1")
         .bind(retry.id)
         .execute(pool)
@@ -290,7 +322,7 @@ pub async fn verify(
             .fetch_one(pool)
             .await
             .unwrap();
-    assert_eq!(quarantined, ("failed".into(), corrupt));
+    assert_eq!(quarantined, ("quarantined".into(), corrupt));
     assert!(
         store.claim_translation(5).await.unwrap().is_none(),
         "corrupt row must not block subsequent queue scans"

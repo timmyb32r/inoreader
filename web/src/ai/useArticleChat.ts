@@ -220,6 +220,7 @@ export function useArticleChat(
     let timer = 0;
     const token = epoch.current;
     const id = chat.id;
+    let after: string | undefined;
     const poll = async () => {
       if (stopped) return;
       if (document.hidden || lock.current) {
@@ -228,15 +229,17 @@ export function useArticleChat(
       }
       const requestRevision = revision.current;
       try {
-        const next = await client.get(id);
+        const result = await client.poll(id, after);
+        const next = result.chat;
         if (
           stopped ||
           token !== epoch.current ||
           requestRevision !== revision.current
         )
           return;
-        accept(next);
-        if (isChatActive(next)) timer = window.setTimeout(poll, 1000);
+        after = result.revision;
+        if (next) accept(next);
+        if (!next || isChatActive(next)) timer = window.setTimeout(poll, 1000);
       } catch (cause) {
         if (stopped || token !== epoch.current) return;
         setError(

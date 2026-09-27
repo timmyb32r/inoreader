@@ -457,55 +457,70 @@ pub enum ModelError {
     ZeroLimit { field: &'static str },
 }
 
+/// Validated immutable execution limits. All counts and byte limits are positive.
+/// Construction is the only input boundary; cloning preserves the invariants.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IngestLimits {
-    pub initial_feed_items: usize,
-    pub fanout_batch: usize,
-    pub content_chunk_bytes: usize,
-    pub max_input_bytes: usize,
-    pub max_extracted_bytes: usize,
+    initial_feed_items: std::num::NonZeroUsize,
+
+    fanout_batch: std::num::NonZeroUsize,
+
+    content_chunk_bytes: std::num::NonZeroUsize,
+
+    max_input_bytes: std::num::NonZeroUsize,
+
+    max_extracted_bytes: std::num::NonZeroUsize,
 }
 impl IngestLimits {
     pub fn new(
         initial_feed_items: usize,
         fanout_batch: usize,
         content_chunk_bytes: usize,
-    ) -> Result<Self, ModelError> {
-        for (field, value) in [
-            ("initial_feed_items", initial_feed_items),
-            ("fanout_batch", fanout_batch),
-            ("content_chunk_bytes", content_chunk_bytes),
-        ] {
-            if value == 0 {
-                return Err(ModelError::ZeroLimit { field });
-            }
-        }
-        Ok(Self {
-            initial_feed_items,
-            fanout_batch,
-            content_chunk_bytes,
-            max_input_bytes: usize::MAX,
-            max_extracted_bytes: usize::MAX,
-        })
-    }
-    pub fn with_payload_limits(
-        mut self,
         max_input_bytes: usize,
         max_extracted_bytes: usize,
     ) -> Result<Self, ModelError> {
-        if max_input_bytes == 0 {
-            return Err(ModelError::ZeroLimit {
-                field: "max_input_bytes",
-            });
-        }
-        if max_extracted_bytes == 0 {
-            return Err(ModelError::ZeroLimit {
-                field: "max_extracted_bytes",
-            });
-        }
-        self.max_input_bytes = max_input_bytes;
-        self.max_extracted_bytes = max_extracted_bytes;
-        Ok(self)
+        Ok(Self {
+            initial_feed_items: std::num::NonZeroUsize::new(initial_feed_items).ok_or(
+                ModelError::ZeroLimit {
+                    field: "initial_feed_items",
+                },
+            )?,
+            fanout_batch: std::num::NonZeroUsize::new(fanout_batch).ok_or(
+                ModelError::ZeroLimit {
+                    field: "fanout_batch",
+                },
+            )?,
+            content_chunk_bytes: std::num::NonZeroUsize::new(content_chunk_bytes).ok_or(
+                ModelError::ZeroLimit {
+                    field: "content_chunk_bytes",
+                },
+            )?,
+            max_input_bytes: std::num::NonZeroUsize::new(max_input_bytes).ok_or(
+                ModelError::ZeroLimit {
+                    field: "max_input_bytes",
+                },
+            )?,
+            max_extracted_bytes: std::num::NonZeroUsize::new(max_extracted_bytes).ok_or(
+                ModelError::ZeroLimit {
+                    field: "max_extracted_bytes",
+                },
+            )?,
+        })
+    }
+    pub fn initial_feed_items(&self) -> usize {
+        self.initial_feed_items.get()
+    }
+    pub fn fanout_batch(&self) -> usize {
+        self.fanout_batch.get()
+    }
+    pub fn content_chunk_bytes(&self) -> usize {
+        self.content_chunk_bytes.get()
+    }
+    pub fn max_input_bytes(&self) -> usize {
+        self.max_input_bytes.get()
+    }
+    pub fn max_extracted_bytes(&self) -> usize {
+        self.max_extracted_bytes.get()
     }
 }
 

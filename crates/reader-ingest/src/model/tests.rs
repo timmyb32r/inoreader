@@ -151,3 +151,23 @@ fn action_and_page_limits_reject_oversized_recipe() {
         reader_core::WebFeedError::LimitExceeded("actions")
     )
 }
+
+#[test]
+fn every_execution_limit_is_required_positive_and_clone_preserves_it() {
+    for index in 0..5 {
+        let mut values = [1; 5];
+        values[index] = 0;
+        assert!(IngestLimits::new(values[0], values[1], values[2], values[3], values[4]).is_err());
+    }
+    let limits = IngestLimits::new(1, 2, 3, 4, 5).unwrap().clone();
+    assert_eq!(
+        (
+            limits.initial_feed_items(),
+            limits.fanout_batch(),
+            limits.content_chunk_bytes(),
+            limits.max_input_bytes(),
+            limits.max_extracted_bytes()
+        ),
+        (1, 2, 3, 4, 5)
+    );
+}

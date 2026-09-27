@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
-import { ChatCopyButton } from "./ChatCopyButton";
+import { CopyButton } from "./CopyButton";
 
 it("copies exact text with immediate pending feedback, duplicate protection and an icon", async () => {
   let finish!: () => void;
@@ -14,10 +14,7 @@ it("copies exact text with immediate pending feedback, duplicate protection and 
     value: { writeText: copy },
   });
   render(
-    <ChatCopyButton
-      text={"**Exact summary**\n\n12.5%"}
-      label="Copy response"
-    />,
+    <CopyButton text={"**Exact summary**\n\n12.5%"} label="Copy response" />,
   );
   const button = screen.getByRole("button", { name: "Copy response" });
   expect(button.querySelector("svg")).not.toBeNull();
@@ -38,7 +35,7 @@ it("reports clipboard failures on the same control", async () => {
     configurable: true,
     value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
   });
-  render(<ChatCopyButton text="Exact text" label="Copy response" />);
+  render(<CopyButton text="Exact text" label="Copy response" />);
   const button = screen.getByRole("button", { name: "Copy response" });
   fireEvent.click(button);
   await waitFor(() =>

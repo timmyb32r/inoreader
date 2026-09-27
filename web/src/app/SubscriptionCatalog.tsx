@@ -7,7 +7,7 @@ import {
 } from "../ui/fields";
 import { Icon } from "../ui/Icon";
 import { ModalDialog } from "../ui/ModalDialog";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import {
   compareSubscriptions,
   defaultWidths,

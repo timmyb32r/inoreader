@@ -1,6 +1,6 @@
 import { useRef, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 import type { useReaderController } from "./useReaderController";
 import { ArticleRow, EmptyState } from "./ArticleRow";
 import { Icon } from "../ui/Icon";

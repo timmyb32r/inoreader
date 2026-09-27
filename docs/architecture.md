@@ -108,3 +108,5 @@ falls back to files or memory when its database is unavailable.
 The [third audit implementation](architecture/consistency-2026-09-27.md) records
 current article identity/history, durable backfill, atomic content snapshots,
 typed recipe/transport boundaries, graceful AI drain and bounded maintenance work.
+
+See [current execution/storage contracts](architecture/contracts-2026-09-27.md) for bounded recovery, schema versions, binary chunks, public AI projections, command ownership and graph guards.

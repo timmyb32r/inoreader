@@ -3,6 +3,10 @@ use reader_glossary::{ChannelStatus, KnownDefinition, MarkKind, StyledText};
 fn main() {
     let mut schemas = serde_json::Map::new();
     schemas.insert(
+        "ChatPoll".into(),
+        serde_json::to_value(schemars::schema_for!(ChatPoll)).unwrap(),
+    );
+    schemas.insert(
         "Balance".into(),
         serde_json::to_value(schemars::schema_for!(Balance)).unwrap(),
     );

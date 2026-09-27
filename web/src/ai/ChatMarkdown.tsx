@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { ChatCopyButton } from "./ChatCopyButton";
+import { CopyButton } from "../ui/CopyButton";
 
 /** Small, deliberately non-HTML Markdown renderer. Provider strings always become
  * text nodes; links accept only HTTP(S), and images never trigger remote loads. */
@@ -33,7 +33,7 @@ export function ChatMarkdown({ text }: { text: string }) {
       blocks.push(
         <blockquote key={index}>
           <p>{inline(quote)}</p>
-          <ChatCopyButton text={quote} label="Copy quote" />
+          <CopyButton text={quote} label="Copy quote" />
         </blockquote>,
       );
       continue;

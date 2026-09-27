@@ -1,6 +1,6 @@
 import type { ResponseContract, ResponseValue } from "../api/decode";
 import { ApiClient, type Bootstrap, type Transport } from "../api/client";
-import type { Article } from "../app/data";
+import type { Article } from "../api/viewModels";
 
 export const articles: Article[] = [
   {

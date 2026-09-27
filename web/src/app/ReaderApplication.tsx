@@ -7,26 +7,26 @@ import { type ApiClient, type WebFeedRecipeView } from "../api/client";
 import { GlossaryPanel } from "../glossary/GlossaryPanel";
 import { useGlossary } from "../glossary/useGlossary";
 import { reportLibraryReady } from "../performanceDiagnostics";
-import { Icon, type IconName } from "../ui/Icon";
+import { Icon } from "../ui/Icon";
 import { ModalDialog } from "../ui/ModalDialog";
 import { ActivityDashboard, useActivityTracker } from "./ActivityDashboard";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { ArticleReader } from "./ArticleReader";
 import { ArticleListPanel } from "./ArticleListPanel";
-import type { Subscription, Workspace } from "./data";
+import type { Subscription, Workspace } from "../api/viewModels";
 import { RulesDialog } from "./RulesDialog";
 import {
   AddSubscription,
   ReasonDialog,
   RestoreDialog,
 } from "./subscriptionDialogs";
-import { SubscriptionIcon } from "./SubscriptionIcon";
+import { ReaderSidebar } from "./ReaderSidebar";
 import { SubscriptionsPage } from "./SubscriptionsPage";
 import { usePopupNavigation } from "./usePopupNavigation";
 import { useReaderController } from "./useReaderController";
+import { useSubscriptionCommands } from "./useSubscriptionCommands";
 import { useWorkspaceSwitch } from "./useWorkspaceSwitch";
 import { WebFeedBuilder } from "./WebFeedBuilder";
-import { WorkspacePicker } from "./WorkspacePicker";
 
 import type { Bootstrap } from "../api/client";
 import { type View } from "./readerLocation";
@@ -39,10 +39,6 @@ type Modal =
   | "shortcuts"
   | "profile"
   | null;
-const views: { id: View; label: string; icon: IconName }[] = [
-  { id: "feed", label: "Feed", icon: "inbox" },
-  { id: "later", label: "Read later", icon: "later" },
-];
 
 export function ReaderApplication({
   client,
@@ -62,10 +58,13 @@ export function ReaderApplication({
   );
   const [modalStack, setModalStack] = useState<Modal[]>([]);
   const modal = modalStack.at(-1) ?? null;
-  const setModal = (next: Modal) =>
+  const modalRevision = useRef(0);
+  const setModal = (next: Modal) => {
+    modalRevision.current++;
     setModalStack((stack) =>
       next === null ? stack.slice(0, -1) : [...stack, next],
     );
+  };
   const [pauseTarget, setPauseTarget] = useState<string | null>(null);
   const [settingsTarget, setSettingsTarget] = useState<string | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"nav" | "list" | "article">(
@@ -87,7 +86,6 @@ export function ReaderApplication({
   const [editingRecipe, setEditingRecipe] = useState<WebFeedRecipeView | null>(
     null,
   );
-  const [sourceMenu, setSourceMenu] = useState<string | null>(null);
   const noticeTimer = useRef<number>();
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const dirtySubscriptionNote = useRef(false);
@@ -140,6 +138,15 @@ export function ReaderApplication({
     markAllRead,
     replaceWorkspace,
   } = reader;
+  const subscriptionCommands = useSubscriptionCommands(
+    client,
+    account.id,
+    workspaceId,
+    (changed) =>
+      setSubscriptions((items) =>
+        items.map((item) => (item.id === changed.id ? changed : item)),
+      ),
+  );
   const glossary = useGlossary(client.glossary, account.id, workspaceId);
   const workspace =
     workspaces.find((item) => item.id === workspaceId)?.name ?? "Workspace";
@@ -196,7 +203,12 @@ export function ReaderApplication({
       setMobilePanel("list");
     },
     announce,
-    reader.waitForWrites,
+    async () => {
+      await Promise.all([
+        reader.waitForWrites(),
+        subscriptionCommands.waitForWrites(),
+      ]);
+    },
   );
   const goHome = () => {
     navigate("/");
@@ -343,228 +355,46 @@ export function ReaderApplication({
         class={`reader-grid${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
       >
         <>
-          <aside
-            class={`sidebar${sidebarCollapsed ? " sidebar--collapsed" : ""} panel-mobile-${mobilePanel === "nav" ? "show" : "hide"}`}
-            aria-label="Reader navigation"
-          >
-            <button
-              class="sidebar-toggle toolbar-tooltip"
-              data-tooltip={
-                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+          <ReaderSidebar
+            key={`${account.id}/${workspaceId}`}
+            {...{
+              sidebarCollapsed,
+              mobilePanel,
+              toggleSidebar,
+              workspace,
+              workspaces,
+              archived,
+              switchingWorkspace,
+              switchWorkspace,
+              readerPath,
+              goHome,
+              paging,
+              view,
+              selectedSubscriptionId,
+              chooseView,
+              unreadTotal,
+              subscriptions,
+              navigate,
+              announce,
+            }}
+            onArchive={() => setModal("archive")}
+            onAdd={() => setModal("add")}
+            onSelectSubscription={(id) => {
+              if (navigate("/reader")) {
+                loadPage("subscription", id, undefined, undefined, 1);
+                setMobilePanel("list");
               }
-              aria-label={
-                sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
-              }
-              aria-expanded={!sidebarCollapsed}
-              onClick={toggleSidebar}
-            >
-              <span class="sidebar-toggle__arrow" aria-hidden="true" />
-            </button>
-            <WorkspacePicker
-              value={workspace}
-              workspaces={workspaces}
-              archived={archived}
-              pending={switchingWorkspace}
-              onChange={switchWorkspace}
-              onArchive={() => setModal("archive")}
-            />
-            <nav class="nav-block" aria-label="Library">
-              <button
-                class={readerPath === "/" ? "nav-item active" : "nav-item"}
-                onClick={goHome}
-              >
-                <Icon name="home" />
-                <span>Home</span>
-              </button>
-              {views.map((item) => (
-                <button
-                  key={item.id}
-                  disabled={paging}
-                  class={
-                    readerPath === "/reader" &&
-                    view === item.id &&
-                    !selectedSubscriptionId
-                      ? "nav-item active"
-                      : "nav-item"
-                  }
-                  onClick={() => chooseView(item.id)}
-                >
-                  <Icon name={item.icon} />
-                  <span>
-                    {item.id === "feed" ? `Feed (${unreadTotal})` : item.label}
-                  </span>
-                </button>
-              ))}
-              <button
-                class="nav-item nav-item--disabled"
-                disabled
-                title="Search is coming later"
-              >
-                <Icon name="search" />
-                <span>Search</span>
-                <small>Later</small>
-              </button>
-            </nav>
-            <div class="sidebar__section-title">
-              <button
-                class="sidebar__section-link"
-                onClick={() => navigate("/subscriptions")}
-              >
-                Subscriptions <em>{subscriptions.length}</em>
-              </button>
-              <button
-                class="icon-button icon-button--small"
-                aria-label="Add subscription"
-                onClick={() => setModal("add")}
-              >
-                <Icon name="plus" size={16} />
-              </button>
-            </div>
-            <nav class="source-list" aria-label="Subscriptions">
-              {subscriptions
-                .filter((item) => item.status !== "archived")
-                .map((item) => (
-                  <div
-                    class={
-                      item.error
-                        ? "source-entry source-entry--error"
-                        : "source-entry"
-                    }
-                    key={item.id}
-                  >
-                    <button
-                      disabled={paging}
-                      class={
-                        readerPath === "/reader" &&
-                        selectedSubscriptionId === item.id
-                          ? "source active"
-                          : "source"
-                      }
-                      title={
-                        item.error ??
-                        item.continuation ??
-                        (item.lastUpdate
-                          ? `Last successful update: ${item.lastUpdate}`
-                          : "Waiting for the first successful update")
-                      }
-                      onClick={() => {
-                        navigate("/reader");
-                        loadPage(
-                          "subscription",
-                          item.id,
-                          undefined,
-                          undefined,
-                          1,
-                        );
-                        setMobilePanel("list");
-                      }}
-                    >
-                      <SubscriptionIcon
-                        name={item.name}
-                        iconDataUrl={item.iconDataUrl}
-                      />
-                      <span class="source__copy">
-                        <span class="source__name">{item.name}</span>
-                        {item.error ? (
-                          <small class="source__status source__status--error">
-                            Update failed · {item.error}
-                          </small>
-                        ) : item.incomplete ? (
-                          <small class="source__status">
-                            Incomplete · continuation queued
-                          </small>
-                        ) : item.lastUpdate ? (
-                          <small class="source__status">
-                            Updated {item.lastUpdate}
-                          </small>
-                        ) : (
-                          <small class="source__status">
-                            Waiting for first update
-                          </small>
-                        )}
-                      </span>
-                      {item.status === "paused" ? (
-                        <Icon name="pause" size={14} />
-                      ) : (
-                        <em>{item.count}</em>
-                      )}
-                    </button>
-                    {item.error && (
-                      <button
-                        class="source-error-log"
-                        aria-label={`Open update log for ${item.name}`}
-                        title="Open update log"
-                        onClick={() =>
-                          navigate(
-                            `/subscriptions/${encodeURIComponent(item.id)}/activity`,
-                          )
-                        }
-                      >
-                        Log
-                      </button>
-                    )}
-                    <button
-                      class="source-more"
-                      aria-label="More options"
-                      title={`More options for ${item.name}`}
-                      aria-expanded={sourceMenu === item.id}
-                      onClick={() =>
-                        setSourceMenu(sourceMenu === item.id ? null : item.id)
-                      }
-                    >
-                      <Icon name="dots" size={16} />
-                    </button>
-                    {sourceMenu === item.id && (
-                      <div class="source-menu">
-                        <button
-                          onClick={() => {
-                            setSourceMenu(null);
-                            navigate(
-                              `/subscriptions/${encodeURIComponent(item.id)}`,
-                            );
-                          }}
-                        >
-                          View details
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSourceMenu(null);
-                            client
-                              .refreshSubscription(item.id)
-                              .then(() => announce("Refresh queued"))
-                              .catch((e: Error) => announce(e.message));
-                          }}
-                        >
-                          Refresh
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSourceMenu(null);
-                            setPauseTarget(item.id);
-                            setModal("pause");
-                          }}
-                        >
-                          Pause
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-            </nav>
-            <div class="sidebar__footer">
-              <button
-                class="nav-item"
-                aria-label="Settings"
-                onClick={() => {
-                  setSettingsTarget(selectedSubscriptionId);
-                  setModal("shortcuts");
-                }}
-              >
-                <Icon name="settings" />
-                <span>Settings</span>
-              </button>
-            </div>
-          </aside>
+            }}
+            onPause={(id) => {
+              setPauseTarget(id);
+              setModal("pause");
+            }}
+            onSettings={() => {
+              setSettingsTarget(selectedSubscriptionId);
+              setModal("shortcuts");
+            }}
+            onRefresh={subscriptionCommands.refresh}
+          />
           {readerPath === "/" ? (
             <ActivityDashboard
               activity={activity}
@@ -650,7 +480,9 @@ export function ReaderApplication({
               if (!articleId) setMobilePanel("list");
             }
           }}
-          onRefresh={(id) => client.refreshSubscription(id)}
+          onRefresh={async (id) => {
+            await subscriptionCommands.refresh(id);
+          }}
           onPause={(id) => {
             setPauseTarget(id);
             setModal("pause");
@@ -698,30 +530,16 @@ export function ReaderApplication({
             setPauseTarget(null);
             setModal(null);
           }}
-          onDone={(reason) =>
-            client
-              .pauseSubscription(
-                pauseTarget ?? selectedSubscription!.id,
-                reason,
-              )
-              .then(() => {
-                setSubscriptions((items) =>
-                  items.map((item) =>
-                    item.id === (pauseTarget ?? selectedSubscription!.id)
-                      ? {
-                          ...item,
-                          status: "paused",
-                          reason,
-                          reasonAt: new Date().toISOString(),
-                        }
-                      : item,
-                  ),
-                );
-                setPauseTarget(null);
-                setModal(null);
-                announce("Subscription paused");
-              })
-          }
+          onDone={async (reason) => {
+            const generation = modalRevision.current;
+            const id = pauseTarget ?? selectedSubscription!.id;
+            const applied = await subscriptionCommands.pause(id, reason);
+            if (applied && modalRevision.current === generation) {
+              setPauseTarget(null);
+              setModal(null);
+              announce("Subscription paused");
+            }
+          }}
         />
       )}
       {modal === "archive" && !archived && (
@@ -866,19 +684,9 @@ export function ReaderApplication({
               setPauseTarget(settingsTarget);
               setModal("pause");
             }}
-            onResume={() => {
-              if (!settingsSubscription) return;
-              client.resumeSubscription(settingsSubscription.id).then(() => {
-                setSubscriptions((items) =>
-                  items.map((item) =>
-                    item.id === settingsSubscription.id
-                      ? { ...item, status: "active", reason: undefined }
-                      : item,
-                  ),
-                );
-                setModal(null);
-                announce("Subscription resumed; catch-up queued");
-              });
+            onResume={async () => {
+              if (settingsSubscription)
+                await subscriptionCommands.resume(settingsSubscription.id);
             }}
           />
         </div>

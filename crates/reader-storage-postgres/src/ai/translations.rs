@@ -134,8 +134,19 @@ impl PostgresAiStore {
             return Err(AiError::Configuration);
         }
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        sqlx::query("UPDATE ai_translations SET status='failed',lease=NULL,lease_until=NULL,document=jsonb_set(document::jsonb,'{job}',document::jsonb->'job' || jsonb_build_object('status','failed','error','Translation was interrupted; retry explicitly. The request may have been charged.'))::text WHERE status='generating' AND lease_until<now()")
-            .execute(&mut *tx).await.map_err(storage)?;
+        let expired: Vec<TranslationRow> = sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_translations WHERE status='generating' AND lease_until<now() ORDER BY lease_until,id LIMIT $1 FOR UPDATE SKIP LOCKED")
+            .bind(i64::from(self.recovery_batch.get())).fetch_all(&mut *tx).await.map_err(storage)?;
+        for row in expired {
+            let id = row.0;
+            match checked_record(row) {
+                Ok(mut record) => {
+                    record.job.state = TranslationState::Failed { error: "Translation was interrupted; retry explicitly. The request may have been charged.".into() };
+                    sqlx::query("UPDATE ai_translations SET status='failed',lease=NULL,lease_until=NULL,document=$2 WHERE id=$1")
+                        .bind(id).bind(encode(&record)?).execute(&mut *tx).await.map_err(storage)?;
+                }
+                Err(_) => quarantine::translation(&mut tx, id).await?,
+            }
+        }
         let row:Option<TranslationRow>=sqlx::query_as("SELECT t.id,t.owner,t.workspace,t.article,t.document FROM ai_translations t JOIN workspaces w ON w.id=t.workspace::text WHERE t.status='queued' AND w.document::jsonb->>'owner'=t.owner::text ORDER BY t.created_at,t.id LIMIT 1 FOR UPDATE OF t SKIP LOCKED")
             .fetch_optional(&mut *tx).await.map_err(storage)?;
         let Some(row) = row else {
@@ -146,9 +157,8 @@ impl PostgresAiStore {
         let mut record = match checked_record(row) {
             Ok(record) => record,
             Err(_) => {
-                sqlx::query("UPDATE ai_translations SET status='failed',lease=NULL,lease_until=NULL WHERE id=$1").bind(id).execute(&mut *tx).await.map_err(storage)?;
+                quarantine::translation(&mut tx, id).await?;
                 tx.commit().await.map_err(storage)?;
-                log::error!("translation_record_invalid operation_id={id} action=quarantined_original_retained");
                 return Ok(None);
             }
         };

@@ -11,8 +11,8 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:acceptance": "playwright test --config playwright.acceptance.config.ts",
-    "format": "prettier --write src e2e *.ts",
-    "format:check": "prettier --check src e2e *.ts"
+    "format": "prettier --write src e2e tools *.ts",
+    "format:check": "prettier --check src e2e tools *.ts"
   },
   "dependencies": {
     "@preact/signals": "^1.3.2",

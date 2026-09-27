@@ -1,10 +1,10 @@
 //! Durable per-request accounting and draft handoff, separate from publication.
 use super::*;
 
-pub(super) fn interrupt(record: &mut ChatRecord) {
-    for call in &mut record.view.provider_calls {
+pub(super) fn interrupt(view: &mut ArticleChat) {
+    for call in &mut view.provider_calls {
         if call.status == CallStatus::Started {
-            call.status = if record.view.status == ChatStatus::Cancelled {
+            call.status = if view.status == ChatStatus::Cancelled {
                 CallStatus::Cancelled
             } else {
                 CallStatus::Interrupted
@@ -24,7 +24,9 @@ pub(super) async fn begin(
     phase: GenerationPhase,
 ) -> Result<Uuid, AiError> {
     let mut tx = pool.begin().await.map_err(storage)?;
-    let mut record = locked(&mut tx, claim.record.owner, claim.record.view.id).await?;
+    let mut state =
+        chat_document::locked_progress(&mut tx, claim.record.owner, claim.record.view.id).await?;
+    let record = &mut state.record;
     if !fenced(&mut tx, claim).await? {
         return Err(AiError::Cancelled);
     }
@@ -60,7 +62,7 @@ pub(super) async fn begin(
         GenerationPhase::Generating => ChatStatus::Generating,
         GenerationPhase::Verifying => ChatStatus::Verifying,
     };
-    write_record(&mut tx, &record).await?;
+    chat_document::write_progress(&mut tx, &state).await?;
     tx.commit().await.map_err(storage)?;
     Ok(id)
 }
@@ -72,7 +74,9 @@ pub(super) async fn update(
     update: CallUpdate,
 ) -> Result<(), AiError> {
     let mut tx = pool.begin().await.map_err(storage)?;
-    let mut record = locked(&mut tx, claim.record.owner, claim.record.view.id).await?;
+    let mut state =
+        chat_document::locked_progress(&mut tx, claim.record.owner, claim.record.view.id).await?;
+    let record = &mut state.record;
     let assistant_id = claim
         .record
         .operations
@@ -88,9 +92,9 @@ pub(super) async fn update(
             .ok_or(AiError::Conflict)?
             .phase;
         let rates = if phase == GenerationPhase::Verifying {
-            &record.review.cost_rates
+            &claim.record.review.cost_rates
         } else {
-            &record.cost_rates
+            &claim.record.cost_rates
         };
         if usage
             .prompt_cache_hit_tokens
@@ -127,14 +131,14 @@ pub(super) async fn update(
                 if status != CallStatus::Completed || call.phase != GenerationPhase::Generating {
                     return Err(AiError::Conflict);
                 }
-                let source = record.snapshot.as_ref().ok_or(AiError::Storage)?;
+                let source = claim.record.snapshot.as_ref().ok_or(AiError::Storage)?;
                 // Revalidate retained transport against the exact snapshot at
                 // this storage boundary; internal callers are not an exemption.
-                CompletedGeneration::new(
+                let completed = CompletedGeneration::new(
                     draft.clone(),
                     call.usage.clone().ok_or(AiError::Storage)?,
                     &source.text,
-                    record.limits.max_response_bytes,
+                    claim.record.limits.max_response_bytes,
                 )?;
                 let op = record
                     .operations
@@ -148,6 +152,13 @@ pub(super) async fn update(
                     return Err(AiError::Conflict);
                 }
                 *saved = Some(draft);
+                state
+                    .published
+                    .messages
+                    .iter_mut()
+                    .find(|m| m.id == assistant_id)
+                    .ok_or(AiError::Storage)?
+                    .content = completed.content().to_owned();
             }
             call.status = status;
         }
@@ -167,6 +178,6 @@ pub(super) async fn update(
             .ok_or(AiError::Storage)?;
         message.phase = Some(GenerationPhase::Verifying);
     }
-    write_record(&mut tx, &record).await?;
+    chat_document::write_progress(&mut tx, &state).await?;
     tx.commit().await.map_err(storage)
 }

@@ -6,9 +6,10 @@ import {
   AutofillResistantSelect,
   AutofillResistantTextarea,
 } from "../ui/fields";
+import { AsyncButton } from "../ui/AsyncButton";
 import { Icon } from "../ui/Icon";
 import { ModalDialog } from "../ui/ModalDialog";
-import type { Subscription, Workspace } from "./data";
+import type { Subscription, Workspace } from "../api/viewModels";
 export function AdvancedSettings({
   onProfile,
   client,
@@ -38,7 +39,7 @@ export function AdvancedSettings({
   onEditWebFeed: (recipe: WebFeedRecipeView) => void;
   onClose: () => void;
   onPause: () => void;
-  onResume: () => void;
+  onResume: () => Promise<void>;
 }) {
   const [opml, setOpml] = useState(""),
     [previewId, setPreviewId] = useState(""),
@@ -51,9 +52,12 @@ export function AdvancedSettings({
     [confirmUnsubscribe, setConfirmUnsubscribe] = useState(false),
     [message, setMessage] = useState("");
   const pendingRef = useRef(false);
+  const selection = useRef(selectedSubscription?.id);
+  selection.current = selectedSubscription?.id;
   useEffect(() => {
     setSubscriptionName(selectedSubscription?.name ?? "");
     setConfirmUnsubscribe(false);
+    setMessage("");
   }, [selectedSubscription?.id, selectedSubscription?.name]);
   const run = <T,>(work: () => Promise<T>, done: (value: T) => void) => {
     if (pendingRef.current) return;
@@ -214,26 +218,39 @@ export function AdvancedSettings({
                 </button>
               ) : (
                 <>
-                  <button
-                    class="settings-action"
-                    disabled={pending}
-                    onClick={
-                      selectedSubscription.status === "paused"
-                        ? onResume
-                        : onPause
-                    }
-                  >
-                    <Icon
-                      name={
-                        selectedSubscription.status === "paused"
-                          ? "refresh"
-                          : "pause"
+                  {selectedSubscription.status === "paused" ? (
+                    <AsyncButton
+                      key={selectedSubscription.id}
+                      class="settings-action"
+                      disabled={pending}
+                      onPress={async () => {
+                        setMessage("");
+                        await onResume();
+                        if (selection.current === selectedSubscription.id)
+                          setMessage("Subscription resumed; catch-up queued");
+                      }}
+                      onError={(error) =>
+                        selection.current === selectedSubscription.id &&
+                        setMessage(
+                          error instanceof Error
+                            ? error.message
+                            : "Could not resume subscription",
+                        )
                       }
-                    />
-                    {selectedSubscription.status === "paused"
-                      ? `Resume ${selectedSubscription.name}`
-                      : `Pause ${selectedSubscription.name}`}
-                  </button>
+                    >
+                      <Icon name="refresh" />
+                      Resume {selectedSubscription.name}
+                    </AsyncButton>
+                  ) : (
+                    <button
+                      class="settings-action"
+                      disabled={pending}
+                      onClick={onPause}
+                    >
+                      <Icon name="pause" />
+                      Pause {selectedSubscription.name}
+                    </button>
+                  )}
                   <button
                     class="settings-action"
                     disabled={pending}

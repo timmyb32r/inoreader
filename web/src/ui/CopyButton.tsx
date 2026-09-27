@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../ui/Icon";
 
-export function ChatCopyButton({
+export function CopyButton({
   text,
   label,
   html,

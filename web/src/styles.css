@@ -3422,3 +3422,11 @@ button[aria-busy] {
   place-items: center;
   pointer-events: none;
 }
+
+/* Reserved menu feedback: network completion never moves a menu action. */
+.source-menu__status {
+  height: 34px;
+  overflow: auto;
+  font-size: 11px;
+  color: var(--danger);
+}

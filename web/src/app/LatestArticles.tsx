@@ -1,7 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
 import { formatArticleDate } from "../ui/formatArticleDate";
-import type { Article } from "./data";
+import type { Article } from "../api/viewModels";
 import "./latest-articles.css";
 
 export function LatestArticles({

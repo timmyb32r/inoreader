@@ -142,6 +142,10 @@ async function fixture(
       chat.status = state.status;
       if (chat.status === "completed")
         chat.messages = exampleChat(chat.articleId, chat.id).messages;
+      if (path.endsWith("/changes"))
+        return route.fulfill({
+          json: { revision: "1", chat: wireFixture(chat) },
+        });
       return route.fulfill({ json: wireFixture(chat) });
     }
     return route.fulfill({ json: wireFixture([]) });

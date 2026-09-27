@@ -54,7 +54,11 @@ pub(super) fn compose(
         },
     );
     let provider = DeepSeekProvider::new(http, Duration::from_millis(ai.poll_milliseconds))?;
-    let store = PostgresAiStore::new(pool, repository);
+    let store = PostgresAiStore::new(
+        pool,
+        repository,
+        std::num::NonZeroU32::new(ai.recovery_batch).ok_or("AI recovery batch must be positive")?,
+    );
     Ok(Some(Arc::new(AiService::new(
         Arc::new(store),
         Arc::new(provider),

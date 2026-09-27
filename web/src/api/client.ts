@@ -1,4 +1,4 @@
-import type { Article, Subscription, Workspace } from "../app/data";
+import type { Article, Subscription, Workspace } from "../api/viewModels";
 import { reportApiRequest } from "../performanceDiagnostics";
 import { AiClient } from "./ai";
 import {

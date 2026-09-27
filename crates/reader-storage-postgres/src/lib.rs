@@ -12,7 +12,7 @@ pub use ai::PostgresAiStore;
 pub use glossary::PostgresGlossaryStore;
 pub use ingest_store::PostgresIngestStore;
 pub use repository::PostgresRepository;
-pub use schema::prepare_schema;
+pub use schema::{prepare_schema, upgrade_schema, verify_schema};
 
 use log::LevelFilter;
 use sqlx::{postgres::PgConnectOptions, ConnectOptions};

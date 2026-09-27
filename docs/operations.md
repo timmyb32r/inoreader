@@ -25,6 +25,31 @@ docker compose run --rm app --config /etc/inoreader/config.yaml prepare-schema
 docker compose up -d
 ```
 
+## Explicit schema upgrades
+
+Startup is read-only with respect to schema. A missing, incompatible or physically
+drifted critical schema contract fails before listeners/workers start. The release
+journal is `schema_releases`; `prepare-schema` never upgrades an occupied database.
+
+For this release, add a positive `ai.recovery_batch` (example: 32) to configurations
+with AI enabled. Build and validate the candidate first. Before upgrading an existing
+unversioned installation, stop/drain the application, retain its image/config/master
+key, create a fresh backup, and restore it to a separate database. Run the candidate's
+`upgrade-schema` against that restored database and compare counts, exact content
+bytes, and original AI document/input strings. Only after that rehearsal succeeds,
+run the same explicit command against production and start the matching image:
+
+```sh
+docker compose run --rm --no-deps app --config /etc/inoreader/config.yaml upgrade-schema
+```
+
+The command converts JSON byte arrays to BYTEA and builds validated public chat
+projections in one transaction. It refuses a second upgrade or invalid historical
+data. Failed conversion leaves the old schema/data intact. Do not run the underlying
+SQL file standalone: the native command owns the full atomic upgrade. Rollback
+requires the old image and its matching pre-upgrade backup; never restore over
+newer user activity without preserving and reconciling that activity.
+
 ## Incremental container builds
 
 The production Dockerfile keeps Cargo registry, git, target, rustup, and npm
@@ -65,7 +90,7 @@ PostgreSQL is the production source of truth. Back up the database persisted in 
 `postgres-data` volume with `pg_dump --format=custom` from the pinned PostgreSQL
 image, write to a new operator-owned path, and keep the password in the Docker
 secret. A valid backup is not just a successful command: restore it into a fresh
-PostgreSQL database, run `prepare-schema`, compare every table count, and run the
+PostgreSQL database, verify the matching schema (or rehearse the explicit upgrade), compare every table count, and run the
 authentication, library, content, queue, and cross-user isolation smoke tests
 before accepting it.
 

@@ -1,3 +1,10 @@
+mod startup;
+use startup::*;
+mod http;
+use http::*;
+mod discovery;
+use discovery::*;
+mod seed;
 use axum::{
     body::Body,
     extract::DefaultBodyLimit,
@@ -32,6 +39,7 @@ use reader_web_runtime::{
     ExternalRequestCompletion, ExternalRequestObserver, OutboundHttpClient, OutboundLimits,
     OutboundPolicy, RawOutboundLimits, ReqwestPinnedTransport, TokioDnsResolver,
 };
+use seed::*;
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use url::Url;
 
@@ -51,6 +59,7 @@ enum Command {
     Serve,
     CheckConfig,
     PrepareSchema,
+    UpgradeSchema,
     ReindexTelegramGlossary {
         owner: uuid::Uuid,
         workspace: uuid::Uuid,
@@ -79,47 +88,6 @@ enum Command {
     Health,
 }
 
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SeedManifest {
-    schema_version: u64,
-    owner_account_id: uuid::Uuid,
-    workspace_id: uuid::Uuid,
-    items: Vec<SeedItem>,
-}
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SeedItem {
-    source_inventory_id: String,
-    idempotency_key: String,
-    selected: bool,
-    status: String,
-    configuration: serde_json::Value,
-    note: Option<String>,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SourceInventory {
-    schema_version: u64,
-    expected_source_count: usize,
-    origin: serde_json::Value,
-    sources: Vec<InventorySource>,
-    pdf_inventory: serde_json::Value,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InventorySource {
-    id: String,
-    configuration: serde_json::Value,
-    adapter_kind: String,
-    historical_observations: serde_json::Value,
-    fixture_coverage: String,
-}
-
-type PreparedSeed = (String, Subscription, SeedSource, serde_json::Value);
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -147,6 +115,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let pool = postgres_pool(&config).await?;
+    if !matches!(cli.command, Command::PrepareSchema | Command::UpgradeSchema) {
+        reader_storage_postgres::verify_schema(&pool).await?;
+    }
     match cli.command {
         Command::CheckConfig | Command::Seed { apply: false, .. } => unreachable!(),
         Command::ReindexTelegramGlossary { owner, workspace } => {
@@ -166,12 +137,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             owner,
             workspace,
         } => {
-            prepare_schema(&pool).await?;
             glossary::import(&config, pool, archive, owner, workspace).await?;
         }
         Command::Health => {
             sqlx::query("SELECT 1").execute(&pool).await?;
             println!("PostgreSQL connection is healthy");
+        }
+        Command::UpgradeSchema => {
+            reader_storage_postgres::upgrade_schema(
+                &pool,
+                std::num::NonZeroU32::new(u32::try_from(config.ingest.batch_items)?)
+                    .ok_or("upgrade batch must be positive")?,
+            )
+            .await?;
+            println!("PostgreSQL schema upgraded and verified");
         }
         Command::PrepareSchema => {
             prepare_schema(&pool).await?;
@@ -337,7 +316,6 @@ async fn postgres_pool(config: &Config) -> Result<sqlx::PgPool, Box<dyn std::err
         ))
         .connect_with(reader_storage_postgres::instrument_postgres(options))
         .await?;
-    prepare_schema(&pool).await?;
     Ok(pool)
 }
 
@@ -377,627 +355,6 @@ fn init_logging(format: LogFormat) {
         });
     }
     let _ = builder.try_init();
-}
-
-fn load_seed(path: &std::path::Path) -> Result<SeedManifest, Box<dyn std::error::Error>> {
-    let raw = std::fs::read(path)?;
-    let value: SeedManifest = serde_json::from_slice(&raw)?;
-    if value.schema_version != 1 {
-        return Err("unsupported seed schema_version".into());
-    }
-    if value.items.is_empty() {
-        return Err("seed manifest has no items".into());
-    }
-    let mut ids = std::collections::HashSet::new();
-    let mut keys = std::collections::HashSet::new();
-    for item in &value.items {
-        if item.source_inventory_id.is_empty()
-            || item.idempotency_key != format!("personal_feed:{}", item.source_inventory_id)
-        {
-            return Err("seed item has invalid identity or idempotency key".into());
-        }
-        if !ids.insert(&item.source_inventory_id) || !keys.insert(&item.idempotency_key) {
-            return Err("seed manifest contains duplicate identities".into());
-        }
-        if item.selected && item.status != "reviewed" {
-            return Err("selected seed item is not reviewed".into());
-        }
-        if contains_secret_field(&item.configuration) {
-            return Err("seed configuration contains a forbidden secret-like field".into());
-        }
-        if !matches!(item.status.as_str(), "reviewed" | "unresolved" | "disabled") {
-            return Err("seed item has invalid status".into());
-        }
-        let _ = &item.note;
-    }
-    Ok(value)
-}
-
-fn contains_secret_field(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Object(values) => values.iter().any(|(key, value)| {
-            ["password", "secret", "token", "credential", "private_key"]
-                .iter()
-                .any(|part| key.to_lowercase().contains(part))
-                || contains_secret_field(value)
-        }),
-        serde_json::Value::Array(values) => values.iter().any(contains_secret_field),
-        _ => false,
-    }
-}
-
-fn seed_values(seed: SeedManifest) -> Result<Vec<PreparedSeed>, Box<dyn std::error::Error>> {
-    let mut values = Vec::new();
-    for item in seed.items.into_iter().filter(|v| v.selected) {
-        let config = item
-            .configuration
-            .as_object()
-            .ok_or("seed configuration must be an object")?;
-        let name = config
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or("seed configuration requires name")?;
-        let raw_url = config
-            .get("feed_url")
-            .or_else(|| config.get("url"))
-            .and_then(|v| v.as_str())
-            .ok_or("seed configuration requires url or feed_url")?;
-        let url = Url::parse(raw_url)?;
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err("seed URL must use HTTP or HTTPS".into());
-        }
-        let kind = if config.get("feed_url").is_some() {
-            SeedSource::Feed
-        } else {
-            SeedSource::Imported
-        };
-        let identity = format!(
-            "seed/{}/{}/{}",
-            seed.owner_account_id, seed.workspace_id, item.idempotency_key
-        );
-        let id = SubscriptionId::from_uuid(uuid::Uuid::new_v5(
-            &uuid::Uuid::NAMESPACE_OID,
-            identity.as_bytes(),
-        ));
-        values.push((
-            item.idempotency_key,
-            Subscription::new(
-                id,
-                WorkspaceId::from_uuid(seed.workspace_id),
-                url,
-                name.to_owned(),
-            ),
-            kind,
-            serde_json::Value::Object(config.clone()),
-        ));
-    }
-    Ok(values)
-}
-
-async fn serve(
-    config: &Config,
-    pool: sqlx::PgPool,
-    reason_policy: ReasonPolicy,
-) -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!(
-        "archive_budget_bytes={} policy=telemetry_only",
-        config.observability.archive_budget_bytes
-    );
-    let repository = Arc::new(PostgresRepository::new(
-        pool.clone(),
-        reason_policy,
-        config.ingest.initial_feed_items,
-    )?);
-    repository.readiness().await?;
-    let ai_service = ai::compose(config, pool.clone(), repository.clone())?;
-    let glossary_service = glossary::compose(config, pool.clone())?;
-    // The transport exposes decoded response bytes, so both the wire/body
-    // budget and decompressed budget constrain the same pre-parser boundary.
-    let limits = OutboundLimits::try_from(RawOutboundLimits {
-        connect_timeout_ms: config.http.connect_timeout_seconds * 1000,
-        request_deadline_ms: config.http.request_timeout_seconds * 1000,
-        max_redirect_hops: config.http.redirect_hops as usize,
-        max_response_body_bytes: config
-            .http
-            .max_body_bytes
-            .min(config.http.max_decompressed_bytes),
-    })?;
-    let outbound_policy = OutboundPolicy::for_plain_http_hosts(
-        config.http.allowed_plain_http_hosts.iter().cloned(),
-        limits,
-    );
-    let observer = RequestObserver {
-        format: config.observability.log_format,
-    };
-    let fetcher = Arc::new(SecureWebFetcher::new(
-        OutboundHttpClient::new(
-            outbound_policy.clone(),
-            TokioDnsResolver,
-            ReqwestPinnedTransport,
-            observer,
-        )
-        .with_user_agent(&config.http.user_agent)?,
-    ));
-    let icon_pool = pool.clone();
-    let icon_fetcher = fetcher.clone();
-    let icon_refresh_interval = Duration::from_secs(config.scheduler.polling_interval_seconds);
-    let icon_workers = config.scheduler.workers;
-    let icon_batch = config.ingest.batch_items;
-    let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(
-        OutboundHttpClient::new(
-            outbound_policy,
-            TokioDnsResolver,
-            ReqwestPinnedTransport,
-            observer,
-        )
-        .with_user_agent(&config.http.user_agent)?,
-    );
-    let cdp = CdpBrowserCollector::configured(
-        config.browser.cdp_endpoint.clone(),
-        browser_http.clone(),
-        config.browser.max_contexts,
-        Duration::from_secs(config.browser.navigation_timeout_seconds),
-        config.ingest.max_web_feed_pages,
-    )?;
-    if let Err(error) = cdp.health_check().await {
-        eprintln!("browser capability degraded: {error}")
-    }
-    let web_feeds = Arc::new(ProductionWebCollector {
-        static_feeds: StaticWebFeedCollector::new(fetcher.clone()),
-        adapters: BuiltInAdapterCollector::new(browser_http),
-        cdp,
-        max_pages: config.ingest.max_web_feed_pages,
-        max_actions: config.browser.max_actions,
-    });
-    let discovery = Arc::new(ProductionDiscovery {
-        fetcher: fetcher.clone(),
-        web_feeds: web_feeds.clone(),
-        preview_timeout: Duration::from_secs(config.browser.preview_timeout_seconds),
-        initial_items: config.ingest.initial_feed_items,
-        visual_snapshots: tokio::sync::Mutex::new(HashMap::new()),
-    });
-    let mut server_state = reader_server::AppState::new(
-        repository,
-        discovery,
-        reason_policy,
-        auth_policy(config)?,
-        config.server.external_origin.clone(),
-        config.auth.login_attempts_per_minute,
-        reader_application::SelectionLimit::new(config.ingest.batch_items)?,
-    );
-    if let Some(ai) = &ai_service {
-        server_state = server_state.with_ai(ai.clone());
-    }
-    if let Some(glossary) = &glossary_service {
-        server_state = server_state.with_glossary(glossary.clone());
-    }
-    let app = reader_server::router(server_state)
-        .fallback(serve_ui)
-        .layer(DefaultBodyLimit::max(config.server.max_request_body_bytes))
-        .layer(tower_http::timeout::TimeoutLayer::with_status_code(
-            StatusCode::REQUEST_TIMEOUT,
-            Duration::from_secs(config.server.request_timeout_seconds),
-        ));
-    let ingest_store = Arc::new(PostgresIngestStore::new(
-        pool,
-        chrono::Duration::seconds(config.scheduler.polling_interval_seconds as i64),
-        config.scheduler.per_origin_concurrency,
-        chrono::Duration::seconds(config.scheduler.max_retry_age_seconds as i64),
-    )?);
-    let ingest_limits = IngestLimits::new(
-        config.ingest.initial_feed_items,
-        config.ingest.batch_items,
-        config.content.chunk_bytes,
-    )?
-    .with_payload_limits(
-        config.ingest.max_input_bytes,
-        config.content.max_extracted_bytes,
-    )?;
-    let worker = Arc::new(
-        IngestWorker::new(
-            ingest_store,
-            fetcher.clone(),
-            fetcher,
-            web_feeds,
-            ingest_limits,
-            chrono::Duration::seconds(config.scheduler.lease_seconds as i64),
-        )?
-        .with_runtime_policy(
-            chrono::Duration::seconds(config.scheduler.renew_seconds as i64),
-            config.scheduler.retry_attempts,
-        )?,
-    );
-    let listener = tokio::net::TcpListener::bind(&config.server.bind).await?;
-    let mut supervisor = reader_runtime::TaskSupervisor::new();
-    supervisor.spawn("subscription_icons", move |mut stop| async move {
-        while !stop.requested() {
-            if let Err(error) = icons::refresh(
-                icon_pool.clone(),
-                icon_fetcher.clone(),
-                icon_workers,
-                icon_batch,
-                &mut stop,
-            )
-            .await
-            {
-                log::warn!("subscription icon refresh failed: {error}");
-            }
-            stop.sleep(icon_refresh_interval).await;
-        }
-        Ok(())
-    });
-
-    if let Some(ai) = ai_service {
-        ai.spawn_workers(&mut supervisor);
-    }
-    if let Some(glossary) = glossary_service {
-        glossary.spawn_workers(&mut supervisor);
-    }
-
-    let worker_count = config.scheduler.workers;
-    let poll = Duration::from_secs(config.scheduler.queue_poll_interval_seconds);
-    supervisor.spawn("ingest", move |mut stop| async move {
-        run_until_shutdown(worker, worker_count, poll, stop.wait()).await
-    });
-    supervisor.spawn("http", move |mut stop| async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async move { stop.wait().await })
-            .await
-            .map_err(|error| error.to_string())
-    });
-    let failure = tokio::select! {
-        signal = reader_runtime::termination_signal() => { signal?; None },
-        error = supervisor.unexpected_exit() => Some(error),
-    };
-    supervisor.request_shutdown();
-    tokio::time::timeout(
-        Duration::from_secs(config.server.graceful_shutdown_seconds),
-        supervisor.drain(),
-    )
-    .await
-    .map_err(|_| {
-        format!(
-            "graceful shutdown exceeded {} seconds",
-            config.server.graceful_shutdown_seconds
-        )
-    })??;
-    if let Some(error) = failure {
-        return Err(error.into());
-    }
-    Ok(())
-}
-
-#[derive(Clone, Copy)]
-struct RequestObserver {
-    format: LogFormat,
-}
-impl ExternalRequestObserver for RequestObserver {
-    fn completed(&self, value: ExternalRequestCompletion) {
-        log::info!(target:"reader_external", "{}", format_external_request_completion(self.format, &value))
-    }
-}
-
-type ProductionFetcher =
-    SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>;
-struct ProductionWebCollector {
-    static_feeds: StaticWebFeedCollector<ProductionFetcher>,
-    adapters: BuiltInAdapterCollector,
-    cdp: CdpBrowserCollector,
-    max_pages: usize,
-    max_actions: usize,
-}
-#[async_trait::async_trait]
-impl BrowserCollector for ProductionWebCollector {
-    fn capability(&self) -> BrowserCapability {
-        self.cdp.capability()
-    }
-    async fn collect(&self, source: &SourceDefinition) -> Result<Vec<SourceRecord>, FetchError> {
-        if let SourceKind::WebPage(recipe) = source.kind() {
-            if recipe.actions().page_count() > self.max_pages || recipe.max_pages() > self.max_pages
-            {
-                return Err(FetchError::Rejected("web_feed_page_limit".into()));
-            }
-            if recipe.actions().action_count() > self.max_actions {
-                return Err(FetchError::Rejected("web_feed_action_limit".into()));
-            }
-        }
-        match source.kind() {
-            SourceKind::BuiltIn(_) => self.adapters.collect(source).await,
-            SourceKind::WebPage(recipe) if recipe.loading() == WebLoading::Browser => {
-                self.cdp.collect(source).await
-            }
-            SourceKind::WebPage(recipe) if recipe.loading() == WebLoading::Automatic => {
-                match self.static_feeds.collect(source).await {
-                    Ok(records) if !records.is_empty() => return Ok(records),
-                    Ok(_) => {}
-                    Err(FetchError::Rejected(value)) if value == "selector_requires_browser" => {}
-                    Err(error) => return Err(error),
-                }
-                self.cdp.collect(source).await
-            }
-            _ => self.static_feeds.collect(source).await,
-        }
-    }
-}
-struct VisualSnapshotState {
-    session_id: uuid::Uuid,
-    workspace_id: uuid::Uuid,
-    expires_at: chrono::DateTime<chrono::Utc>,
-    width: u32,
-    height: u32,
-    groups: Vec<reader_ingest::VisualCandidateGroup>,
-}
-struct ProductionDiscovery {
-    fetcher: Arc<ProductionFetcher>,
-    web_feeds: Arc<ProductionWebCollector>,
-    preview_timeout: Duration,
-    initial_items: usize,
-    visual_snapshots: tokio::sync::Mutex<HashMap<uuid::Uuid, VisualSnapshotState>>,
-}
-#[async_trait::async_trait]
-impl FeedDiscovery for ProductionDiscovery {
-    async fn discover(&self, url: Url) -> Result<FeedPreviewResponse, String> {
-        let page = self
-            .fetcher
-            .fetch(&url, &CacheValidators::default())
-            .await
-            .map_err(|e| e.to_string())?;
-        let (is_json, records) = match reader_collectors::parse_json(&page.body, &page.final_url) {
-            Ok(v) => (true, v),
-            Err(_) => (
-                false,
-                reader_collectors::parse_xml(&page.body, &page.final_url)
-                    .map_err(|e| e.to_string())?,
-            ),
-        };
-        let title = page.final_url.host_str().unwrap_or("Feed").to_owned();
-        let available_items = records.len();
-        let initial_items = available_items.min(self.initial_items);
-        Ok(FeedPreviewResponse {
-            title,
-            kind: if is_json { "json_feed" } else { "rss" }.to_owned(),
-            url: page.final_url.to_string(),
-            available_items,
-            initial_items,
-            incomplete: available_items > initial_items,
-            articles: records
-                .into_iter()
-                .take(initial_items)
-                .map(|v| FeedPreviewArticle {
-                    title: v.title,
-                    published_at: v.published_at.map(|d| d.to_rfc3339()),
-                })
-                .collect(),
-        })
-    }
-    async fn preview_web_feed(
-        &self,
-        draft: &WebFeedRecipeDraft,
-    ) -> Result<(FeedPreviewResponse, reader_core::PreparedWebFeed), String> {
-        let prepared = reader_core::PreparedWebFeed::new(
-            draft.clone(),
-            self.web_feeds.max_pages,
-            self.web_feeds.max_actions,
-        )?;
-        let url = Url::parse(&draft.url).map_err(|_| "invalid web feed URL".to_owned())?;
-        let recipe = prepared.recipe().clone();
-        let source = SourceDefinition::new(
-            reader_core::SourceId::new(),
-            url.clone(),
-            SourceKind::WebPage(recipe),
-        )
-        .map_err(|e| e.to_string())?;
-        let records = tokio::time::timeout(self.preview_timeout, self.web_feeds.collect(&source))
-            .await
-            .map_err(|_| "web feed preview timed out".to_owned())?
-            .map_err(|e| e.to_string())?;
-        let title = url.host_str().unwrap_or("Web feed").to_owned();
-        let available_items = records.len();
-        let initial_items = available_items.min(self.initial_items);
-        Ok((
-            FeedPreviewResponse {
-                title,
-                kind: "web_feed".to_owned(),
-                url: url.to_string(),
-                available_items,
-                initial_items,
-                incomplete: available_items > initial_items,
-                articles: records
-                    .into_iter()
-                    .take(initial_items)
-                    .map(|v| FeedPreviewArticle {
-                        title: v.key().title.clone(),
-                        published_at: v.published_at().map(|d| d.to_rfc3339()),
-                    })
-                    .collect(),
-            },
-            prepared,
-        ))
-    }
-    async fn visual_preview(
-        &self,
-        session_id: uuid::Uuid,
-        request: &VisualPreviewRequest,
-    ) -> Result<VisualPreviewResponse, String> {
-        let url = Url::parse(&request.url).map_err(|_| "invalid visual preview URL".to_owned())?;
-        if !matches!(url.scheme(), "http" | "https") {
-            return Err("visual preview URL must use HTTP or HTTPS".into());
-        }
-        let mobile = match request.viewport.as_str() {
-            "desktop" => false,
-            "mobile" => true,
-            _ => return Err("invalid visual preview viewport".into()),
-        };
-        let capture = tokio::time::timeout(
-            self.preview_timeout,
-            self.web_feeds.cdp.visual_snapshot(&url, mobile),
-        )
-        .await
-        .map_err(|_| "visual preview timed out".to_owned())?
-        .map_err(|e| e.to_string())?;
-        let token = uuid::Uuid::new_v4();
-        let expires_at = chrono::Utc::now()
-            + chrono::Duration::from_std(self.preview_timeout)
-                .map_err(|_| "invalid visual preview deadline".to_owned())?;
-        let groups = capture
-            .groups
-            .iter()
-            .enumerate()
-            .map(|(index, group)| VisualCandidateGroupView {
-                id: format!("group-{index}"),
-                selector: SelectorDraft {
-                    language: "css".into(),
-                    expression: group.selector.clone(),
-                },
-                count: group.boxes.len(),
-                boxes: group
-                    .boxes
-                    .iter()
-                    .map(|rect| VisualRectView {
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height,
-                    })
-                    .collect(),
-            })
-            .collect();
-        let state = VisualSnapshotState {
-            session_id,
-            workspace_id: request.workspace_id,
-            expires_at,
-            width: capture.width,
-            height: capture.height,
-            groups: capture.groups,
-        };
-        let mut snapshots = self.visual_snapshots.lock().await;
-        let now = chrono::Utc::now();
-        snapshots.retain(|_, value| {
-            value.expires_at > now
-                && (value.session_id != session_id || value.workspace_id != request.workspace_id)
-        });
-        snapshots.insert(token, state);
-        Ok(VisualPreviewResponse {
-            snapshot_token: token,
-            expires_at,
-            image_data_url: format!("data:image/png;base64,{}", BASE64.encode(capture.png)),
-            width: capture.width,
-            height: capture.height,
-            groups,
-        })
-    }
-    async fn visual_select(
-        &self,
-        session_id: uuid::Uuid,
-        request: &VisualSelectionRequest,
-    ) -> Result<VisualSelectionResponse, String> {
-        if !request.x.is_finite() || !request.y.is_finite() || request.x < 0.0 || request.y < 0.0 {
-            return Err("invalid visual selection coordinates".into());
-        }
-        let mut snapshots = self.visual_snapshots.lock().await;
-        snapshots.retain(|_, value| value.expires_at > chrono::Utc::now());
-        let snapshot = snapshots
-            .get(&request.snapshot_token)
-            .ok_or_else(|| "visual_snapshot_stale".to_owned())?;
-        if snapshot.session_id != session_id || snapshot.workspace_id != request.workspace_id {
-            return Err("visual_snapshot_stale".into());
-        }
-        if request.x > f64::from(snapshot.width) || request.y > f64::from(snapshot.height) {
-            return Err("visual selection is outside the snapshot".into());
-        }
-        let selected = select_visual_group(snapshot, request.x, request.y)?;
-        snapshots.remove(&request.snapshot_token);
-        Ok(selected)
-    }
-}
-
-fn select_visual_group(
-    snapshot: &VisualSnapshotState,
-    x: f64,
-    y: f64,
-) -> Result<VisualSelectionResponse, String> {
-    let group = snapshot
-        .groups
-        .iter()
-        .filter(|group| {
-            group.boxes.iter().any(|rect| {
-                x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height
-            })
-        })
-        .min_by(|left, right| {
-            let left_area = left
-                .boxes
-                .iter()
-                .filter(|r| x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height)
-                .map(|r| r.width * r.height)
-                .fold(f64::INFINITY, f64::min);
-            let right_area = right
-                .boxes
-                .iter()
-                .filter(|r| x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height)
-                .map(|r| r.width * r.height)
-                .fold(f64::INFINITY, f64::min);
-            left_area.total_cmp(&right_area)
-        })
-        .ok_or_else(|| "no repeated item group at the selected coordinates".to_owned())?;
-    WebSelector::new(SelectorLanguage::Css, group.selector.clone()).map_err(|e| e.to_string())?;
-    Ok(VisualSelectionResponse {
-        selector: SelectorDraft {
-            language: "css".into(),
-            expression: group.selector.clone(),
-        },
-        count: group.boxes.len(),
-        similar_items: group
-            .boxes
-            .iter()
-            .map(|rect| VisualRectView {
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-            })
-            .collect(),
-    })
-}
-
-fn auth_policy(config: &Config) -> Result<AuthPolicy, reader_application::AuthError> {
-    Ok(AuthPolicy {
-        session_lifetime_seconds: config.auth.session_lifetime_seconds,
-        invite_lifetime_seconds: config.auth.invite_lifetime_seconds,
-        reset_lifetime_seconds: config.auth.reset_lifetime_seconds,
-        argon2id: Argon2idPolicy::new(
-            config.auth.argon2id_memory_kib,
-            config.auth.argon2id_time_cost,
-            config.auth.argon2id_parallelism,
-        )?,
-    })
-}
-
-async fn serve_ui(uri: Uri) -> Response<Body> {
-    match ui_asset(uri.path()) {
-        Some(asset) => Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, asset.content_type)
-            .header(header::CACHE_CONTROL, reader_server_ui::cache_control(asset))
-            .header("content-security-policy", "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; connect-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'")
-            .header("x-content-type-options", "nosniff")
-            .header("referrer-policy", "strict-origin-when-cross-origin")
-            .body(Body::from(asset.bytes))
-            .expect("static response headers are valid"),
-        None => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(r#"{"code":"not_found","message":"resource not found"}"#))
-            .expect("static not-found response is valid"),
-    }
-}
-
-fn ui_asset(path: &str) -> Option<reader_server_ui::Asset> {
-    reader_server_ui::asset(path).or_else(|| {
-        (!path.starts_with("/api/") && !path.rsplit('/').next().unwrap_or_default().contains('.'))
-            .then(|| reader_server_ui::asset("/index.html"))
-            .flatten()
-    })
 }
 
 #[cfg(test)]

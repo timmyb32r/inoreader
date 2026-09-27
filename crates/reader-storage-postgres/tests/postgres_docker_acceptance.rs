@@ -19,6 +19,8 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/schema_contracts.rs"]
+mod schema_contracts;
 #[path = "support/schema_upgrade.rs"]
 mod schema_upgrade;
 
@@ -167,6 +169,8 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
 
     read_projection::verify(&pool).await;
     schema_upgrade::verify(&pool).await;
+    schema_contracts::verify(&pool).await;
+    schema_contracts::upgrade_roundtrip(&pool).await;
 
     let oversized_key = "x".repeat(20_000);
     sqlx::query(
@@ -199,7 +203,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 47); // Includes channel raw events and glossary projections.
+    assert_eq!(table_count, 48); // Includes channel raw events and glossary projections.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",

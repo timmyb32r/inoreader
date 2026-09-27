@@ -90,7 +90,7 @@ impl PostgresAiStore {
             return Err(AiError::Configuration);
         }
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        let expired: Vec<Row> = sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE status='generating' AND lease_until<now() FOR UPDATE SKIP LOCKED")
+        let expired: Vec<Row> = sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE status='generating' AND lease_until<now() ORDER BY lease_until,id LIMIT $1 FOR UPDATE SKIP LOCKED").bind(i64::from(self.recovery_batch.get()))
             .fetch_all(&mut *tx).await.map_err(storage)?;
         for row in expired {
             let id = row.0;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { ApiClient, ArticlePage, Bootstrap } from "../api/client";
-import type { Article, Subscription } from "./data";
+import type { Article, Subscription } from "../api/viewModels";
 import {
   readArticlePagePosition,
   writeArticlePagePosition,

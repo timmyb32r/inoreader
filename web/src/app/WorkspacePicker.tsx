@@ -1,6 +1,6 @@
 import { useState } from "preact/hooks";
 import { Icon } from "../ui/Icon";
-import type { Workspace } from "./data";
+import type { Workspace } from "../api/viewModels";
 export function WorkspacePicker({
   value,
   workspaces,

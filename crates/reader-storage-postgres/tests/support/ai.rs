@@ -93,6 +93,7 @@ impl AiProvider for Provider {
 pub(super) fn policy(owner: Uuid) -> AiPolicy {
     AiPolicy::new(
         AiConfig {
+            recovery_batch: 2,
             prompt_approved: true,
             prompt_path: "test".into(),
             prompt_version: "test-v1".into(),
@@ -184,7 +185,11 @@ pub async fn verify(pool: &PgPool) {
     let reader = Arc::new(
         PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap(),
     );
-    let store = Arc::new(PostgresAiStore::new(pool.clone(), reader.clone()));
+    let store = Arc::new(PostgresAiStore::new(
+        pool.clone(),
+        reader.clone(),
+        std::num::NonZeroU32::new(2).unwrap(),
+    ));
     let owner = AccountId::new();
     let other = AccountId::new();
     let workspace = Workspace::new(WorkspaceId::new(), owner, "AI owner".into());
@@ -368,7 +373,11 @@ pub async fn verify(pool: &PgPool) {
         .await
         .unwrap();
     assert!(store.claim(5).await.unwrap().is_none());
-    let resumed_store = PostgresAiStore::new(pool.clone(), reader.clone());
+    let resumed_store = PostgresAiStore::new(
+        pool.clone(),
+        reader.clone(),
+        std::num::NonZeroU32::new(2).unwrap(),
+    );
     let interrupted = resumed_store.chat(owner, id).await.unwrap();
     assert_eq!(interrupted.view.status, ChatStatus::Interrupted);
     assert_eq!(
@@ -522,7 +531,7 @@ pub async fn verify(pool: &PgPool) {
         .await
         .unwrap();
     let html = "<p>Exact source 12.5%.</p>";
-    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(source_record.as_uuid().to_string()).bind(refresh.to_string()).bind(serde_json::to_string(html.as_bytes()).unwrap()).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(source_record.as_uuid().to_string()).bind(refresh.to_string()).bind(html.as_bytes()).execute(pool).await.unwrap();
     let ArticleInput::Ready(snapshot) = store.article_input(owner, ws, a).await.unwrap() else {
         panic!("ready manifest must produce full snapshot")
     };

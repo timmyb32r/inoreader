@@ -43,15 +43,19 @@ it("shows the first complete summary while checking and replaces it with the che
       if (path.includes("/articles/"))
         return [pending("generating")] as unknown as ResponseValue<C>;
       reads++;
-      return (reads === 1
-        ? pending("verifying")
-        : {
-            ...saved(),
-            providerCalls: [
-              call("generating", "completed"),
-              call("verifying", "completed"),
-            ],
-          }) as unknown as ResponseValue<C>;
+      return {
+        revision: String(reads),
+        chat:
+          reads === 1
+            ? pending("verifying")
+            : {
+                ...saved(),
+                providerCalls: [
+                  call("generating", "completed"),
+                  call("verifying", "completed"),
+                ],
+              },
+      } as unknown as ResponseValue<C>;
     };
     render(<Harness client={new AiClient(transport)} />);
     await act(async () => {

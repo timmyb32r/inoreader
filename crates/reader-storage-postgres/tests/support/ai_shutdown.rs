@@ -79,7 +79,11 @@ pub async fn child(connection: &str, marker: PathBuf) {
         .save_article(workspace.id(), None, article.clone())
         .await
         .unwrap();
-    let store = Arc::new(PostgresAiStore::new(pool, reader));
+    let store = Arc::new(PostgresAiStore::new(
+        pool,
+        reader,
+        std::num::NonZeroU32::new(2).unwrap(),
+    ));
     let op = Uuid::new_v4();
     let initial = record(
         owner.as_uuid(),

@@ -229,3 +229,14 @@ fn stop_budgets_cover_both_paid_phases_and_container_never_preempts_drain() {
         .validate_container_stop_budget(value.server.graceful_shutdown_seconds + 1)
         .unwrap();
 }
+
+#[test]
+fn recovery_batch_is_required_in_raw_configuration() {
+    let mut raw: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    raw["ai"]
+        .as_mapping_mut()
+        .unwrap()
+        .remove(serde_yaml::Value::String("recovery_batch".into()));
+    assert!(serde_yaml::from_value::<Config>(raw).is_err());
+}

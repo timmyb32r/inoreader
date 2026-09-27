@@ -12,6 +12,7 @@ FROM rust:1.96-bookworm AS rust
 WORKDIR /src
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
+COPY tools/upgrade_binary_content.sql tools/upgrade_binary_content.sql
 COPY prompts/reading-data-news/transport.md prompts/reading-data-news/transport.md
 COPY prompts/reading-data-news/definitions/ prompts/reading-data-news/definitions/
 COPY --from=ui /src/web/dist web/dist

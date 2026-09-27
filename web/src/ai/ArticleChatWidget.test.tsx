@@ -343,10 +343,13 @@ it("polls only an active visible conversation and reconnects without a paid requ
           { ...saved(), status: "generating" },
         ] as unknown as ResponseValue<C>;
       reads += 1;
-      return {
+      const chat = {
         ...saved(),
         status: reads > 1 ? "completed" : "generating",
-      } as unknown as ResponseValue<C>;
+      };
+      return (path.includes("/changes")
+        ? { revision: String(reads), chat }
+        : chat) as unknown as ResponseValue<C>;
     };
     render(<Harness client={new AiClient(transport)} />);
     await act(async () => {

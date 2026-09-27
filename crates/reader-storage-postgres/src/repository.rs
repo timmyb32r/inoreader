@@ -49,7 +49,7 @@ impl PostgresRepository {
         let pool = PgPool::connect_with(crate::instrument_postgres(options))
             .await
             .map_err(storage)?;
-        crate::prepare_schema(&pool).await.map_err(storage)?;
+        crate::verify_schema(&pool).await.map_err(storage)?;
         Self::new(pool, reason_policy, initial_scope)
     }
     pub fn new(

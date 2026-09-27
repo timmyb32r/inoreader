@@ -83,8 +83,12 @@ pub async fn service(
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(record.as_uuid().to_string()).bind(refresh.to_string()).bind(serde_json::to_string(b"<p>Exact source text</p>".as_slice()).unwrap()).execute(pool).await.unwrap();
-    let store = Arc::new(PostgresAiStore::new(pool.clone(), repository));
+    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(record.as_uuid().to_string()).bind(refresh.to_string()).bind(b"<p>Exact source text</p>".as_slice()).execute(pool).await.unwrap();
+    let store = Arc::new(PostgresAiStore::new(
+        pool.clone(),
+        repository,
+        std::num::NonZeroU32::new(2).unwrap(),
+    ));
     let service = Arc::new(AiService::new(
         store,
         Arc::new(BrowserProvider(AtomicUsize::new(0))),

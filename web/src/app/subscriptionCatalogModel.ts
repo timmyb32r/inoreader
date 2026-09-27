@@ -1,4 +1,4 @@
-import type { Subscription } from "./data";
+import type { Subscription } from "../api/viewModels";
 export type CatalogView = "current" | "attention" | "archived";
 export type SortDirection = "asc" | "desc";
 export type Column =

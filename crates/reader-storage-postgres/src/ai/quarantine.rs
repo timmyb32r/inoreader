@@ -42,3 +42,18 @@ pub(super) async fn definitions(
     log::error!("ai_record_invalid class=definitions operation_id={id} action=quarantined_original_retained");
     Ok(())
 }
+
+pub(super) async fn translation(
+    tx: &mut Transaction<'_, Postgres>,
+    id: Uuid,
+) -> Result<(), AiError> {
+    sqlx::query(
+        "UPDATE ai_translations SET status='quarantined',lease=NULL,lease_until=NULL WHERE id=$1",
+    )
+    .bind(id)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
+    log::error!("ai_record_invalid class=translation operation_id={id} action=quarantined_original_retained");
+    Ok(())
+}

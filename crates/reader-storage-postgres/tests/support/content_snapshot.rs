@@ -46,7 +46,7 @@ pub async fn verify(
         .execute(&mut *write)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(&record_id).bind(replacement.refresh_id.to_string()).bind(serde_json::to_string(b"<p>Replacement 99%.</p>".as_slice()).unwrap()).execute(&mut *write).await.unwrap();
+    sqlx::query("INSERT INTO staged_content_chunks(record_id,refresh_id,representation,ordinal,bytes) VALUES($1,$2,'safe',0,$3)").bind(&record_id).bind(replacement.refresh_id.to_string()).bind(b"<p>Replacement 99%.</p>".as_slice()).execute(&mut *write).await.unwrap();
     write.commit().await.unwrap();
     barrier.commit().await.unwrap();
     let ArticleInput::Ready(snapshot) = reading.await.unwrap().unwrap() else {
@@ -77,7 +77,7 @@ pub async fn verify(
     sqlx::query("UPDATE staged_content_chunks SET refresh_id=$2,bytes=$3 WHERE record_id=$1")
         .bind(record_id)
         .bind(pointer.refresh_id.to_string())
-        .bind(serde_json::to_string(b"<p>Exact source 12.5%.</p>".as_slice()).unwrap())
+        .bind(b"<p>Exact source 12.5%.</p>".as_slice())
         .execute(&mut *restore)
         .await
         .unwrap();

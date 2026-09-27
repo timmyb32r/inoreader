@@ -47,6 +47,8 @@ def main() -> int:
     ):
         if expected not in compose:
             failures.append(f"Compose lacks the DeepSeek deployment contract {expected!r}")
+    if "COPY tools/upgrade_binary_content.sql tools/upgrade_binary_content.sql" not in dockerfile:
+        failures.append("Rust image build must include the explicit embedded schema upgrade")
     if "COPY prompts/reading-data-news/transport.md prompts/reading-data-news/transport.md" not in dockerfile:
         failures.append("Rust image build must include the embedded DeepSeek transport instruction")
     if "secrets" not in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines():

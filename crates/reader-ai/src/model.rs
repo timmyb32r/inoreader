@@ -168,6 +168,15 @@ pub struct ArticleChat {
     pub error: Option<String>,
 }
 
+/// Revision is an opaque decimal string: no JavaScript precision loss. A missing
+/// chat means unchanged relative to the caller's revision, never missing ownership.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatPoll {
+    pub revision: String,
+    pub chat: Option<ArticleChat>,
+}
+
 /// Private persistent record. The source and prompt are retained verbatim for
 /// every conversation version, independently of content-chunk garbage collection.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -463,6 +472,18 @@ pub trait AiStore: Send + Sync {
         workspace: Uuid,
         article: Uuid,
     ) -> Result<Vec<ChatRecord>, AiError>;
+    async fn public_chats(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Vec<ArticleChat>, AiError>;
+    async fn public_chat(
+        &self,
+        owner: Uuid,
+        id: Uuid,
+        after: Option<&str>,
+    ) -> Result<ChatPoll, AiError>;
     async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ChatRecord, AiError>;
     async fn append(
         &self,

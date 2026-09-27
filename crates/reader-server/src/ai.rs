@@ -16,6 +16,7 @@ pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
         .route("/api/articles/{id}/chat", post(start::<R>))
         .route("/api/articles/{id}/chats", get(versions::<R>))
         .route("/api/ai/chats/{id}", get(chat::<R>))
+        .route("/api/ai/chats/{id}/changes", get(poll_chat::<R>))
         .route("/api/ai/chats/{id}/messages", post(message::<R>))
         .route("/api/ai/chats/{id}/retry", post(retry::<R>))
         .route("/api/ai/chats/{id}/stop", post(stop::<R>))
@@ -123,6 +124,24 @@ async fn chat<R: ReaderRepository + 'static>(
 ) -> Result<Json<ArticleChat>, ApiFailure> {
     let owner = auth(&s, &headers).await?.account.id.as_uuid();
     Ok(Json(service(&s)?.chat(owner, id).await?))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PollQuery {
+    after: Option<String>,
+}
+async fn poll_chat<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<PollQuery>,
+) -> Result<Json<reader_ai::ChatPoll>, ApiFailure> {
+    let owner = auth(&s, &headers).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .poll_chat(owner, id, query.after.as_deref())
+            .await?,
+    ))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

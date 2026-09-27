@@ -100,6 +100,7 @@ ai:
   poll_milliseconds: 500
   # One claim covers draft and verification; must exceed both request deadlines.
   lease_seconds: 660
+  recovery_batch: 32
   # Peak-price estimate; off-peak billing can be lower. Verified 2026-09-27.
   input_usd_per_million_tokens: "0.3"
   cached_input_usd_per_million_tokens: "0.006"

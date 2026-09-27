@@ -254,7 +254,7 @@ fn worker(
         fetcher.clone(),
         fetcher,
         Arc::new(BrowserStub(browser)),
-        IngestLimits::new(initial, 2, 4).unwrap(),
+        IngestLimits::new(initial, 2, 4, 1_000_000, 1_000_000).unwrap(),
         Duration::seconds(30),
     )
     .unwrap()
@@ -538,7 +538,7 @@ async fn web_feed_initial_depth_is_marked_incomplete_and_refresh_uses_browser_pa
         fetcher.clone(),
         fetcher,
         Arc::new(BrowserRecords(records)),
-        IngestLimits::new(1, 2, 4).unwrap(),
+        IngestLimits::new(1, 2, 4, 1_000_000, 1_000_000).unwrap(),
         Duration::seconds(30),
     )
     .unwrap();

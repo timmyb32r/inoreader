@@ -38,10 +38,19 @@ ALLOWED: dict[str, set[str]] = {
 def internal_dependencies(manifest: Path) -> set[str]:
     document = tomllib.loads(manifest.read_text(encoding="utf-8"))
     result: set[str] = set()
-    for section in ("dependencies", "build-dependencies"):
-        for name, value in document.get(section, {}).items():
-            if name in ALLOWED and isinstance(value, dict) and "path" in value:
-                result.add(name)
+    root_manifest = manifest.parent.parent.parent / "Cargo.toml"
+    workspace = tomllib.loads(root_manifest.read_text(encoding="utf-8")).get("workspace", {}).get("dependencies", {}) if root_manifest.exists() else {}
+    # Resolve Cargo package identity, including renamed, inherited and cfg edges.
+    # Dev dependencies are test-only seams, not production architecture edges.
+    groups = [document, *document.get("target", {}).values()]
+    for group in groups:
+        for section in ("dependencies", "build-dependencies"):
+            for alias, value in group.get(section, {}).items():
+                if isinstance(value, dict) and value.get("workspace"):
+                    value = workspace.get(alias, {})
+                package = value.get("package", alias) if isinstance(value, dict) else alias
+                if package in ALLOWED:
+                    result.add(package)
     return result
 
 

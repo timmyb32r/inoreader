@@ -11,6 +11,7 @@ pub async fn verify(
     let mut value = record(owner, workspace, article, op);
     value.operations[0].kind = OperationKind::Start { regenerate: true };
     value.operations[0].task = AttemptTask::Reply;
+    value.view.messages[0].purpose = Some(MessagePurpose::Chat);
     let source = (0..5000)
         .map(|_| Uuid::new_v4().to_string())
         .collect::<Vec<_>>()
@@ -25,11 +26,26 @@ pub async fn verify(
         .unwrap();
     // Poison at the head of both queued and expired work must be retained but
     // must not prevent the valid paid operation behind it from being claimed.
-    for expired in [false, true] {
+    for (expired, bad_draft) in [(false, false), (true, false), (true, true)] {
         let bad = Uuid::new_v4();
-        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,scheduled_at,status,document,inputs,lease,lease_until) VALUES($1,$2,$3,$4,now()-interval '1 day',now()-interval '1 day',$5,'broken original',$6,$7,$8)")
+        let original = if bad_draft {
+            let raw: String = sqlx::query_scalar("SELECT document FROM ai_chats WHERE id=$1")
+                .bind(chat.view.id)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+            let mut raw: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            raw["view"]["id"] = serde_json::json!(bad);
+            raw["view"]["messages"][0]["purpose"] = serde_json::json!("summary");
+            raw["operations"][0]["task"] =
+                serde_json::json!({"Summary":{"draft":"invalid retained draft"}});
+            raw.to_string()
+        } else {
+            "broken original".into()
+        };
+        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,scheduled_at,status,document,inputs,lease,lease_until,public_view) VALUES($1,$2,$3,$4,now()-interval '1 day',now()-interval '1 day',$5,$9,$6,$7,$8,'broken public')")
             .bind(bad).bind(owner).bind(workspace).bind(article).bind(if expired {"generating"} else {"queued"})
-            .bind(&pinned).bind(expired.then(Uuid::new_v4)).bind(expired.then(|| Utc::now()-chrono::Duration::minutes(1)))
+            .bind(&pinned).bind(expired.then(Uuid::new_v4)).bind(expired.then(|| Utc::now()-chrono::Duration::minutes(1))).bind(&original)
             .execute(pool).await.unwrap();
         if !expired {
             assert!(store.claim(60).await.unwrap().is_none());
@@ -55,7 +71,7 @@ pub async fn verify(
                 .await
                 .unwrap();
         assert_eq!(status, "quarantined");
-        assert_eq!(raw, "broken original");
+        assert_eq!(raw, original);
     }
     let claim = store.claim(60).await.unwrap().unwrap();
     assert_eq!(claim.record.view.id, chat.view.id);
@@ -100,6 +116,83 @@ pub async fn verify(
             .text,
         value.snapshot.as_ref().unwrap().text
     );
+    let first = store.public_chat(owner, chat.view.id, None).await.unwrap();
+    assert_eq!(first.chat.unwrap().messages[0].content, "Progress 19");
+    assert!(store
+        .public_chat(owner, chat.view.id, Some(&first.revision))
+        .await
+        .unwrap()
+        .chat
+        .is_none());
+    assert!(matches!(
+        store
+            .public_chat(Uuid::new_v4(), chat.view.id, Some(&first.revision))
+            .await,
+        Err(AiError::NotFound)
+    ));
+    // Quarantine is a visible failure even if a previously valid public cache
+    // remains and the caller sends the unchanged revision. Accounting cannot revive it.
+    sqlx::query("UPDATE ai_chats SET status='quarantined' WHERE id=$1")
+        .bind(chat.view.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        store
+            .public_chat(owner, chat.view.id, Some(&first.revision))
+            .await,
+        Err(AiError::Storage)
+    ));
+    assert!(matches!(
+        store
+            .update_claim(
+                &claim,
+                ChatStatus::Generating,
+                Some("forbidden"),
+                None,
+                None
+            )
+            .await,
+        Err(AiError::Storage)
+    ));
+    sqlx::query("UPDATE ai_chats SET status='generating' WHERE id=$1")
+        .bind(chat.view.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    // Once a worker has loaded its immutable input, reads and progress must not
+    // select/decode that column again. Corruption remains visible to execution reads.
+    sqlx::query("UPDATE ai_chats SET inputs='invalid fixture input' WHERE id=$1")
+        .bind(chat.view.id)
+        .execute(pool)
+        .await
+        .unwrap();
+    store
+        .update_claim(
+            &claim,
+            ChatStatus::Generating,
+            Some("Progress without reloading inputs"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let changed = store
+        .public_chat(owner, chat.view.id, Some(&first.revision))
+        .await
+        .unwrap();
+    assert_ne!(changed.revision, first.revision);
+    assert_eq!(
+        changed.chat.unwrap().messages[0].content,
+        "Progress without reloading inputs"
+    );
+    assert!(store.chat(owner, chat.view.id).await.is_err());
+    sqlx::query("UPDATE ai_chats SET inputs=$2 WHERE id=$1")
+        .bind(chat.view.id)
+        .bind(&pinned)
+        .execute(pool)
+        .await
+        .unwrap();
     sqlx::query("CREATE TABLE ai_write_baseline(document TEXT NOT NULL)")
         .execute(pool)
         .await

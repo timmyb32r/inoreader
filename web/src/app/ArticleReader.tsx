@@ -5,7 +5,7 @@ import { ParagraphReader } from "../translation/ParagraphReader";
 import { AsyncButton } from "../ui/AsyncButton";
 import { Icon, type IconName } from "../ui/Icon";
 import { formatArticleDate } from "../ui/formatArticleDate";
-import type { Article } from "./data";
+import type { Article } from "../api/viewModels";
 
 export function ArticleReader({
   article,
