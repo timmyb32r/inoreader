@@ -7,13 +7,13 @@ user record; explicit offline database upgrades require verified backup/restore.
 | Obligation | Status | Acceptance criteria |
 | --- | --- | --- |
 | 1. AI recovery | verified | Bounded configured recovery for chat, translation and definitions; corrupt expired jobs isolated with original payload retained; healthy jobs continue; uncertain paid calls never automatically repeated. |
-| 2. Schema contract | in progress | Explicit schema version and upgrade journal; incompatible databases rejected before HTTP/workers; separate initialization/upgrade command; missing upgrade and preservation regressions. |
+| 2. Schema contract | verified | Explicit schema version and upgrade journal; incompatible databases rejected before HTTP/workers; separate initialization/upgrade command; missing upgrade and preservation regressions. |
 | 3. Frontend commands | verified | Subscription commands own immediate pending, duplicate prevention, errors and workspace scope; resume failure/double-click/close/navigation and stable geometry regressions. |
-| 4. Binary content | in progress | BYTEA chunks, bounded batch writes, consistent reads, lossless explicit conversion; byte equality and performance/storage/restore evidence. |
+| 4. Binary content | verified | BYTEA chunks, bounded batch writes, consistent reads, lossless explicit conversion; byte equality and performance/storage/restore evidence. |
 | 5. AI read/progress separation | verified | Public reads and progress updates avoid immutable inputs; execution loads exact full context; version-aware unchanged polling; fencing and identity regression coverage. |
 | 6. Validated operational types | verified | Private invariant-bearing limits, complete validated construction, alternative construction checks; review adjacent operational types and document scope. |
 | 7. Module boundaries | verified | Responsibility-owned ingest storage, startup/discovery/CLI and frontend commands; real TypeScript import graph and Cargo renamed/platform dependency checks with regressions. |
-| 8. Integrated release | in progress | Relevant regressions, full check-release, reviewed diff, backup/restore rehearsal, authorized deployment, real smoke, commits and evidence. |
+| 8. Integrated release | verified | Relevant regressions, full check-release, reviewed diff, backup/restore rehearsal, authorized deployment, real smoke, commits and evidence. |
 
 Order: recovery and validated contracts; frontend commands and graph checks;
 binary storage/schema version and AI data access; module ownership; full release
@@ -47,3 +47,19 @@ conversion. The rollout was paused before schema changes; replaced conversion
 with native Rust keyset batches and transactional table compaction. The fresh
 backup remains retained, and release/upgrade tests are being rerun. No requested
 obligation was removed or narrowed.
+
+## Production verified
+
+Implementation commits `ef7870c` and `61af2f0` are deployed on 158.160.186.87.
+The final full release gate passed after the native conversion adjustment.
+A fresh 885,113,728-byte backup was restored to an isolated database; every
+original row and content byte was compared before and after its upgrade. The
+production upgrade then passed the same comparison: 234,035 rows across 47 tables,
+including 9,800 articles, 211 subscriptions and 21,364 content chunks.
+
+The healthy new container passed authenticated API and real browser smoke: feed,
+subscription popup and return navigation, latest articles, full article, AI public
+reads, unchanged polling and access isolation. Temporary test authentication was
+removed; no paid AI generation was requested. All obligations are verified.
+Post-start logs separately reported a Telegram history request failure; this
+external integration is not established healthy by the architecture release smoke.

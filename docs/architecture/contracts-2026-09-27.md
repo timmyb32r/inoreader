@@ -89,3 +89,34 @@ ten local reads measured about 263 ms versus 14 ms. Twenty progress writes with 
 full-input write baseline. These are repeatable local fixtures, not production SLAs.
 Browser regressions compare control rectangles through pending and failed commands
 and assert immediate busy feedback and duplicate suppression.
+
+## Production rollout — 2026-09-27
+
+Deployed implementation commits `ef7870c` and `61af2f0` to 158.160.186.87.
+Image: `sha256:229ecb0e14c976e039765c3d5fb14f963c9edfe77e43f5453bc10dd23ae9dcf4`.
+
+The complete release gate passed: 218 Rust/acceptance tests, 157 frontend tests,
+42 browser scenarios and 16 Python tests, plus formatting, Clippy, contracts,
+architecture checks and build. A fresh 885,113,728-byte PostgreSQL backup was
+restored and compared with the stopped application's original database. The
+restored upgrade and production upgrade each preserved all original columns,
+234,035 rows across 47 tables, and every content byte. New schema/projection
+columns were validated separately. Backup and restore rehearsal database remain
+on the server under the private operator rollout directory.
+
+Native schema upgrade took 147.84 seconds on the restored copy and 154.63 seconds
+on production; these exclude backup and exhaustive comparison time. Logical
+chunk payload decreased from 9,706,205,232 to 2,766,911,157 bytes. Physical chunk
+relation including indexes/TOAST decreased from 1,736,261,632 to 929,325,056 bytes
+(46.5%). No article content was truncated or rewritten.
+
+Production smoke passed readiness, authentication and workspace isolation,
+bounded 50-article bootstrap, subscriptions, article/translation/definition/chat
+reads, AI profile, glossary read, popup return navigation and latest-article links.
+Three existing chats passed revision-aware polling; unchanged responses were
+28 bytes. Chromium reported zero page errors. The temporary session was deleted;
+this smoke did not make paid provider calls.
+
+Post-start logs contained a Telegram history request failure. The release smoke
+checks glossary reads, not successful live Telegram ingestion, and does not claim
+that external dependency is healthy. Schema and application startup passed.
