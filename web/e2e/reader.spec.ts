@@ -2,23 +2,45 @@ import { expect, test } from "@playwright/test";
 
 test("reader navigation and article states", async ({ page }) => {
   await page.goto("/reader");
-  await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
-  await page.getByRole("heading", { name: "The durable queue is the product", level: 2 }).click();
-  await expect(page.getByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /^Feed \(\d+\)$/ }),
+  ).toBeVisible();
+  await page
+    .getByRole("heading", {
+      name: "The durable queue is the product",
+      level: 2,
+    })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "The durable queue is the product",
+      level: 1,
+    }),
+  ).toBeVisible();
   const reader = page.getByRole("article", { name: "Article reader" });
   await reader.getByRole("button", { name: "Read later" }).click();
-  await expect(reader.getByRole("button", { name: "Remove from later" })).toBeVisible();
+  await expect(
+    reader.getByRole("button", { name: "Remove from later" }),
+  ).toBeVisible();
 });
 
-test("pause validates reason without moving the dialog footer", async ({ page }) => {
+test("pause validates reason without moving the dialog footer", async ({
+  page,
+}) => {
   await page.goto("/reader");
-  await page.getByRole("navigation", { name: "Subscriptions" }).getByRole("button", { name: /This Week in Rust/ }).click();
+  await page
+    .getByRole("navigation", { name: "Subscriptions" })
+    .getByRole("button", { name: /This Week in Rust/ })
+    .click();
   await page.getByRole("button", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Pause This Week in Rust" }).click();
   const submit = page.getByRole("button", { name: "Pause subscription" });
   const before = await submit.boundingBox();
-  await page.getByLabel(/Reason/).focus(); await page.getByLabel(/Reason/).blur();
-  await expect(page.getByText("Enter a reason before continuing.")).toBeVisible();
+  await page.getByLabel(/Reason/).focus();
+  await page.getByLabel(/Reason/).blur();
+  await expect(
+    page.getByText("Enter a reason before continuing."),
+  ).toBeVisible();
   expect(await submit.boundingBox()).toEqual(before);
   await page.getByLabel(/Reason/).fill("Reading backlog first");
   await submit.click();
@@ -30,15 +52,29 @@ test("theme and responsive panels remain usable", async ({ page }) => {
   await page.goto("/reader");
   await page.getByRole("button", { name: "Use dark theme" }).click();
   await expect(page.locator(".app")).toHaveAttribute("data-theme", "dark");
-  await page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 }).click();
-  await expect(page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 })).toBeVisible();
+  await page
+    .getByRole("heading", {
+      name: "Async Rust without the hidden machinery",
+      level: 2,
+    })
+    .click();
+  await expect(
+    page.getByRole("heading", {
+      name: "Async Rust without the hidden machinery",
+      level: 1,
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Back to articles" }).click();
-  await expect(page.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /^Feed \(\d+\)$/ }),
+  ).toBeVisible();
 });
 
 test("search is an inert placeholder", async ({ page }) => {
   await page.goto("/reader");
-  await expect(page.getByRole("button", { name: /Search/ }).first()).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: /Search/ }).first(),
+  ).toBeDisabled();
   await expect(page.getByRole("searchbox")).toHaveCount(0);
   await expect(page).not.toHaveURL(/search/);
 });

@@ -616,7 +616,7 @@ async fn provider_rejects_bad_key_and_absent_usage_without_retry() {
     ));
 }
 
-fn translation_config() -> AiConfig {
+pub(super) fn translation_config() -> AiConfig {
     AiConfig {
         prompt_approved: true,
         prompt_path: "test".into(),
@@ -658,13 +658,15 @@ async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source
     let payload = serde_json::json!({"translation":"Диск.","words":[{"source":"磁盘","pinyin":"cípán","translation":"диск"}]});
     let response = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":payload.to_string()}}],"usage":{"prompt_tokens":10,"completion_tokens":20,"prompt_cache_hit_tokens":2,"prompt_cache_miss_tokens":8}});
     let (adapter, requests) = provider(response.to_string(), StatusCode::OK);
-    let (result, usage) = adapter
+    let reply = adapter
         .translate(
             "test-key",
             TranslationInput::new(&config, "磁盘。").unwrap(),
         )
         .await
         .unwrap();
+    let result = reply.translation_result("磁盘。").unwrap();
+    let usage = reply.usage().unwrap();
     assert_eq!(result.source(), "磁盘。");
     assert_eq!(usage.completion_tokens, 20);
     {
@@ -687,7 +689,9 @@ async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source
                 "test-key",
                 TranslationInput::new(&config, "磁盘。").unwrap()
             )
-            .await,
+            .await
+            .unwrap()
+            .translation_result("磁盘。"),
         Err(AiError::RateLimit)
     ));
     let (adapter, _) = provider(response.to_string(), StatusCode::OK);
@@ -697,7 +701,9 @@ async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source
                 "test-key",
                 TranslationInput::new(&config, "另一个段落").unwrap()
             )
-            .await,
+            .await
+            .unwrap()
+            .translation_result("另一个段落"),
         Err(AiError::Translation(_))
     ));
     let mut truncated = response.clone();
@@ -709,7 +715,9 @@ async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source
                 "test-key",
                 TranslationInput::new(&config, "磁盘。").unwrap()
             )
-            .await,
+            .await
+            .unwrap()
+            .translation_result("磁盘。"),
         Err(AiError::Context)
     ));
 }
@@ -756,7 +764,10 @@ async fn glossary_uses_one_non_thinking_flash_request_and_retains_rejected_paylo
         .await
         .unwrap();
     assert_eq!(reply.body, raw.as_bytes());
-    assert_eq!(reply.result(&snapshot).unwrap().entities.len(), 6);
+    assert_eq!(
+        reply.definition_result(&snapshot).unwrap().entities.len(),
+        6
+    );
     assert!(reply.usage().is_some());
     let requests = requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
@@ -785,12 +796,12 @@ async fn glossary_uses_one_non_thinking_flash_request_and_retains_rejected_paylo
             .entities
             .is_empty()
     );
-    let partial = DefinitionReply {
+    let partial = ProviderReply {
         status: 200,
         body: raw.as_bytes().to_vec(),
         interrupted: true,
     };
-    assert!(partial.result(&snapshot).is_err());
+    assert!(partial.definition_result(&snapshot).is_err());
     assert_eq!(partial.body, raw.as_bytes());
 }
 

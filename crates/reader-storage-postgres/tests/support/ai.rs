@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use reader_ai::*;
-use reader_application::ReaderRepository;
+use reader_application::{ArticleRepository, SubscriptionRepository, WorkspaceRepository};
 use reader_core::*;
 use reader_storage_postgres::{PostgresAiStore, PostgresRepository};
 use sqlx::PgPool;
@@ -25,14 +25,10 @@ struct Provider {
 }
 #[async_trait]
 impl AiProvider for Provider {
-    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<DefinitionReply, AiError> {
+    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<ProviderReply, AiError> {
         Err(AiError::Unavailable)
     }
-    async fn translate(
-        &self,
-        _: &str,
-        _: TranslationInput,
-    ) -> Result<(ParagraphTranslation, Usage), AiError> {
+    async fn translate(&self, _: &str, _: TranslationInput) -> Result<ProviderReply, AiError> {
         Err(AiError::Unavailable)
     }
     async fn balance(&self, key: &str) -> Result<Balance, AiError> {

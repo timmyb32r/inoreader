@@ -2,17 +2,17 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReasonCommand {
     pub reason: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct MarkReadCommand {
     pub workspace_id: Uuid,
     pub read: bool,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceView {
     pub id: Uuid,
@@ -21,7 +21,7 @@ pub struct WorkspaceView {
     pub archive_reason: Option<String>,
     pub archive_reason_at: Option<DateTime<Utc>>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionView {
     pub id: Uuid,
@@ -31,11 +31,11 @@ pub struct SubscriptionView {
     pub personal_note: String,
     pub source_url: String,
     pub icon_data_url: Option<String>,
-    pub source_type: String,
+    pub source_type: SourceTypeView,
     pub created_at: Option<DateTime<Utc>>,
     pub count: usize,
     pub unread_count: usize,
-    pub status: String,
+    pub status: SubscriptionStatusView,
     pub last_update: Option<DateTime<Utc>>,
     pub last_error_at: Option<DateTime<Utc>>,
     pub consecutive_failures: u32,
@@ -48,7 +48,7 @@ pub struct SubscriptionView {
     pub reason: Option<String>,
     pub reason_at: Option<DateTime<Utc>>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticleView {
     pub id: Uuid,
@@ -64,105 +64,105 @@ pub struct ArticleView {
     pub age: String,
     pub read: bool,
     pub later: bool,
-    pub full_text: String,
+    pub full_text: FullTextStatus,
     pub full_text_reason: Option<String>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct WorkspaceResponse {
     pub workspace: WorkspaceView,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct SubscriptionResponse {
     pub subscription: SubscriptionView,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct ArticleResponse {
     pub article: ArticleView,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct ArticleListResponse {
     pub articles: Vec<ArticleView>,
     pub generated_at: DateTime<Utc>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct ApiError {
     pub code: &'static str,
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct CreateInviteRequest {
     pub username: String,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct InviteResponse {
     pub url: String,
     pub expires_at: DateTime<Utc>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct AcceptInviteRequest {
     pub token: String,
     pub username: String,
     pub password: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct CreateSessionRequest {
     pub username: String,
     pub password: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResetPasswordRequest {
     pub token: String,
     pub new_password: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreatePasswordResetRequest {
     pub username: String,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct PasswordResetResponse {
     pub url: String,
     pub expires_at: DateTime<Utc>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct SessionResponse {
     pub session_id: Uuid,
     pub expires_at: DateTime<Utc>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
     pub name: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RenameWorkspaceRequest {
     pub name: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct AddSubscriptionRequest {
     pub workspace_id: Uuid,
     pub url: String,
     pub title: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RenameSubscriptionRequest {
     pub name: String,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SaveSubscriptionNoteRequest {
     pub note: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionActivityView {
     pub id: Uuid,
@@ -172,12 +172,12 @@ pub struct SubscriptionActivityView {
     pub discovered_items: Option<usize>,
     pub diagnostic: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PreviewSourceUrlRequest {
     pub url: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceUrlPreviewResponse {
     pub token: Uuid,
@@ -185,21 +185,21 @@ pub struct SourceUrlPreviewResponse {
     pub title: String,
     pub expires_at: DateTime<Utc>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CommitSourceUrlRequest {
     pub preview_token: Uuid,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionExtractionView {
-    pub source_type: String,
+    pub source_type: SourceTypeView,
     pub feed_urls: Vec<String>,
     pub recipe_version: Option<u64>,
     pub recipe_summary: Option<String>,
     pub last_preview: Option<DateTime<Utc>>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct ArticleListQuery {
     pub workspace_id: Uuid,
     pub view: Option<String>,
@@ -207,14 +207,14 @@ pub struct ArticleListQuery {
     pub cursor: Option<String>,
     pub direction: Option<String>,
 }
-#[derive(Debug, Default, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Default, Deserialize)]
 pub struct BootstrapQuery {
     pub view: Option<String>,
     pub subscription_id: Option<Uuid>,
     pub cursor: Option<String>,
     pub direction: Option<String>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticlePageView {
     pub articles: Vec<ArticleView>,
@@ -223,17 +223,17 @@ pub struct ArticlePageView {
     pub newer_cursor: Option<String>,
     pub older_cursor: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct WorkspaceQuery {
     pub workspace_id: Uuid,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArticleStatePatch {
     pub read: Option<bool>,
     pub later: Option<bool>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuleDraft {
     pub id: Option<Uuid>,
@@ -243,7 +243,7 @@ pub struct RuleDraft {
     pub action: String,
     pub enabled: bool,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RulePreviewResponse {
     pub matched_articles: usize,
@@ -251,13 +251,13 @@ pub struct RulePreviewResponse {
     pub total_subscription_articles: usize,
     pub sample_article_ids: Vec<Uuid>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleApplicationAccepted {
     pub operation_id: Uuid,
     pub status: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuleApplicationStatus {
     pub operation_id: Uuid,
@@ -265,7 +265,7 @@ pub struct RuleApplicationStatus {
     pub evaluated: usize,
     pub cancel_reason: Option<String>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpmlImportRequest {
     pub workspace_id: Uuid,
@@ -273,19 +273,19 @@ pub struct OpmlImportRequest {
     pub apply: bool,
     pub preview_id: Option<Uuid>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct OpmlPreviewResponse {
     pub supported: usize,
     pub duplicates: usize,
     pub errors: Vec<String>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectorDraft {
     pub language: String,
     pub expression: String,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WebFeedRecipeDraft {
     pub workspace_id: Uuid,
@@ -326,27 +326,27 @@ pub struct WebFeedRecipeDraft {
     #[serde(default)]
     pub scrolls: usize,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebFeedRecipeView {
     pub subscription_id: Uuid,
     pub version: u64,
     pub draft: WebFeedRecipeDraft,
 }
-#[derive(Clone, Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateWebFeedRecipeRequest {
     pub expected_version: u64,
     pub draft: WebFeedRecipeDraft,
 }
-#[derive(Clone, Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VisualPreviewRequest {
     pub workspace_id: Uuid,
     pub url: String,
     pub viewport: String,
 }
-#[derive(Clone, Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct VisualSelectionRequest {
     pub workspace_id: Uuid,
@@ -354,7 +354,7 @@ pub struct VisualSelectionRequest {
     pub x: f64,
     pub y: f64,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisualRect {
     pub x: f64,
@@ -362,7 +362,7 @@ pub struct VisualRect {
     pub width: f64,
     pub height: f64,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisualCandidateGroup {
     pub id: String,
@@ -370,7 +370,7 @@ pub struct VisualCandidateGroup {
     pub count: usize,
     pub boxes: Vec<VisualRect>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisualPreviewResponse {
     pub snapshot_token: Uuid,
@@ -380,45 +380,45 @@ pub struct VisualPreviewResponse {
     pub height: u32,
     pub groups: Vec<VisualCandidateGroup>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisualSelectionResponse {
     pub selector: SelectorDraft,
     pub count: usize,
     pub similar_items: Vec<VisualRect>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct OperationAccepted {
     pub operation_id: Uuid,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MarkAllReadRequest {
     pub view: String,
     pub subscription_id: Option<Uuid>,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct RuleListQuery {
     pub workspace_id: Uuid,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 pub struct OpmlExportQuery {
     pub workspace_id: Uuid,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct OpmlImportResponse {
     pub preview_id: Uuid,
     pub subscriptions: usize,
     pub warnings: Vec<String>,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapAccount {
     pub id: Uuid,
     pub display_name: String,
     pub initials: String,
 }
-#[derive(Debug, Serialize)]
+#[derive(schemars::JsonSchema, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapResponse {
     pub account: BootstrapAccount,
@@ -427,18 +427,18 @@ pub struct BootstrapResponse {
     pub subscriptions: Vec<SubscriptionView>,
     pub article_page: ArticlePageView,
 }
-#[derive(Debug, Deserialize)]
+#[derive(schemars::JsonSchema, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeedDiscoverRequest {
     pub url: String,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedPreviewArticle {
     pub title: String,
     pub published_at: Option<String>,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedPreviewResponse {
     pub title: String,
@@ -448,4 +448,26 @@ pub struct FeedPreviewResponse {
     pub initial_items: usize,
     pub incomplete: bool,
     pub articles: Vec<FeedPreviewArticle>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FullTextStatus {
+    Ready,
+    Pending,
+    Failed,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SubscriptionStatusView {
+    Active,
+    Paused,
+    Archived,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceTypeView {
+    Feed,
+    Web,
+    BuiltIn,
 }

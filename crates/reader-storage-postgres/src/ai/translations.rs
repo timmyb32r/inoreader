@@ -13,6 +13,11 @@ fn checked_record(
     {
         return Err(AiError::Storage);
     }
+    if let Some(input) = &record.input {
+        if input.source() != record.job.source || input.model() != record.job.model {
+            return Err(AiError::Storage);
+        }
+    }
     if let TranslationState::Completed { result } = &record.job.state {
         if result.source() != record.job.source {
             return Err(AiError::Storage);
@@ -32,7 +37,30 @@ impl PostgresAiStore {
         let rows:Vec<TranslationRow>=sqlx::query_as("SELECT t.id,t.owner,t.workspace,t.article,t.document FROM ai_translations t JOIN workspaces w ON w.id=t.workspace::text WHERE t.owner=$1 AND t.workspace=$2 AND t.article=$3 AND w.document::jsonb->>'owner'=$1::text ORDER BY t.created_at DESC,t.id DESC")
             .bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
         rows.into_iter()
-            .map(|row| Ok(checked_record(row)?.job))
+            .map(|row| {
+                let (id,owner,workspace_id,article_id,document)=&row;
+                match checked_record(row.clone()) {
+                    Ok(record)=>Ok(record.job),
+                    Err(_)=>{
+                        // Report the damaged attempt independently; retain its raw
+                        // document for recovery instead of hiding the entire article.
+                        log::error!("translation_record_invalid operation_id={id}");
+                        let raw:serde_json::Value=serde_json::from_str(document).map_err(storage)?;
+                        // Result corruption is isolatable. Identity corruption is
+                        // not: never expose a payload whose tenant binding is invalid.
+                        if raw["owner"] != serde_json::json!(owner)
+                            || raw["job"]["id"] != serde_json::json!(id)
+                            || raw["job"]["workspaceId"] != serde_json::json!(workspace_id)
+                            || raw["job"]["articleId"] != serde_json::json!(article_id) {
+                            return Err(AiError::Storage);
+                        }
+                        Ok(ParagraphJob{id:*id,workspace_id:*workspace_id,article_id:*article_id,
+                            source:raw["job"]["source"].as_str().ok_or(AiError::Storage)?.into(),
+                            model:raw["job"]["model"].as_str().ok_or(AiError::Storage)?.into(),
+                            state:TranslationState::Failed{error:"Stored translation failed validation; original response retained for recovery.".into()},usage:None})
+                    }
+                }
+            })
             .collect()
     }
     pub(super) async fn insert_translation(
@@ -64,13 +92,23 @@ impl PostgresAiStore {
             if r.job.workspace_id != j.workspace_id
                 || r.job.article_id != j.article_id
                 || r.job.source != j.source
+                || r.source_revision != record.source_revision
+                || r.input
+                    .as_ref()
+                    .map(TranslationInput::identity)
+                    .transpose()?
+                    != record
+                        .input
+                        .as_ref()
+                        .map(TranslationInput::identity)
+                        .transpose()?
             {
                 return Err(AiError::Conflict);
             }
             return Ok(r.job);
         }
-        let cached:Option<String>=sqlx::query_scalar("SELECT document FROM ai_translations WHERE owner=$1 AND workspace=$2 AND article=$3 AND status IN ('queued','generating','completed') AND document::jsonb->>'source_revision'=$4 AND document::jsonb->'job'->>'source'=$5 ORDER BY created_at DESC LIMIT 1")
-            .bind(record.owner).bind(j.workspace_id).bind(j.article_id).bind(&record.source_revision).bind(&j.source).fetch_optional(&mut *tx).await.map_err(storage)?;
+        let cached:Option<String>=sqlx::query_scalar("SELECT document FROM ai_translations WHERE owner=$1 AND workspace=$2 AND article=$3 AND status IN ('queued','generating','completed') AND document::jsonb->>'source_revision'=$4 AND document::jsonb->'job'->>'source'=$5 AND document::jsonb->'input'=$6::jsonb ORDER BY created_at DESC LIMIT 1")
+            .bind(record.owner).bind(j.workspace_id).bind(j.article_id).bind(&record.source_revision).bind(&j.source).bind(record.input.as_ref().ok_or(AiError::Configuration)?.identity()?).fetch_optional(&mut *tx).await.map_err(storage)?;
         if let Some(row) = cached {
             let cached: TranslationRecord = decode(&row)?;
             return Ok(checked_record((
@@ -104,11 +142,24 @@ impl PostgresAiStore {
             tx.commit().await.map_err(storage)?;
             return Ok(None);
         };
-        let mut record = checked_record(row)?;
+        let id = row.0;
+        let mut record = match checked_record(row) {
+            Ok(record) => record,
+            Err(_) => {
+                sqlx::query("UPDATE ai_translations SET status='failed',lease=NULL,lease_until=NULL WHERE id=$1").bind(id).execute(&mut *tx).await.map_err(storage)?;
+                tx.commit().await.map_err(storage)?;
+                log::error!("translation_record_invalid operation_id={id} action=quarantined_original_retained");
+                return Ok(None);
+            }
+        };
         record.job.state = TranslationState::Generating;
         let lease = Uuid::new_v4();
-        sqlx::query("UPDATE ai_translations SET status='generating',document=$2,lease=$3,lease_until=now()+$4::bigint*interval '1 second' WHERE id=$1")
-            .bind(record.job.id).bind(encode(&record)?).bind(lease).bind(seconds).execute(&mut *tx).await.map_err(storage)?;
+        let queue_wait_us: i64=sqlx::query_scalar("UPDATE ai_translations SET status='generating',document=$2,lease=$3,lease_until=now()+$4::bigint*interval '1 second' WHERE id=$1 RETURNING (extract(epoch FROM now()-created_at)*1000000)::bigint")
+            .bind(record.job.id).bind(encode(&record)?).bind(lease).bind(seconds).fetch_one(&mut *tx).await.map_err(storage)?;
+        log::info!(
+            "ai_queue class=translation operation_id={} queue_wait_us={queue_wait_us}",
+            record.job.id
+        );
         tx.commit().await.map_err(storage)?;
         Ok(Some(ClaimedTranslation { record, lease }))
     }
@@ -117,6 +168,7 @@ impl PostgresAiStore {
         claim: &ClaimedTranslation,
         state: TranslationState,
         usage: Option<Usage>,
+        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
         let status = match &state {
             TranslationState::Completed { result } => {
@@ -131,8 +183,11 @@ impl PostgresAiStore {
         let mut record = claim.record.clone();
         record.job.state = state;
         record.job.usage = usage;
-        let n=sqlx::query("UPDATE ai_translations t SET status=$4,document=$5,lease=NULL,lease_until=NULL FROM workspaces w WHERE t.id=$1 AND t.owner=$2 AND t.lease=$3 AND t.lease_until>now() AND t.status='generating' AND w.id=t.workspace::text AND w.document::jsonb->>'owner'=$2::text")
-            .bind(record.job.id).bind(record.owner).bind(claim.lease).bind(status).bind(encode(&record)?).execute(&self.pool).await.map_err(storage)?.rows_affected();
+        let (raw, response_status, interrupted) = reply
+            .map(|r| (Some(r.body), Some(i32::from(r.status)), Some(r.interrupted)))
+            .unwrap_or((None, None, None));
+        let n=sqlx::query("UPDATE ai_translations t SET raw_response=$6,response_status=$7,response_interrupted=$8,status=$4,document=$5,lease=NULL,lease_until=NULL FROM workspaces w WHERE t.id=$1 AND t.owner=$2 AND t.lease=$3 AND t.lease_until>now() AND t.status='generating' AND w.id=t.workspace::text AND w.document::jsonb->>'owner'=$2::text")
+            .bind(record.job.id).bind(record.owner).bind(claim.lease).bind(status).bind(encode(&record)?).bind(raw).bind(response_status).bind(interrupted).execute(&self.pool).await.map_err(storage)?.rows_affected();
         if n != 1 {
             return Err(AiError::Cancelled);
         }

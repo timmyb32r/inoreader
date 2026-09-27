@@ -2,7 +2,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use reader_ai::*;
-use reader_application::ReaderRepository;
+use reader_application::ArticleRepository;
 use reader_core::{ArticleId, WorkspaceId};
 use serde::{de::DeserializeOwned, Serialize};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -34,6 +34,9 @@ CREATE TABLE IF NOT EXISTS ai_translations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL, document TEXT NOT NULL,
     lease UUID, lease_until TIMESTAMPTZ
 );
+ALTER TABLE ai_translations ADD COLUMN IF NOT EXISTS raw_response BYTEA;
+ALTER TABLE ai_translations ADD COLUMN IF NOT EXISTS response_status INTEGER;
+ALTER TABLE ai_translations ADD COLUMN IF NOT EXISTS response_interrupted BOOLEAN;
 CREATE INDEX IF NOT EXISTS ai_translations_article ON ai_translations(owner,workspace,article,created_at DESC);
 CREATE INDEX IF NOT EXISTS ai_translations_pending ON ai_translations(status,created_at);
 CREATE TABLE IF NOT EXISTS ai_profiles (
@@ -227,7 +230,7 @@ impl AiStore for PostgresAiStore {
         claim: &ClaimedDefinitions,
         state: DefinitionState,
         usage: Option<Usage>,
-        reply: Option<DefinitionReply>,
+        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
         self.complete_definitions(claim, state, usage, reply).await
     }
@@ -254,8 +257,9 @@ impl AiStore for PostgresAiStore {
         claim: &ClaimedTranslation,
         state: TranslationState,
         usage: Option<Usage>,
+        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
-        self.complete_translation(claim, state, usage).await
+        self.complete_translation(claim, state, usage, reply).await
     }
 
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError> {
@@ -610,15 +614,20 @@ impl AiStore for PostgresAiStore {
         };
         let record: ChatRecord = decode(&document)?;
         let lease = Uuid::new_v4();
-        sqlx::query(
-            "UPDATE ai_chats SET lease=$2,lease_until=now()+$3*interval '1 second' WHERE id=$1",
+        let queue_wait_us: i64 = sqlx::query_scalar(
+            "UPDATE ai_chats SET lease=$2,lease_until=now()+$3*interval '1 second' WHERE id=$1 RETURNING (extract(epoch FROM now()-scheduled_at)*1000000)::bigint",
         )
         .bind(record.view.id)
         .bind(lease)
         .bind(i64::try_from(lease_seconds).map_err(storage)?)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(storage)?;
+        log::info!(
+            "ai_claim class=chat job_id={} queue_wait_us={}",
+            record.view.id,
+            queue_wait_us
+        );
         tx.commit().await.map_err(storage)?;
         Ok(Some(ClaimedChat { record, lease }))
     }

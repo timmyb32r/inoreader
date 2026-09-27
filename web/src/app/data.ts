@@ -1,21 +1,26 @@
-export type Article = {
-  id: string;
-  url: string;
-  source: string;
-  sources?: string[];
-  subscriptionIds?: string[];
-  title: string;
-  excerpt: string;
-  body: string[];
-  bodyHtml?: string;
-  author?: string;
-  age: string;
-  read: boolean;
-  later: boolean;
-  fullText: "ready" | "pending" | "failed";
-  fullTextReason?: string;
-  originalUrl?: string;
-};
-
-export type Subscription = { id: string; name: string; sourceTitle?: string; customName?: string; sourceUrl?: string; iconDataUrl?: string; personalNote?: string; sourceType?: "feed"|"web"|"built_in"; count: number; unreadCount?: number; status: "active" | "paused" | "archived"; lastUpdate?: string; lastErrorAt?:string; createdAt?:string; pollingInterval?:string; incomplete?:boolean; continuation?:string; error?:string; needsAttention?:boolean; attentionReason?:string; editableWebFeed?:boolean; reason?: string; reasonAt?: string };
-export type Workspace = { id: string; name: string; archived: boolean; archiveReason?: string; archiveReasonAt?: string };
+import type {
+  ArticleView,
+  SubscriptionView,
+  WorkspaceView,
+} from "../api/generated";
+/** UI drafts/fixtures may omit decoration fields. Core identity and state fields
+ * use the generated wire contract; nullable server values stay nullable. */
+type ViewModel<T, K extends keyof T> = Pick<T, K> & Partial<Omit<T, K>>;
+export type Article = ViewModel<
+  ArticleView,
+  | "id"
+  | "url"
+  | "source"
+  | "title"
+  | "excerpt"
+  | "body"
+  | "age"
+  | "read"
+  | "later"
+  | "fullText"
+> & { originalUrl?: string };
+export type Subscription = ViewModel<
+  SubscriptionView,
+  "id" | "name" | "count" | "status"
+> & { pollingInterval?: string };
+export type Workspace = WorkspaceView;

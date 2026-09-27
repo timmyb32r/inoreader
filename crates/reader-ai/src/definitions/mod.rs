@@ -1,3 +1,4 @@
+use crate::ProviderReply;
 use crate::{AiConfig, AiError, ArticleSnapshot, CostRates, InputLimits, Usage};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,6 +12,7 @@ pub use record::*;
 pub const DEFINITIONS_VERSION: &str = "reading-data-news-definitions-v2";
 const SYSTEM: &str = include_str!("../../../../prompts/reading-data-news/definitions/system.md");
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntityKind {
@@ -21,6 +23,7 @@ pub enum EntityKind {
     Protocol,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "EntityWire", rename_all = "camelCase")]
 pub struct EntityDefinition {
@@ -29,6 +32,7 @@ pub struct EntityDefinition {
     explanation: String,
     insufficient_context: bool,
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct EntityWire {
@@ -60,6 +64,7 @@ impl EntityDefinition {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DefinitionResult {
@@ -82,54 +87,5 @@ impl DefinitionResult {
             }
         }
         Ok(())
-    }
-}
-
-/// Raw bounded provider response retained even when its JSON/finish reason fails.
-pub struct DefinitionReply {
-    pub status: u16,
-    pub body: Vec<u8>,
-    pub interrupted: bool,
-}
-impl DefinitionReply {
-    pub fn result(&self, snapshot: &ArticleSnapshot) -> Result<DefinitionResult, AiError> {
-        if self.interrupted {
-            return Err(AiError::Provider);
-        }
-        crate::provider::check_status(
-            http::StatusCode::from_u16(self.status).map_err(|_| AiError::Protocol)?,
-        )?;
-        let value: Value = serde_json::from_slice(&self.body).map_err(|_| AiError::Protocol)?;
-        let choices = value["choices"]
-            .as_array()
-            .filter(|v| v.len() == 1)
-            .ok_or(AiError::Protocol)?;
-        if choices[0]["finish_reason"] != "stop" {
-            return Err(AiError::Context);
-        }
-        DefinitionResult::from_response(
-            snapshot,
-            choices[0]["message"]["content"]
-                .as_str()
-                .ok_or(AiError::Protocol)?,
-        )
-    }
-    pub fn usage(&self) -> Option<Usage> {
-        let v: Value = serde_json::from_slice(&self.body).ok()?;
-        let v = &v["usage"];
-        let prompt_tokens = v["prompt_tokens"].as_u64()?;
-        let completion_tokens = v["completion_tokens"].as_u64()?;
-        let hit = v["prompt_cache_hit_tokens"].as_u64()?;
-        let miss = v["prompt_cache_miss_tokens"].as_u64()?;
-        if hit.checked_add(miss)? != prompt_tokens {
-            return None;
-        }
-        Some(Usage {
-            prompt_tokens,
-            completion_tokens,
-            prompt_cache_hit_tokens: hit,
-            prompt_cache_miss_tokens: miss,
-            estimated_cost_usd: None,
-        })
     }
 }

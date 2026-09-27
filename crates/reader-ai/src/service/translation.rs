@@ -17,8 +17,9 @@ impl AiService {
         operation: Uuid,
         source: String,
     ) -> Result<ParagraphJob, AiError> {
+        log::info!("ai_submission operation_id={operation}");
         self.policy.generation_allowed(owner)?;
-        TranslationInput::new(self.policy.config(), &source)?;
+        let input = TranslationInput::new(self.policy.config(), &source)?;
         self.key(owner).await?;
         let snapshot = match self.store.article_input(owner, workspace, article).await? {
             ArticleInput::Ready(s) => s,
@@ -35,6 +36,7 @@ impl AiService {
         self.store
             .create_translation(TranslationRecord {
                 owner,
+                input: Some(input),
                 source_revision: snapshot.source_revision,
                 cost_rates: self.policy.cost_rates().clone(),
                 job: ParagraphJob {
@@ -57,28 +59,49 @@ impl AiService {
         else {
             return Ok(false);
         };
-        let result = async {
-            self.policy.generation_allowed(claim.record.owner)?;
-            let key = self.key(claim.record.owner).await?;
-            let mut config = self.policy.config().clone();
-            config.model = claim.record.job.model.clone();
-            let input = TranslationInput::new(&config, &claim.record.job.source)?;
-            self.provider.translate(&key, input).await
-        }
-        .await;
-        let (state, usage) = match result {
-            Ok((result, mut usage)) => {
-                usage.estimated_cost_usd = Some(claim.record.cost_rates.cost(&usage)?);
-                (TranslationState::Completed { result }, Some(usage))
-            }
-            Err(error) => (
-                TranslationState::Failed {
-                    error: error.to_string(),
-                },
-                None,
-            ),
-        };
-        self.store.finish_translation(&claim, state, usage).await?;
-        Ok(true)
+        reader_runtime::Context::operation(claim.record.job.id)
+            .scope(async {
+                let result = async {
+                    self.policy.generation_allowed(claim.record.owner)?;
+                    let key = self.key(claim.record.owner).await?;
+                    let input = claim.record.input.clone().ok_or(AiError::Unavailable)?;
+                    reader_runtime::observe(
+                        reader_runtime::Stage::TranslationProvider,
+                        self.provider.translate(&key, input),
+                    )
+                    .await
+                }
+                .await;
+                let (state, usage, reply) = match result {
+                    Ok(reply) => {
+                        let mut usage = reply.usage();
+                        if let Some(usage) = &mut usage {
+                            usage.estimated_cost_usd = Some(claim.record.cost_rates.cost(usage)?);
+                        }
+                        let state = match reader_runtime::observe_sync(
+                            reader_runtime::Stage::TranslationValidation,
+                            || reply.translation_result(&claim.record.job.source),
+                        ) {
+                            Ok(result) => TranslationState::Completed { result },
+                            Err(error) => TranslationState::Failed {
+                                error: error.to_string(),
+                            },
+                        };
+                        (state, usage, Some(reply))
+                    }
+                    Err(error) => (
+                        TranslationState::Failed {
+                            error: error.to_string(),
+                        },
+                        None,
+                        None,
+                    ),
+                };
+                self.store
+                    .finish_translation(&claim, state, usage, reply)
+                    .await?;
+                Ok(true)
+            })
+            .await
     }
 }

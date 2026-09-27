@@ -14,7 +14,8 @@ pub async fn run_until_shutdown<S, F, X, B, Q>(
     worker_count: usize,
     idle_poll: Duration,
     shutdown: Q,
-) where
+) -> Result<(), String>
+where
     S: IngestStore + 'static,
     F: FeedFetcher + 'static,
     X: FullTextExtractor + 'static,
@@ -22,11 +23,11 @@ pub async fn run_until_shutdown<S, F, X, B, Q>(
     Q: Future<Output = ()>,
 {
     let (stop_tx, stop_rx) = watch::channel(false);
-    let mut tasks = Vec::with_capacity(worker_count);
+    let mut tasks = tokio::task::JoinSet::new();
     for index in 0..worker_count {
         let worker = worker.clone();
         let mut stop = stop_rx.clone();
-        tasks.push(tokio::spawn(async move {
+        tasks.spawn(async move {
             let identity = format!("worker-{index}");
             loop {
                 if *stop.borrow() { break; }
@@ -50,11 +51,18 @@ pub async fn run_until_shutdown<S, F, X, B, Q>(
                     }
                 }
             }
-        }));
+        });
     }
-    shutdown.await;
-    let _ = stop_tx.send(true);
-    for task in tasks {
-        let _ = task.await;
+    let failure = tokio::select! {
+        _ = shutdown => None,
+        _ = tasks.join_next() => Some("ingest worker exited unexpectedly".to_owned()),
+    };
+    stop_tx.send_replace(true);
+    let mut failure = failure;
+    while let Some(result) = tasks.join_next().await {
+        if result.is_err() {
+            failure.get_or_insert_with(|| "ingest worker panicked".to_owned());
+        }
     }
+    failure.map_or(Ok(()), Err)
 }

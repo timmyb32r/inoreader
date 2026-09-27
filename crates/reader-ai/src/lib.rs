@@ -24,3 +24,6 @@ pub use translation::*;
 
 #[cfg(test)]
 mod tests;
+
+mod provider_reply;
+pub use provider_reply::ProviderReply;

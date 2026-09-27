@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+schemars = { version = "1.2.2", optional = true, features = ["chrono04", "uuid1"] }
+reader-runtime = { path = "../reader-runtime" }
 async-trait.workspace = true
 chrono.workspace = true
 http.workspace = true
@@ -19,3 +21,11 @@ thiserror.workspace = true
 tokio.workspace = true
 url.workspace = true
 uuid.workspace = true
+
+[features]
+schema = ["dep:schemars", "reader-glossary/schema"]
+
+[[bin]]
+name = "export_ai_contracts"
+path = "src/bin/export_ai_contracts.rs"
+required-features = ["schema"]

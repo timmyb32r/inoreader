@@ -10,3 +10,6 @@ __pycache__/
 /config.yaml
 /secrets/
 /seed-manifest*.json
+
+/web/playwright-report*/
+/web/test-results*/

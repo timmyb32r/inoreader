@@ -13,9 +13,13 @@ export function usePresentedChat(chat: ArticleChat | null) {
   latest.current = chat;
   const flush = () => {
     const selection = window.getSelection();
-    const selecting = selection && !selection.isCollapsed &&
-      (messages.current?.contains(selection.anchorNode) || messages.current?.contains(selection.focusNode));
-    if (!pressed.current && !scrolling.current && !selecting) setPresented(latest.current);
+    const selecting =
+      selection &&
+      !selection.isCollapsed &&
+      (messages.current?.contains(selection.anchorNode) ||
+        messages.current?.contains(selection.focusNode));
+    if (!pressed.current && !scrolling.current && !selecting)
+      setPresented(latest.current);
   };
   useEffect(() => {
     // Opening another article must never display the previous article's text.
@@ -24,9 +28,16 @@ export function usePresentedChat(chat: ArticleChat | null) {
   }, [chat]);
   useEffect(() => {
     const down = (event: PointerEvent) => {
-      if (event.target instanceof Node && messages.current?.closest(".ai-chat")?.contains(event.target)) pressed.current = true;
+      if (
+        event.target instanceof Node &&
+        messages.current?.closest(".ai-chat")?.contains(event.target)
+      )
+        pressed.current = true;
     };
-    const up = () => { pressed.current = false; flush(); };
+    const up = () => {
+      pressed.current = false;
+      flush();
+    };
     window.addEventListener("pointerdown", down);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
@@ -42,7 +53,10 @@ export function usePresentedChat(chat: ArticleChat | null) {
   const onScroll = () => {
     scrolling.current = true;
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => { scrolling.current = false; flush(); }, 180);
+    timer.current = setTimeout(() => {
+      scrolling.current = false;
+      flush();
+    }, 180);
   };
   return { presented, messages, onScroll };
 }

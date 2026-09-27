@@ -1,4 +1,4 @@
-use reader_application::ReaderRepository;
+use reader_application::WorkspaceRepository;
 use reader_core::{AccountId, ReasonPolicy, Workspace, WorkspaceId};
 use reader_glossary::*;
 use reader_storage_postgres::{PostgresGlossaryStore, PostgresRepository};

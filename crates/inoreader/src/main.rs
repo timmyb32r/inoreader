@@ -6,7 +6,11 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use clap::{Parser, Subcommand};
 use inoreader::{format_external_request_completion, Config, LogFormat};
-use reader_application::{Argon2idPolicy, AuthPolicy, AuthService, ReaderRepository, SeedSource};
+use reader_application::{Argon2idPolicy, AuthPolicy, AuthService, SeedSource};
+use reader_application::{
+    ArticleRepository, IdentityRepository, OperationsRepository, SubscriptionRepository,
+    WorkspaceRepository,
+};
 use reader_core::{AccountId, ReasonPolicy, Subscription, SubscriptionId, WorkspaceId};
 use reader_ingest::{
     run_until_shutdown, IngestLimits, IngestWorker, SecureWebFetcher, StaticWebFeedCollector,
@@ -342,10 +346,25 @@ fn init_logging(format: LogFormat) {
                 "{}",
                 serde_json::json!({
                     "event": "log",
+                    "context": reader_runtime::Context::current(),
                     "level": record.level().to_string(),
                     "target": record.target(),
                     "message": record.args().to_string(),
                 })
+            )
+        });
+    }
+    if format != LogFormat::Json {
+        builder.format(|buffer, record| {
+            let context = reader_runtime::Context::current();
+            writeln!(
+                buffer,
+                "{} {} {} context={:?} {}",
+                buffer.timestamp_millis(),
+                record.level(),
+                record.target(),
+                context,
+                record.args()
             )
         });
     }
@@ -495,20 +514,6 @@ async fn serve(
     let icon_fetcher = fetcher.clone();
     let icon_refresh_interval = Duration::from_secs(config.scheduler.polling_interval_seconds);
     let icon_workers = config.scheduler.workers;
-    tokio::spawn(async move {
-        loop {
-            if let Err(error) = refresh_missing_subscription_icons(
-                icon_pool.clone(),
-                icon_fetcher.clone(),
-                icon_workers,
-            )
-            .await
-            {
-                log::warn!("subscription icon refresh failed: {error}");
-            }
-            tokio::time::sleep(icon_refresh_interval).await;
-        }
-    });
     let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(
         OutboundHttpClient::new(
             outbound_policy,
@@ -551,13 +556,11 @@ async fn serve(
         config.auth.login_attempts_per_minute,
         config.ingest.batch_items,
     );
-    if let Some(ai) = ai_service {
-        ai.spawn_workers();
-        server_state = server_state.with_ai(ai);
+    if let Some(ai) = &ai_service {
+        server_state = server_state.with_ai(ai.clone());
     }
-    if let Some(glossary) = glossary_service {
-        glossary.spawn_workers();
-        server_state = server_state.with_glossary(glossary);
+    if let Some(glossary) = &glossary_service {
+        server_state = server_state.with_glossary(glossary.clone());
     }
     let app = reader_server::router(server_state)
         .fallback(serve_ui)
@@ -596,35 +599,51 @@ async fn serve(
         )?,
     );
     let listener = tokio::net::TcpListener::bind(&config.server.bind).await?;
-    let (server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel();
-    let (worker_stop_tx, worker_stop_rx) = tokio::sync::oneshot::channel();
-    let scheduler = tokio::spawn(run_until_shutdown(
-        worker,
-        config.scheduler.workers,
-        Duration::from_secs(config.scheduler.queue_poll_interval_seconds),
-        async {
-            let _ = worker_stop_rx.await;
-        },
-    ));
-    let server = tokio::spawn(async move {
-        axum::serve(listener, app)
-            .with_graceful_shutdown(async {
-                let _ = server_stop_rx.await;
-            })
+    let mut supervisor = reader_runtime::TaskSupervisor::new();
+    supervisor.spawn("subscription_icons", move |mut stop| async move {
+        while !stop.requested() {
+            if let Err(error) = refresh_missing_subscription_icons(
+                icon_pool.clone(),
+                icon_fetcher.clone(),
+                icon_workers,
+                &mut stop,
+            )
             .await
+            {
+                log::warn!("subscription icon refresh failed: {error}");
+            }
+            stop.sleep(icon_refresh_interval).await;
+        }
+        Ok(())
     });
-    tokio::signal::ctrl_c().await?;
-    let _ = server_stop_tx.send(());
-    let _ = worker_stop_tx.send(());
-    let grace = Duration::from_secs(config.server.graceful_shutdown_seconds);
-    tokio::time::timeout(grace, async {
-        server
+
+    if let Some(ai) = ai_service {
+        ai.spawn_workers(&mut supervisor);
+    }
+    if let Some(glossary) = glossary_service {
+        glossary.spawn_workers(&mut supervisor);
+    }
+
+    let worker_count = config.scheduler.workers;
+    let poll = Duration::from_secs(config.scheduler.queue_poll_interval_seconds);
+    supervisor.spawn("ingest", move |mut stop| async move {
+        run_until_shutdown(worker, worker_count, poll, stop.wait()).await
+    });
+    supervisor.spawn("http", move |mut stop| async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move { stop.wait().await })
             .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-        scheduler.await.map_err(|e| e.to_string())?;
-        Ok::<(), String>(())
-    })
+            .map_err(|error| error.to_string())
+    });
+    let failure = tokio::select! {
+        signal = termination_signal() => { signal?; None },
+        error = supervisor.unexpected_exit() => Some(error),
+    };
+    supervisor.request_shutdown();
+    tokio::time::timeout(
+        Duration::from_secs(config.server.graceful_shutdown_seconds),
+        supervisor.drain(),
+    )
     .await
     .map_err(|_| {
         format!(
@@ -632,13 +651,30 @@ async fn serve(
             config.server.graceful_shutdown_seconds
         )
     })??;
+    if let Some(error) = failure {
+        return Err(error.into());
+    }
     Ok(())
+}
+
+async fn termination_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! { result = tokio::signal::ctrl_c() => result, _ = terminate.recv() => Ok(()) }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
+    }
 }
 
 async fn refresh_missing_subscription_icons(
     pool: sqlx::PgPool,
     fetcher: Arc<SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>>,
     concurrency: usize,
+    stop: &mut reader_runtime::Shutdown,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT mapping.subscription_id,source.document FROM subscription_sources mapping JOIN sources source ON source.id=mapping.source_id LEFT JOIN subscription_icons icon ON icon.subscription_id=mapping.subscription_id WHERE icon.subscription_id IS NULL",
@@ -660,7 +696,10 @@ async fn refresh_missing_subscription_icons(
     let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency.max(1)));
     let mut tasks = tokio::task::JoinSet::new();
     for (favicon, subscription_ids) in grouped {
-        let permit = semaphore.clone().acquire_owned().await?;
+        let permit = tokio::select! { _ = stop.wait() => break, permit = semaphore.clone().acquire_owned() => permit? };
+        if stop.requested() {
+            break;
+        }
         let fetcher = fetcher.clone();
         tasks.spawn(async move {
             let _permit = permit;
@@ -692,7 +731,7 @@ async fn refresh_missing_subscription_icons(
                 .await?;
             }
             Ok(Err(error)) => log::debug!("subscription icon unavailable: {error}"),
-            Err(error) => log::warn!("subscription icon task failed: {error}"),
+            Err(_) => return Err("subscription icon task panicked".into()),
         }
     }
     Ok(())
@@ -704,10 +743,7 @@ struct RequestObserver {
 }
 impl ExternalRequestObserver for RequestObserver {
     fn completed(&self, value: ExternalRequestCompletion) {
-        eprintln!(
-            "{}",
-            format_external_request_completion(self.format, &value)
-        )
+        log::info!(target:"reader_external", "{}", format_external_request_completion(self.format, &value))
     }
 }
 

@@ -3,26 +3,33 @@ use async_trait::async_trait;
 use std::time::Duration;
 
 impl AiService {
-    pub fn spawn_workers(self: &Arc<Self>) {
-        for _ in 0..self.policy.config().workers {
-            let service = self.clone();
-            tokio::spawn(async move {
-                loop {
-                    if let Err(error) = service.define_once().await {
-                        log::error!("ai_definitions_worker outcome=failed classification={error}");
+    pub fn spawn_workers(self: &Arc<Self>, supervisor: &mut reader_runtime::TaskSupervisor) {
+        // Separate work classes share one FIFO permit pool: slow definitions do
+        // not force every chat to wait behind a definition and a translation.
+        let slots = Arc::new(tokio::sync::Semaphore::new(self.policy.config().workers));
+        for class in ["definitions", "translation", "chat"] {
+            for _ in 0..self.policy.config().workers {
+                let service = self.clone();
+                let slots = slots.clone();
+                supervisor.spawn(class,move |mut stop|async move {
+                    while !stop.requested() {
+                        let permit=tokio::select! {
+                            _=stop.wait()=>break,
+                            permit=slots.acquire()=>permit.map_err(|_|"AI admission closed".to_string())?,
+                        };
+                        if stop.requested(){break;}
+                        let result=match class {
+                            "definitions"=>service.define_once().await,
+                            "translation"=>service.translate_once().await,
+                            _=>service.work_once().await,
+                        };
+                        drop(permit);
+                        if let Err(error)=result {log::error!("ai_worker class={class} outcome=failed classification={error}");}
+                        stop.sleep(Duration::from_millis(service.policy.config().poll_milliseconds)).await;
                     }
-                    if let Err(error) = service.translate_once().await {
-                        log::error!("ai_translation_worker outcome=failed classification={error}");
-                    }
-                    if let Err(error) = service.work_once().await {
-                        log::error!("ai_worker outcome=failed classification={error}");
-                    }
-                    tokio::time::sleep(Duration::from_millis(
-                        service.policy.config().poll_milliseconds,
-                    ))
-                    .await;
-                }
-            });
+                    Ok(())
+                });
+            }
         }
     }
 
@@ -32,27 +39,34 @@ impl AiService {
         let Some(mut claim) = self.store.claim(self.policy.config().lease_seconds).await? else {
             return Ok(false);
         };
-        if let Err(error) = self.generate_claim(&mut claim).await {
-            if !matches!(error, AiError::Cancelled) {
-                let state = if matches!(
-                    error,
-                    AiError::Provider | AiError::Protocol | AiError::Storage
-                ) {
-                    ChatStatus::Interrupted
-                } else {
-                    ChatStatus::Failed
-                };
-                match self
-                    .store
-                    .update_claim(&claim, state, None, None, Some(&error.to_string()))
-                    .await
-                {
-                    Ok(()) | Err(AiError::Cancelled) => {}
-                    Err(error) => return Err(error),
+        reader_runtime::Context::job(
+            claim.record.operations.last().ok_or(AiError::Storage)?.id,
+            claim.record.view.id,
+        )
+        .scope(async {
+            if let Err(error) = self.generate_claim(&mut claim).await {
+                if !matches!(error, AiError::Cancelled) {
+                    let state = if matches!(
+                        error,
+                        AiError::Provider | AiError::Protocol | AiError::Storage
+                    ) {
+                        ChatStatus::Interrupted
+                    } else {
+                        ChatStatus::Failed
+                    };
+                    match self
+                        .store
+                        .update_claim(&claim, state, None, None, Some(&error.to_string()))
+                        .await
+                    {
+                        Ok(()) | Err(AiError::Cancelled) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
             }
-        }
-        Ok(true)
+            Ok(true)
+        })
+        .await
     }
 
     async fn generate_claim(&self, claim: &mut ClaimedChat) -> Result<(), AiError> {
@@ -187,7 +201,12 @@ impl AiService {
             rates,
             private_draft,
         };
-        match self.provider.generate(&key, input, &mut progress).await {
+        match reader_runtime::observe(
+            reader_runtime::Stage::ChatProvider,
+            self.provider.generate(&key, input, &mut progress),
+        )
+        .await
+        {
             Ok(output) => {
                 progress.usage(&output.usage).await?;
                 if phase == GenerationPhase::Verifying {

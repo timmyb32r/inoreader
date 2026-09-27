@@ -1,20 +1,41 @@
+import { wireFixture } from "./wire-fixtures.mjs";
 import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
-  await page.route("**/api/bootstrap*", async route => {
+  await page.route("**/api/bootstrap*", async (route) => {
     const data = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...data, subscriptions: [...data.subscriptions, { id: "broken", name: "Broken source", status: "active", count: 0, needsAttention: true, attentionReason: "Repeated fetch failures" }] } });
+    await route.fulfill({
+      json: wireFixture({
+        ...data,
+        subscriptions: [
+          ...data.subscriptions,
+          {
+            id: "broken",
+            name: "Broken source",
+            status: "active",
+            count: 0,
+            needsAttention: true,
+            attentionReason: "Repeated fetch failures",
+          },
+        ],
+      }),
+    });
   });
 });
 
-test("latest article hover, keyboard focus and press highlight without moving targets", async ({ page }) => {
+test("latest article hover, keyboard focus and press highlight without moving targets", async ({
+  page,
+}) => {
   await page.goto("/subscriptions/sub");
-  const row = page.getByRole("dialog", { name: "Subscription details", exact: true }).getByRole("button", { name: /Async Rust without the hidden machinery/ });
+  const row = page
+    .getByRole("dialog", { name: "Subscription details", exact: true })
+    .getByRole("button", { name: /Async Rust without the hidden machinery/ });
   await row.scrollIntoViewIfNeeded();
   const before = await row.boundingBox();
   const next = page.getByRole("button", { name: "View all articles" });
   const nextBefore = await next.boundingBox();
-  const color = () => row.evaluate(el => getComputedStyle(el).backgroundColor);
+  const color = () =>
+    row.evaluate((el) => getComputedStyle(el).backgroundColor);
   const idle = await color();
   await row.hover();
   expect(await color()).not.toBe(idle);
@@ -32,10 +53,17 @@ test("latest article hover, keyboard focus and press highlight without moving ta
   expect(await color()).not.toBe(idle);
   expect(await row.boundingBox()).toEqual(before);
   await page.keyboard.press("Enter");
-  await expect(page.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Async Rust without the hidden machinery",
+      level: 1,
+    }),
+  ).toBeVisible();
 });
 
-test("attention column is red and sorts problems to the top and back", async ({ page }) => {
+test("attention column is red and sorts problems to the top and back", async ({
+  page,
+}) => {
   await page.goto("/subscriptions");
   const header = page.getByRole("columnheader", { name: "Needs attention" });
   const rows = page.locator(".subscription-table tbody tr");
@@ -44,17 +72,25 @@ test("attention column is red and sorts problems to the top and back", async ({ 
   await expect(rows.first()).toContainText("Broken source");
   const badge = rows.first().locator(".subscription-attention");
   await expect(badge).toHaveText("!Needs attention");
-  expect(await badge.evaluate(el => getComputedStyle(el).color)).toBe("rgb(192, 75, 80)");
+  expect(await badge.evaluate((el) => getComputedStyle(el).color)).toBe(
+    "rgb(192, 75, 80)",
+  );
   await header.getByRole("button").click();
   await expect(header).toHaveAttribute("aria-sort", "descending");
   await expect(rows.first()).toContainText("This Week in Rust");
   await page.reload();
-  await expect(page.getByRole("columnheader", { name: "Needs attention" })).toHaveAttribute("aria-sort", "descending");
+  await expect(
+    page.getByRole("columnheader", { name: "Needs attention" }),
+  ).toHaveAttribute("aria-sort", "descending");
 });
 
-test("sidebar collapse spans its width and Settings keeps its target stable on hover", async ({ page }) => {
+test("sidebar collapse spans its width and Settings keeps its target stable on hover", async ({
+  page,
+}) => {
   await page.goto("/reader");
-  const sidebar = page.getByRole("complementary", { name: "Reader navigation" });
+  const sidebar = page.getByRole("complementary", {
+    name: "Reader navigation",
+  });
   const toggle = page.getByRole("button", { name: "Collapse sidebar" });
   const settings = page.getByRole("button", { name: "Settings", exact: true });
   await expect(settings).toBeVisible();
@@ -62,21 +98,34 @@ test("sidebar collapse spans its width and Settings keeps its target stable on h
   const sidebarBounds = (await sidebar.boundingBox())!;
   expect(bounds.width).toBeGreaterThanOrEqual(sidebarBounds.width - 2);
   const settingsBefore = await settings.boundingBox();
-  await page.mouse.move(bounds.x + bounds.width - 8, bounds.y + bounds.height / 2);
+  await page.mouse.move(
+    bounds.x + bounds.width - 8,
+    bounds.y + bounds.height / 2,
+  );
   expect(await settings.boundingBox()).toEqual(settingsBefore);
   await page.mouse.down();
   expect(await toggle.boundingBox()).toEqual(bounds);
   await page.mouse.up();
-  await expect(page.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    page.getByRole("button", { name: "Expand sidebar" }),
+  ).toHaveAttribute("aria-expanded", "false");
   await page.getByRole("button", { name: "Expand sidebar" }).click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(await settings.boundingBox()).toEqual(settingsBefore);
 });
 
-test("favicon is a real multi-resolution ICO served from the public path", async ({ page, request }) => {
+test("favicon is a real multi-resolution ICO served from the public path", async ({
+  page,
+  request,
+}) => {
   await page.goto("/reader");
-  await expect(page.locator('link[rel="icon"]')).toHaveAttribute("href", "/favicon.ico");
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute(
+    "href",
+    "/favicon.ico",
+  );
   const response = await request.get("/favicon.ico");
   expect(response.status()).toBe(200);
-  expect([...(await response.body()).subarray(0, 6)]).toEqual([0, 0, 1, 0, 4, 0]);
+  expect([...(await response.body()).subarray(0, 6)]).toEqual([
+    0, 0, 1, 0, 4, 0,
+  ]);
 });

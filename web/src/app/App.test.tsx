@@ -1,14 +1,20 @@
-import { fireEvent, render, screen, within, waitFor } from "@testing-library/preact";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
-import { App } from "./App";
-import { formatArticleDate } from "../ui/formatArticleDate";
-import { articles, mockClient } from "../test/mockClient";
 import { ApiClient, ApiError } from "../api/client";
+import { articles, mockClient } from "../test/mockClient";
+import { formatArticleDate } from "../ui/formatArticleDate";
+import { App } from "./App";
 
-const renderApp = () => render(<App client={mockClient()}/>);
+const renderApp = () => render(<App client={mockClient()} />);
 
 describe("reader application", () => {
-  beforeEach(()=>history.replaceState({},"","/reader"));
+  beforeEach(() => history.replaceState({}, "", "/reader"));
   it("highlights only the current navigation destination when returning home", async () => {
     const user = userEvent.setup();
     renderApp();
@@ -19,98 +25,198 @@ describe("reader application", () => {
     expect(all).not.toHaveClass("active");
     await user.click(all);
     expect(all).toHaveClass("active");
-    expect(screen.getByRole("button", { name: "Home" })).not.toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Home" })).not.toHaveClass(
+      "active",
+    );
   });
   it("opens the selected subscription settings from its list heading", async () => {
     const user = userEvent.setup();
     renderApp();
-    const sources = await screen.findByRole("navigation", { name: "Subscriptions" });
-    await user.click(within(sources).getByRole("button", { name: /This Week in Rust/ }));
-    const link = await screen.findByRole("link", { name: "Open settings for This Week in Rust" });
+    const sources = await screen.findByRole("navigation", {
+      name: "Subscriptions",
+    });
+    await user.click(
+      within(sources).getByRole("button", { name: /This Week in Rust/ }),
+    );
+    const link = await screen.findByRole("link", {
+      name: "Open settings for This Week in Rust",
+    });
     expect(link).toHaveAttribute("href", "/subscriptions/sub");
     await user.click(link);
-    expect(await screen.findByRole("dialog", { name: "Subscription details" })).toBeVisible();
+    expect(
+      await screen.findByRole("dialog", { name: "Subscription details" }),
+    ).toBeVisible();
     expect(window.location.pathname).toBe("/subscriptions/sub");
-    await user.click(screen.getByRole("button", { name: "Close subscriptions" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await user.click(
+      screen.getByRole("button", { name: "Close subscriptions" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     expect(location.pathname).toBe("/reader");
     expect(location.search).toContain("subscription=sub");
     expect(link).toBeVisible();
   });
   it("returns from details to the actual catalog with its search intact, then to Home", async () => {
-    const user=userEvent.setup();
-    history.replaceState({},"","/");
+    const user = userEvent.setup();
+    history.replaceState({}, "", "/");
     renderApp();
-    await user.click(await screen.findByRole("button",{name:"Subscriptions 1"}));
-    await user.type(screen.getByRole("searchbox",{name:"Search subscriptions"}),"Rust");
-    await user.click(screen.getByRole("link",{name:"This Week in Rust"}));
-    await user.click(screen.getByRole("button",{name:"Close subscriptions"}));
-    await waitFor(()=>expect(location.pathname).toBe("/subscriptions"));
-    expect(screen.getByRole("searchbox",{name:"Search subscriptions"})).toHaveValue("Rust");
+    await user.click(
+      await screen.findByRole("button", { name: "Subscriptions 1" }),
+    );
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search subscriptions" }),
+      "Rust",
+    );
+    await user.click(screen.getByRole("link", { name: "This Week in Rust" }));
+    await user.click(
+      screen.getByRole("button", { name: "Close subscriptions" }),
+    );
+    await waitFor(() => expect(location.pathname).toBe("/subscriptions"));
+    expect(
+      screen.getByRole("searchbox", { name: "Search subscriptions" }),
+    ).toHaveValue("Rust");
     await user.keyboard("{Escape}");
-    await waitFor(()=>expect(location.pathname).toBe("/"));
+    await waitFor(() => expect(location.pathname).toBe("/"));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByRole("button",{name:"Home"})).toHaveClass("active");
+    expect(screen.getByRole("button", { name: "Home" })).toHaveClass("active");
   });
   it("closes a direct details link to the reader without inventing a catalog parent", async () => {
-    history.replaceState({},"","/subscriptions/sub");
+    history.replaceState({}, "", "/subscriptions/sub");
     renderApp();
-    await userEvent.setup().click(await screen.findByRole("button",{name:"Close subscriptions"}));
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByRole("button", { name: "Close subscriptions" }),
+      );
     expect(location.pathname).toBe("/reader");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("returns from the web feed builder to the add dialog with its draft preserved", async () => {
-    const user=userEvent.setup();renderApp();
-    await user.click(await screen.findByRole("button",{name:"Add subscription"}));
-    await user.type(screen.getByRole("textbox",{name:"Feed or website URL"}),"https://example.com/feed");
-    await user.click(screen.getByRole("button",{name:"Build a Web feed"}));
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(
+      await screen.findByRole("button", { name: "Add subscription" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Feed or website URL" }),
+      "https://example.com/feed",
+    );
+    await user.click(screen.getByRole("button", { name: "Build a Web feed" }));
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog",{name:"Add a subscription"})).toBeVisible();
-    expect(screen.getByRole("textbox",{name:"Feed or website URL"})).toHaveValue("https://example.com/feed");
+    expect(
+      screen.getByRole("dialog", { name: "Add a subscription" }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("textbox", { name: "Feed or website URL" }),
+    ).toHaveValue("https://example.com/feed");
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
   it("replaces the visible batch through stable cursors and preserves the position in the URL", async () => {
-    const client=mockClient();
-    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{id:"account",displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[articles[0]],total:100,unreadTotal:75,olderCursor:"older-1"}});
-    const list=vi.spyOn(client,"listArticles").mockResolvedValue({articles:[articles[1]],total:100,unreadTotal:75,newerCursor:"newer-2",olderCursor:"older-2"});
-    render(<App client={client}/>);
+    const client = mockClient();
+    vi.spyOn(client, "bootstrap").mockResolvedValue({
+      account: { id: "account", displayName: "Test", initials: "TB" },
+      workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
+      activeWorkspaceId: "ws",
+      subscriptions: [],
+      articlePage: {
+        articles: [articles[0]],
+        total: 100,
+        unreadTotal: 75,
+        olderCursor: "older-1",
+      },
+    });
+    const list = vi.spyOn(client, "listArticles").mockResolvedValue({
+      articles: [articles[1]],
+      total: 100,
+      unreadTotal: 75,
+      newerCursor: "newer-2",
+      olderCursor: "older-2",
+    });
+    render(<App client={client} />);
     expect(await screen.findByText("1–50 of 100")).toBeVisible();
-    expect(screen.getByRole("button", {name:"Feed (75)"})).toBeVisible();
-    expect(screen.getByRole("heading", {name:"Feed (75)"})).toBeVisible();
-    await userEvent.setup().click(screen.getByRole("button",{name:"Older →"}));
-    expect(await screen.findByRole("heading",{name:articles[1].title,level:2})).toBeVisible();
-    expect(list).toHaveBeenCalledWith("ws","feed",undefined,"older-1","older");
+    expect(screen.getByRole("button", { name: "Feed (75)" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Feed (75)" })).toBeVisible();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Older →" }));
+    expect(
+      await screen.findByRole("heading", { name: articles[1].title, level: 2 }),
+    ).toBeVisible();
+    expect(list).toHaveBeenCalledWith(
+      "ws",
+      "feed",
+      undefined,
+      "older-1",
+      "older",
+    );
     expect(window.location.search).toContain("cursor=older-1");
     expect(window.location.search).toContain("batch=2");
-    expect(screen.getByRole("navigation",{name:"Article pages"})).toHaveClass("article-pager");
+    expect(
+      screen.getByRole("navigation", { name: "Article pages" }),
+    ).toHaveClass("article-pager");
   });
   it("formats article timestamps in stable UTC and omits relative age and missing authors", async () => {
-    expect(formatArticleDate("2026-09-26T14:06:26.316789727+00:00")).toBe("2026-sep-26 14:06:26");
-    const timestamped={...articles[0],age:"2026-09-26T14:06:26.316789727+00:00",author:undefined};
-    const client=mockClient();
-    vi.spyOn(client,"bootstrap").mockResolvedValue({account:{id:"account",displayName:"Test",initials:"TB"},workspaces:[{id:"ws",name:"Data engineering",archived:false}],activeWorkspaceId:"ws",subscriptions:[],articlePage:{articles:[timestamped],total:1,unreadTotal:1}});
-    render(<App client={client}/>);
-    expect((await screen.findAllByText("2026-sep-26 14:06:26")).length).toBeGreaterThanOrEqual(2);
+    expect(formatArticleDate("2026-09-26T14:06:26.316789727+00:00")).toBe(
+      "2026-sep-26 14:06:26",
+    );
+    const timestamped = {
+      ...articles[0],
+      age: "2026-09-26T14:06:26.316789727+00:00",
+      author: undefined,
+    };
+    const client = mockClient();
+    vi.spyOn(client, "bootstrap").mockResolvedValue({
+      account: { id: "account", displayName: "Test", initials: "TB" },
+      workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
+      activeWorkspaceId: "ws",
+      subscriptions: [],
+      articlePage: { articles: [timestamped], total: 1, unreadTotal: 1 },
+    });
+    render(<App client={client} />);
+    expect(
+      (await screen.findAllByText("2026-sep-26 14:06:26")).length,
+    ).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(/Unknown author| ago/)).not.toBeInTheDocument();
   });
   it("opens a failed subscription's update log from the sidebar", async () => {
     history.replaceState({}, "", "/");
     const client = mockClient();
-    const failed = { id:"failed",name:"Broken feed",sourceType:"feed" as const,count:0,status:"active" as const,error:"outbound request timed out" };
+    const failed = {
+      id: "failed",
+      name: "Broken feed",
+      sourceType: "feed" as const,
+      count: 0,
+      status: "active" as const,
+      error: "outbound request timed out",
+    };
     vi.spyOn(client, "bootstrap").mockResolvedValue({
       account: { id: "account", displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
-      activeWorkspaceId: "ws", subscriptions: [failed], articlePage:{articles:[],total:0,unreadTotal:0},
+      activeWorkspaceId: "ws",
+      subscriptions: [failed],
+      articlePage: { articles: [], total: 0, unreadTotal: 0 },
     });
     vi.spyOn(client, "getSubscription").mockResolvedValue(failed);
-    const activity = vi.spyOn(client, "subscriptionActivity").mockResolvedValue([{
-      id:"attempt",occurredAt:"2026-09-26T10:00:00Z",successful:false,diagnostic:"connection refused",
-    }]);
+    const activity = vi
+      .spyOn(client, "subscriptionActivity")
+      .mockResolvedValue([
+        {
+          id: "attempt",
+          occurredAt: "2026-09-26T10:00:00Z",
+          successful: false,
+          diagnostic: "connection refused",
+        },
+      ]);
     const user = userEvent.setup();
-    render(<App client={client}/>);
+    render(<App client={client} />);
 
-    await user.click(await screen.findByRole("button", { name: "Open update log for Broken feed" }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Open update log for Broken feed",
+      }),
+    );
     expect(window.location.pathname).toBe("/subscriptions/failed/activity");
     expect(await screen.findByText("connection refused")).toBeVisible();
     expect(activity).toHaveBeenCalledTimes(1);
@@ -123,7 +229,9 @@ describe("reader application", () => {
 
     await user.click(await screen.findByRole("link", { name: "Reader home" }));
     expect(window.location.pathname).toBe("/");
-    expect(await screen.findByRole("heading", { name: "Your reading activity" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Your reading activity" }),
+    ).toBeVisible();
   });
 
   it("shows the active subscription count beside the catalog link", async () => {
@@ -135,12 +243,18 @@ describe("reader application", () => {
   it("collapses and expands the sidebar without removing its navigation", async () => {
     const user = userEvent.setup();
     renderApp();
-    const sidebar = await screen.findByRole("complementary", { name: "Reader navigation" });
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Reader navigation",
+    });
     const collapse = screen.getByRole("button", { name: "Collapse sidebar" });
     await user.click(collapse);
     expect(sidebar).toHaveClass("sidebar--collapsed");
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: /^Feed \(\d+\)$/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Expand sidebar" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: /^Feed \(\d+\)$/ }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Expand sidebar" }));
     expect(sidebar).not.toHaveClass("sidebar--collapsed");
   });
@@ -150,17 +264,23 @@ describe("reader application", () => {
     renderApp();
     await user.click(await screen.findByRole("button", { name: "Home" }));
     expect(window.location.pathname).toBe("/");
-    expect(screen.getByRole("heading", { name: "Your reading activity" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Your reading activity" }),
+    ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open feed" }));
     expect(window.location.pathname).toBe("/reader");
-    expect(screen.getByRole("heading", { name: /^Feed \(\d+\)$/ })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: /^Feed \(\d+\)$/ }),
+    ).toBeVisible();
   });
 
   it("centers an accessible spinner while bootstrap is pending", () => {
     const client = new ApiClient(async () => new Promise(() => undefined));
-    render(<App client={client}/>);
+    render(<App client={client} />);
 
-    const loading = screen.getByRole("status", { name: "Opening your library" });
+    const loading = screen.getByRole("status", {
+      name: "Opening your library",
+    });
     expect(loading).toHaveClass("bootstrap-loading");
     expect(loading.querySelector(".bootstrap-loading__spinner")).not.toBeNull();
     expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
@@ -170,9 +290,11 @@ describe("reader application", () => {
     const client = new ApiClient(async () => {
       throw new ApiError(500, "storage operation failed");
     });
-    render(<App client={client}/>);
+    render(<App client={client} />);
 
-    expect(await screen.findByRole("heading", { name: "Reader is unavailable" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Reader is unavailable" }),
+    ).toBeVisible();
     expect(screen.getByText("storage operation failed")).toBeVisible();
     expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
     expect(screen.queryByText("Opening your library…")).not.toBeInTheDocument();
@@ -186,26 +308,42 @@ describe("reader application", () => {
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
       activeWorkspaceId: "ws",
       subscriptions: [],
-      articlePage:{articles:[pending],total:1,unreadTotal:1},
+      articlePage: { articles: [pending], total: 1, unreadTotal: 1 },
     });
-    const getArticle = vi.spyOn(client, "getArticle").mockResolvedValue(
-      { ...pending, fullText: "ready", body: ["Extracted body"] },
-    );
+    const getArticle = vi.spyOn(client, "getArticle").mockResolvedValue({
+      ...pending,
+      fullText: "ready",
+      body: ["Extracted body"],
+    });
 
-    render(<App client={client}/>);
+    render(<App client={client} />);
     const readerStatus = await screen.findByText(/Fetching the full article/);
     expect(readerStatus).toBeVisible();
     expect(readerStatus.querySelector(".spinner")).not.toBeNull();
-    const contentLoading = screen.getByRole("status", { name: "Loading full article content" });
+    const contentLoading = screen.getByRole("status", {
+      name: "Loading full article content",
+    });
     expect(contentLoading.querySelector(".spinner")).not.toBeNull();
-    const row = screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article");
+    const row = screen
+      .getByRole("heading", { name: pending.title, level: 2 })
+      .closest("article");
     expect(row?.querySelector(".fulltext--pending .spinner")).not.toBeNull();
 
-    expect(await screen.findByText("Extracted body", {}, { timeout: 2000 })).toBeVisible();
+    expect(
+      await screen.findByText("Extracted body", {}, { timeout: 2000 }),
+    ).toBeVisible();
     expect(getArticle).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(/Fetching the full article/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "Loading full article content" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: pending.title, level: 2 }).closest("article")).toBe(row);
+    expect(
+      screen.queryByText(/Fetching the full article/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("status", { name: "Loading full article content" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen
+        .getByRole("heading", { name: pending.title, level: 2 })
+        .closest("article"),
+    ).toBe(row);
   });
 
   it("renders sanitized article markup as structured content", async () => {
@@ -213,20 +351,29 @@ describe("reader application", () => {
     const formatted = {
       ...articles[0],
       body: [],
-      bodyHtml: '<h2>Benefits</h2><p>Use <strong>structured data</strong>.</p><ul><li>Fast</li></ul><img src="https://example.com/diagram.png" alt="CSV diagram">',
+      bodyHtml:
+        '<h2>Benefits</h2><p>Use <strong>structured data</strong>.</p><ul><li>Fast</li></ul><img src="https://example.com/diagram.png" alt="CSV diagram">',
     };
     vi.spyOn(client, "bootstrap").mockResolvedValue({
       account: { id: "account", displayName: "Test", initials: "TB" },
       workspaces: [{ id: "ws", name: "Data engineering", archived: false }],
-      activeWorkspaceId: "ws", subscriptions: [], articlePage:{articles:[formatted],total:1,unreadTotal:1},
+      activeWorkspaceId: "ws",
+      subscriptions: [],
+      articlePage: { articles: [formatted], total: 1, unreadTotal: 1 },
     });
-    render(<App client={client}/>);
+    render(<App client={client} />);
 
-    const reader = await screen.findByRole("article", { name: "Article reader" });
-    expect(within(reader).getByRole("heading", { name: "Benefits", level: 2 })).toBeVisible();
+    const reader = await screen.findByRole("article", {
+      name: "Article reader",
+    });
+    expect(
+      within(reader).getByRole("heading", { name: "Benefits", level: 2 }),
+    ).toBeVisible();
     expect(within(reader).getByText("structured data").tagName).toBe("STRONG");
     expect(within(reader).getByText("Fast").closest("li")).not.toBeNull();
-    expect(within(reader).getByRole("img", { name: "CSV diagram" })).toHaveAttribute("src", "https://example.com/diagram.png");
+    expect(
+      within(reader).getByRole("img", { name: "CSV diagram" }),
+    ).toHaveAttribute("src", "https://example.com/diagram.png");
   });
 
   it("opens an account menu before an explicit sign out", async () => {
@@ -234,9 +381,11 @@ describe("reader application", () => {
     const client = mockClient();
     const signOut = vi.fn(async () => undefined);
     client.signOut = signOut;
-    render(<App client={client}/>);
+    render(<App client={client} />);
 
-    const accountMenu = await screen.findByRole("button", { name: "Account menu" });
+    const accountMenu = await screen.findByRole("button", {
+      name: "Account menu",
+    });
     await user.click(accountMenu);
     expect(signOut).not.toHaveBeenCalled();
     expect(screen.getByRole("menu")).toBeVisible();
@@ -247,30 +396,57 @@ describe("reader application", () => {
   });
 
   it("opens an article and marks it read without moving its row or changing Read later", async () => {
-    const user = userEvent.setup(); renderApp();
-    const row = (await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 2 })).closest("article")!;
+    const user = userEvent.setup();
+    renderApp();
+    const row = (
+      await screen.findByRole("heading", {
+        name: "Async Rust without the hidden machinery",
+        level: 2,
+      })
+    ).closest("article")!;
     expect(row).not.toHaveClass("read");
-    expect(within(row).getByRole("button", { name: "Read article later" })).toBeInTheDocument();
-    await user.click(within(row).getByRole("button", { name: /Async Rust without/ }));
+    expect(
+      within(row).getByRole("button", { name: "Read article later" }),
+    ).toBeInTheDocument();
+    await user.click(
+      within(row).getByRole("button", { name: /Async Rust without/ }),
+    );
     expect(row).toHaveClass("read");
-    expect(within(row).getByRole("button", { name: "Read article later" })).toBeInTheDocument();
+    expect(
+      within(row).getByRole("button", { name: "Read article later" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps reading and Read later independent", async () => {
-    const user = userEvent.setup(); renderApp();
-    await screen.findByRole("heading",{name:"Async Rust without the hidden machinery",level:1});
-    const reader=screen.getByRole("article",{name:"Article reader"});
-    expect(within(reader).getByRole("button", { name: "Mark read" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(reader).getByRole("button", { name: "Read later" })).toHaveAttribute("aria-pressed", "false");
-    await user.click(within(reader).getByRole("button", { name: "Read later" }));
-    expect(within(reader).getByRole("button", { name: "Mark read" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(reader).getByRole("button", { name: "Remove from later" })).toHaveAttribute("aria-pressed", "true");
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole("heading", {
+      name: "Async Rust without the hidden machinery",
+      level: 1,
+    });
+    const reader = screen.getByRole("article", { name: "Article reader" });
+    expect(
+      within(reader).getByRole("button", { name: "Mark read" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(reader).getByRole("button", { name: "Read later" }),
+    ).toHaveAttribute("aria-pressed", "false");
+    await user.click(
+      within(reader).getByRole("button", { name: "Read later" }),
+    );
+    expect(
+      within(reader).getByRole("button", { name: "Mark read" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(reader).getByRole("button", { name: "Remove from later" }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("shows a disabled search stub and never renders an input", async () => {
     renderApp();
     const search = await screen.findAllByRole("button", { name: /Search/ });
-    expect(search).toHaveLength(2);search.forEach(item=>expect(item).toBeDisabled());
+    expect(search).toHaveLength(2);
+    search.forEach((item) => expect(item).toBeDisabled());
     expect(screen.getByText("Coming later")).toBeVisible();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
@@ -279,49 +455,142 @@ describe("reader application", () => {
     history.replaceState({}, "", "/subscriptions/sub");
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     const user = userEvent.setup();
-    const subscription={id:"sub",name:"This Week in Rust",sourceTitle:"This Week in Rust",sourceUrl:"https://example.com/feed",sourceType:"feed" as const,personalNote:"",count:3,unreadCount:2,status:"active" as const};
-    const client=mockClient({"/api/subscriptions/sub":subscription});const signOut=vi.spyOn(client,"signOut");
-    const view=render(<App client={client}/>);
-    await user.type(await screen.findByRole("textbox",{name:"Personal note"}),"keep me");
-    await user.click(screen.getByRole("button",{name:"← Back"}));
+    const subscription = {
+      id: "sub",
+      name: "This Week in Rust",
+      sourceTitle: "This Week in Rust",
+      sourceUrl: "https://example.com/feed",
+      sourceType: "feed" as const,
+      personalNote: "",
+      count: 3,
+      unreadCount: 2,
+      status: "active" as const,
+    };
+    const client = mockClient({ "/api/subscriptions/sub": subscription });
+    const signOut = vi.spyOn(client, "signOut");
+    const view = render(<App client={client} />);
+    await user.type(
+      await screen.findByRole("textbox", { name: "Personal note" }),
+      "keep me",
+    );
+    await user.click(screen.getByRole("button", { name: "← Back" }));
     expect(window.location.pathname).toBe("/subscriptions/sub");
-    history.pushState({},"","/");window.dispatchEvent(new PopStateEvent("popstate"));
+    history.pushState({}, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
     expect(window.location.pathname).toBe("/subscriptions/sub");
-    await user.click(screen.getByRole("button",{name:"Account menu"}));await user.click(screen.getByRole("menuitem",{name:"Sign out"}));
-    expect(signOut).not.toHaveBeenCalled();expect(confirm).toHaveBeenCalledTimes(3);
-    view.unmount();confirm.mockRestore();history.replaceState({},"","/");
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
+    expect(signOut).not.toHaveBeenCalled();
+    expect(confirm).toHaveBeenCalledTimes(3);
+    view.unmount();
+    confirm.mockRestore();
+    history.replaceState({}, "", "/");
   });
 
-  it("uses a generic accessible name for every subscription options menu",async()=>{renderApp();expect(await screen.findAllByRole("button",{name:"More options"})).not.toHaveLength(0);expect(screen.queryByRole("button",{name:"Subscription actions"})).not.toBeInTheDocument()});
-
-  it("labels every article toolbar action with a stable hover tooltip",async()=>{
+  it("uses a generic accessible name for every subscription options menu", async () => {
     renderApp();
-    const reader=await screen.findByRole("article",{name:"Article reader"});
-    const actions=[...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip")];
+    expect(
+      await screen.findAllByRole("button", { name: "More options" }),
+    ).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("button", { name: "Subscription actions" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("labels every article toolbar action with a stable hover tooltip", async () => {
+    renderApp();
+    const reader = await screen.findByRole("article", {
+      name: "Article reader",
+    });
+    const actions = [
+      ...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip"),
+    ];
     expect(actions).toHaveLength(5);
-    for(const action of actions){
+    for (const action of actions) {
       expect(action.dataset.tooltip).toBeTruthy();
       expect(action.getAttribute("aria-label")).toBeTruthy();
     }
-    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Terms","Open original"]);
-    expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toBeDisabled();
-    expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toHaveAttribute("data-tooltip","Configure DeepSeek in Settings");
+    expect(actions.map((action) => action.getAttribute("aria-label"))).toEqual([
+      "Mark read",
+      "Read later",
+      "Translate paragraphs",
+      "Terms",
+      "Open original",
+    ]);
+    expect(
+      within(reader).getByRole("button", { name: "Translate paragraphs" }),
+    ).toBeDisabled();
+    expect(
+      within(reader).getByRole("button", { name: "Translate paragraphs" }),
+    ).toHaveAttribute("data-tooltip", "Configure DeepSeek in Settings");
   });
 
   it("preserves the discovered source title when adding a subscription", async () => {
-    const calls:{path:string;body?:Record<string,unknown>}[]=[];
-    const base=mockClient();
-    const client=new ApiClient(async<T,>(path:string,init?:RequestInit)=>{calls.push({path,body:init?.body?JSON.parse(String(init.body)):undefined});if(path.startsWith("/api/bootstrap"))return await base.bootstrap() as T;if(path==="/api/feeds/discover")return {title:"Canonical source title",kind:"rss",url:"https://example.com/feed",articles:[]} as T;if(path==="/api/subscriptions")return {id:"added",name:"Canonical source title",count:0,unreadCount:0,status:"active"} as T;return undefined as T});
-    const user=userEvent.setup();render(<App client={client}/>);await user.click(await screen.findByRole("button",{name:"Add subscription"}));await user.type(screen.getByLabelText("Feed or website URL"),"https://example.com/feed");await user.click(screen.getByRole("button",{name:"Check URL"}));await user.click(await within(screen.getByRole("dialog")).findByRole("button",{name:"Add subscription"}));
-    expect(calls.find(call=>call.path==="/api/subscriptions")?.body).toEqual({workspace_id:"ws",url:"https://example.com/feed",title:"Canonical source title"});
+    const calls: { path: string; body?: Record<string, unknown> }[] = [];
+    const base = mockClient();
+    const client = new ApiClient(
+      async <T,>(path: string, init?: RequestInit) => {
+        calls.push({
+          path,
+          body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        });
+        if (path.startsWith("/api/bootstrap"))
+          return (await base.bootstrap()) as T;
+        if (path === "/api/feeds/discover")
+          return {
+            title: "Canonical source title",
+            kind: "rss",
+            url: "https://example.com/feed",
+            articles: [],
+          } as T;
+        if (path === "/api/subscriptions")
+          return {
+            id: "added",
+            name: "Canonical source title",
+            count: 0,
+            unreadCount: 0,
+            status: "active",
+          } as T;
+        return undefined as T;
+      },
+    );
+    const user = userEvent.setup();
+    render(<App client={client} />);
+    await user.click(
+      await screen.findByRole("button", { name: "Add subscription" }),
+    );
+    await user.type(
+      screen.getByLabelText("Feed or website URL"),
+      "https://example.com/feed",
+    );
+    await user.click(screen.getByRole("button", { name: "Check URL" }));
+    await user.click(
+      await within(screen.getByRole("dialog")).findByRole("button", {
+        name: "Add subscription",
+      }),
+    );
+    expect(
+      calls.find((call) => call.path === "/api/subscriptions")?.body,
+    ).toEqual({
+      workspace_id: "ws",
+      url: "https://example.com/feed",
+      title: "Canonical source title",
+    });
   });
 
   it("requires a reason and retains it while validating pause", async () => {
-    const user = userEvent.setup(); renderApp();
-    const subscriptions=await screen.findByRole("navigation",{name:"Subscriptions"});
-    await user.click(within(subscriptions).getByRole("button", { name: /This Week in Rust/ }));
+    const user = userEvent.setup();
+    renderApp();
+    const subscriptions = await screen.findByRole("navigation", {
+      name: "Subscriptions",
+    });
+    await user.click(
+      within(subscriptions).getByRole("button", { name: /This Week in Rust/ }),
+    );
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(screen.getByRole("button", { name: "Pause This Week in Rust" }));
+    await user.click(
+      screen.getByRole("button", { name: "Pause This Week in Rust" }),
+    );
     const reason = screen.getByLabelText(/Reason/);
     const submit = screen.getByRole("button", { name: "Pause subscription" });
     fireEvent.blur(reason);
@@ -332,33 +601,75 @@ describe("reader application", () => {
   });
 
   it("archives with a reason and restores without losing the library", async () => {
-    const user = userEvent.setup(); renderApp();
-    await user.click(await screen.findByRole("button", { name: /Data engineering/ }));
+    const user = userEvent.setup();
+    renderApp();
+    await user.click(
+      await screen.findByRole("button", { name: /Data engineering/ }),
+    );
     await user.click(screen.getByRole("button", { name: "Archive workspace" }));
     await user.type(screen.getByLabelText(/Reason/), "Taking a break");
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Archive workspace" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Archive workspace",
+      }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 550));
     expect(screen.getByText(/workspace is archived/i)).toBeVisible();
-    expect(screen.getByRole("heading",{name:"Async Rust without the hidden machinery",level:2})).toBeVisible();
+    expect(
+      screen.getByRole("heading", {
+        name: "Async Rust without the hidden machinery",
+        level: 2,
+      }),
+    ).toBeVisible();
   });
 
   it("supports keyboard next, previous, save and later", async () => {
     renderApp();
-    await screen.findByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 });
-    fireEvent.keyDown(window,{key:"j"});
-    expect(await screen.findByRole("heading", { name: "The durable queue is the product", level: 1 })).toBeVisible();
-    fireEvent.keyDown(window,{key:"l"});
-    expect(await screen.findByRole("button", { name: "Remove from later" })).toBeVisible();
-    fireEvent.keyDown(window,{key:"k"});
-    expect(screen.getByRole("heading", { name: "Async Rust without the hidden machinery", level: 1 })).toBeVisible();
+    await screen.findByRole("heading", {
+      name: "Async Rust without the hidden machinery",
+      level: 1,
+    });
+    fireEvent.keyDown(window, { key: "j" });
+    expect(
+      await screen.findByRole("heading", {
+        name: "The durable queue is the product",
+        level: 1,
+      }),
+    ).toBeVisible();
+    fireEvent.keyDown(window, { key: "l" });
+    expect(
+      await screen.findByRole("button", { name: "Remove from later" }),
+    ).toBeVisible();
+    fireEvent.keyDown(window, { key: "k" });
+    expect(
+      screen.getByRole("heading", {
+        name: "Async Rust without the hidden machinery",
+        level: 1,
+      }),
+    ).toBeVisible();
   });
 
   it("preserves source languages", async () => {
     renderApp();
     expect(await screen.findByText("流式系统中的背压设计")).toBeVisible();
-    await userEvent.setup().click(screen.getByRole("button",{name:/Data engineering/}));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Data engineering/ }));
     expect(screen.getByRole("button", { name: /Финансы/ })).toBeInTheDocument();
   });
 
-  it("opens the subscription catalog and stable detail route",async()=>{const user=userEvent.setup();history.replaceState({},"","/reader");renderApp();await screen.findByRole("heading",{name:/^Feed \(\d+\)$/});await user.click(screen.getByRole("button",{name:"Subscriptions 1"}));expect(await screen.findByRole("heading",{name:"Subscriptions"})).toBeVisible();expect(location.pathname).toBe("/subscriptions");await user.click(screen.getByRole("link",{name:"This Week in Rust"}));expect(location.pathname).toBe("/subscriptions/sub");history.replaceState({},"","/")});
+  it("opens the subscription catalog and stable detail route", async () => {
+    const user = userEvent.setup();
+    history.replaceState({}, "", "/reader");
+    renderApp();
+    await screen.findByRole("heading", { name: /^Feed \(\d+\)$/ });
+    await user.click(screen.getByRole("button", { name: "Subscriptions 1" }));
+    expect(
+      await screen.findByRole("heading", { name: "Subscriptions" }),
+    ).toBeVisible();
+    expect(location.pathname).toBe("/subscriptions");
+    await user.click(screen.getByRole("link", { name: "This Week in Rust" }));
+    expect(location.pathname).toBe("/subscriptions/sub");
+    history.replaceState({}, "", "/");
+  });
 });

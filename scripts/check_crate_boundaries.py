@@ -14,18 +14,20 @@ CRATES = ROOT / "crates"
 # Every internal dependency must be listed. A new edge fails closed until its
 # architectural ownership is reviewed.
 ALLOWED: dict[str, set[str]] = {
+    "reader-runtime": set(),
     "reader-core": set(),
     "reader-application": {"reader-core"},
     "reader-collectors": {"reader-core"},
     "reader-web-runtime": set(),
-    "reader-glossary": {"reader-web-runtime"},
-    "reader-ai": {"reader-web-runtime", "reader-glossary"},
+    "reader-glossary": {"reader-web-runtime", "reader-runtime"},
+    "reader-ai": {"reader-web-runtime", "reader-glossary", "reader-runtime"},
     "reader-ingest": {"reader-core", "reader-collectors", "reader-web-runtime"},
-    "reader-server-contracts": {"reader-core"},
-    "reader-server": {"reader-core", "reader-application", "reader-server-contracts", "reader-web-runtime", "reader-ai", "reader-glossary"},
+    "reader-server-contracts": set(),
+    "reader-server": {"reader-runtime","reader-core", "reader-application", "reader-server-contracts", "reader-web-runtime", "reader-ai", "reader-glossary"},
     "reader-server-ui": set(),
     "reader-storage-postgres": {"reader-core", "reader-application", "reader-ingest", "reader-ai", "reader-glossary"},
     "inoreader": {
+        "reader-runtime",
         "reader-core", "reader-application", "reader-collectors", "reader-ingest",
         "reader-server", "reader-server-contracts", "reader-server-ui",
         "reader-storage-postgres", "reader-web-runtime", "reader-ai", "reader-glossary",

@@ -25,3 +25,7 @@ uuid.workspace = true
 [dev-dependencies]
 testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
+reader-server = { path = "../reader-server" }
+reader-server-contracts = { path = "../reader-server-contracts" }
+reader-server-ui = { path = "../reader-server-ui" }
+axum.workspace = true

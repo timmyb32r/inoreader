@@ -63,6 +63,7 @@ pub enum AiError {
     Cancelled,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Balance {
@@ -70,6 +71,7 @@ pub struct Balance {
     pub balances: Vec<BalanceAmount>,
     pub updated_at: DateTime<Utc>,
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BalanceAmount {
@@ -78,6 +80,7 @@ pub struct BalanceAmount {
     pub granted: String,
     pub topped_up: String,
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProfile {
@@ -90,6 +93,7 @@ pub struct AiProfile {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub availability_reason: Option<String>,
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
@@ -97,6 +101,7 @@ pub enum MessageRole {
     Assistant,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageStatus {
@@ -107,6 +112,7 @@ pub enum MessageStatus {
     Failed,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatStatus {
@@ -128,6 +134,7 @@ impl ChatStatus {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
@@ -142,6 +149,7 @@ pub struct ChatMessage {
     pub purpose: Option<MessagePurpose>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticleChat {
@@ -279,6 +287,7 @@ impl AttemptTask {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessagePurpose {
@@ -286,6 +295,7 @@ pub enum MessagePurpose {
     Chat,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GenerationPhase {
@@ -293,6 +303,7 @@ pub enum GenerationPhase {
     Verifying,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CallStatus {
@@ -305,6 +316,7 @@ pub enum CallStatus {
 
 /// One potentially billable provider request. No usage means unknown, not zero.
 /// Request IDs and assistant IDs retain provenance across explicit retries.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderCall {
@@ -332,6 +344,7 @@ pub struct ClaimedChat {
 
 /// Usage comes directly from provider completion metadata. Decimal monetary
 /// strings are retained exactly; a missing provider usage event stays unknown.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
@@ -366,7 +379,7 @@ pub trait AiStore: Send + Sync {
         claim: &crate::ClaimedDefinitions,
         state: crate::DefinitionState,
         usage: Option<Usage>,
-        reply: Option<crate::DefinitionReply>,
+        reply: Option<crate::ProviderReply>,
     ) -> Result<(), AiError>;
 
     async fn translations(
@@ -388,6 +401,7 @@ pub trait AiStore: Send + Sync {
         claim: &crate::ClaimedTranslation,
         state: crate::TranslationState,
         usage: Option<Usage>,
+        reply: Option<crate::ProviderReply>,
     ) -> Result<(), AiError>;
 
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError>;
@@ -477,13 +491,13 @@ pub trait AiProvider: Send + Sync {
         &self,
         key: &str,
         input: crate::DefinitionsInput,
-    ) -> Result<crate::DefinitionReply, AiError>;
+    ) -> Result<crate::ProviderReply, AiError>;
 
     async fn translate(
         &self,
         key: &str,
         input: crate::TranslationInput,
-    ) -> Result<(crate::ParagraphTranslation, Usage), AiError>;
+    ) -> Result<crate::ProviderReply, AiError>;
 
     async fn balance(&self, key: &str) -> Result<Balance, AiError>;
     async fn generate(

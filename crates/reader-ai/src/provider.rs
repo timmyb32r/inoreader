@@ -98,14 +98,14 @@ where
         &self,
         key: &str,
         input: crate::DefinitionsInput,
-    ) -> Result<crate::DefinitionReply, AiError> {
+    ) -> Result<crate::ProviderReply, AiError> {
         self.define_entities(key, input).await
     }
     async fn translate(
         &self,
         key: &str,
         input: crate::TranslationInput,
-    ) -> Result<(crate::ParagraphTranslation, Usage), AiError> {
+    ) -> Result<crate::ProviderReply, AiError> {
         self.translate_paragraph(key, input).await
     }
 

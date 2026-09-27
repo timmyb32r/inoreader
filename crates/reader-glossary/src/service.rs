@@ -129,25 +129,25 @@ impl GlossaryService {
             }
         }
     }
-    pub fn spawn_workers(self: &Arc<Self>) -> Vec<tokio::task::JoinHandle<()>> {
-        let mut workers = Vec::new();
+    pub fn spawn_workers(self: &Arc<Self>, supervisor: &mut reader_runtime::TaskSupervisor) {
         for _ in 0..self.policy.config().workers {
             let service = self.clone();
-            workers.push(tokio::spawn(async move {
-                loop {
+            supervisor.spawn("telegram_poll", move |mut stop| async move {
+                while !stop.requested() {
                     if let Err(error) = service.poll_once().await {
                         log::error!("telegram_poll outcome=failed classification={error}");
                     }
-                    tokio::time::sleep(Duration::from_millis(
+                    stop.sleep(Duration::from_millis(
                         service.policy.config().worker_poll_milliseconds,
                     ))
                     .await;
                 }
-            }));
+                Ok(())
+            });
         }
         let service = self.clone();
-        workers.push(tokio::spawn(async move {
-            loop {
+        supervisor.spawn("telegram_projection", move |mut stop| async move {
+            while !stop.requested() {
                 if let Err(error) = service
                     .store
                     .apply_pending(service.policy.config().batch_size)
@@ -155,16 +155,20 @@ impl GlossaryService {
                 {
                     log::error!("telegram_projection outcome=failed classification={error}");
                 }
-                tokio::time::sleep(Duration::from_millis(
+                stop.sleep(Duration::from_millis(
                     service.policy.config().worker_poll_milliseconds,
                 ))
                 .await;
             }
-        }));
+            Ok(())
+        });
         let service = self.clone();
-        workers.push(tokio::spawn(async move {
-            loop {
+        supervisor.spawn("telegram_history", move |mut stop| async move {
+            while !stop.requested() {
                 for _ in 0..service.policy.config().history_pages_per_run {
+                    if stop.requested() {
+                        break;
+                    }
                     match service.history_once().await {
                         Ok(true) => {}
                         Ok(false) => break,
@@ -173,17 +177,17 @@ impl GlossaryService {
                             break;
                         }
                     }
-                    tokio::time::sleep(Duration::from_millis(
+                    stop.sleep(Duration::from_millis(
                         service.policy.config().public_page_interval_milliseconds,
                     ))
                     .await;
                 }
-                tokio::time::sleep(Duration::from_millis(
+                stop.sleep(Duration::from_millis(
                     service.policy.config().worker_poll_milliseconds,
                 ))
                 .await;
             }
-        }));
-        workers
+            Ok(())
+        });
     }
 }

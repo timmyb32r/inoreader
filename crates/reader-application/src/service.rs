@@ -1,4 +1,4 @@
-use crate::{ReaderRepository, RepositoryError};
+use crate::RepositoryError;
 use chrono::{DateTime, Utc};
 use reader_core::*;
 use std::sync::Arc;
@@ -19,7 +19,9 @@ pub struct ReaderService<R> {
     reason_policy: ReasonPolicy,
 }
 
-impl<R: ReaderRepository> ReaderService<R> {
+impl<R: crate::WorkspaceRepository + crate::SubscriptionRepository + crate::ArticleRepository>
+    ReaderService<R>
+{
     pub fn new(repository: Arc<R>, reason_policy: ReasonPolicy) -> Self {
         Self {
             repository,
@@ -126,32 +128,6 @@ impl<R: ReaderRepository> ReaderService<R> {
         workspace_id: WorkspaceId,
     ) -> Result<Vec<Article>, CommandError> {
         Ok(self.repository.articles_by_workspace(workspace_id).await?)
-    }
-    pub async fn mark_read(
-        &self,
-        workspace_id: WorkspaceId,
-        article_id: ArticleId,
-        read: bool,
-    ) -> Result<Article, CommandError> {
-        if !self
-            .repository
-            .workspace(workspace_id)
-            .await?
-            .accepts_delivery()
-        {
-            return Err(CommandError::WorkspaceArchived);
-        }
-        let mut article = self.repository.article(workspace_id, article_id).await?;
-        let expected = article.revision;
-        article.state.read = read;
-        if !read {
-            article.state.protect_unread = true;
-        }
-        article.revision += 1;
-        self.repository
-            .save_article(workspace_id, Some(expected), article.clone())
-            .await?;
-        Ok(article)
     }
 }
 

@@ -1,0 +1,10 @@
+[package]
+name = "reader-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+tokio.workspace = true
+uuid.workspace = true
+serde.workspace = true
+log.workspace = true

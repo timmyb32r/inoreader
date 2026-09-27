@@ -6,6 +6,7 @@ pub const CHANNEL_USERNAME: &str = "reading_data_news";
 
 /// Formatting intervals are UTF-16 code units, end-exclusive, like Telegram and
 /// JavaScript. Every interval must lie on a Unicode scalar boundary in `text`.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MarkKind {
@@ -20,6 +21,7 @@ pub enum MarkKind {
     Link { url: String },
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextMark {
@@ -28,6 +30,7 @@ pub struct TextMark {
     pub style: MarkKind,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "TextWire")]
 pub struct StyledText {
@@ -35,6 +38,7 @@ pub struct StyledText {
     marks: Vec<TextMark>,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TextWire {
@@ -112,6 +116,7 @@ pub fn utf16_byte(text: &str, offset: usize) -> Result<usize, GlossaryError> {
 
 /// A definition is a verified exact leading name plus its complete paragraph.
 /// Its position is in the post's UTF-16 projection, never an HTML byte offset.
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "DefinitionWire")]
 pub struct Definition {
@@ -120,6 +125,7 @@ pub struct Definition {
     paragraph: StyledText,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DefinitionWire {

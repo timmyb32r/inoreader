@@ -3,7 +3,6 @@ use crate::{
     AccountRecord, ArticlePresentation, InviteRecord, PasswordResetRecord, RuleApplicationProgress,
     SeedSource, SessionRecord,
 };
-use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use url::Url;
 use uuid::Uuid;
@@ -67,14 +66,46 @@ async fn bootstrap_admin_creates_an_owned_initial_workspace() {
     assert_eq!(writes[0].1.name(), "Personal");
 }
 
-#[async_trait]
-impl ReaderRepository for Repository {
-    async fn readiness(&self) -> Result<(), RepositoryError> {
-        Ok(())
-    }
-    async fn save_job(&self, _: Option<u64>, _: DurableJob) -> Result<(), RepositoryError> {
+#[async_trait::async_trait]
+impl crate::ArticleRepository for Repository {
+    async fn article(&self, _: WorkspaceId, _: ArticleId) -> Result<Article, RepositoryError> {
         unused()
     }
+    async fn articles_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Article>, RepositoryError> {
+        unused()
+    }
+    async fn article_presentations_by_workspace(
+        &self,
+        _: WorkspaceId,
+    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
+        unused()
+    }
+    async fn save_article(
+        &self,
+        _: WorkspaceId,
+        _: Option<u64>,
+        _: Article,
+    ) -> Result<(), RepositoryError> {
+        unused()
+    }
+    async fn enqueue_article_full_text_refresh(
+        &self,
+        _: WorkspaceId,
+        _: &Article,
+    ) -> Result<(), RepositoryError> {
+        unused()
+    }
+    async fn mark_articles_read_atomic(
+        &self,
+        _: WorkspaceId,
+        _: Vec<Article>,
+    ) -> Result<(), RepositoryError> {
+        unused()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::IdentityRepository for Repository {
     async fn account(&self, _: AccountId) -> Result<AccountRecord, RepositoryError> {
         unused()
     }
@@ -141,40 +172,63 @@ impl ReaderRepository for Repository {
     ) -> Result<(), RepositoryError> {
         unused()
     }
-    async fn workspace(&self, id: WorkspaceId) -> Result<Workspace, RepositoryError> {
-        if id == self.workspace.id() {
-            Ok(self.workspace.clone())
-        } else {
-            unused()
-        }
-    }
-    async fn workspaces_by_owner(&self, _: AccountId) -> Result<Vec<Workspace>, RepositoryError> {
+    async fn record_login_attempt(
+        &self,
+        _: &str,
+        _: DateTime<Utc>,
+        _: u32,
+    ) -> Result<bool, RepositoryError> {
         unused()
     }
-    async fn save_workspace(
-        &self,
-        expected: Option<u64>,
-        value: Workspace,
-    ) -> Result<(), RepositoryError> {
-        self.saved_workspace.lock().unwrap().push((expected, value));
+}
+
+#[async_trait::async_trait]
+impl crate::OperationsRepository for Repository {
+    async fn readiness(&self) -> Result<(), RepositoryError> {
         Ok(())
     }
-    async fn restore_workspace_with_refreshes(
-        &self,
-        expected: u64,
-        value: Workspace,
-        active: Vec<Subscription>,
-    ) -> Result<(), RepositoryError> {
-        self.saved_workspace
-            .lock()
-            .unwrap()
-            .push((Some(expected), value));
-        self.refreshes
-            .lock()
-            .unwrap()
-            .extend(active.into_iter().map(|subscription| subscription.id()));
-        Ok(())
+    async fn save_job(&self, _: Option<u64>, _: DurableJob) -> Result<(), RepositoryError> {
+        unused()
     }
+}
+
+#[async_trait::async_trait]
+impl crate::RuleRepository for Repository {
+    async fn rules_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Rule>, RepositoryError> {
+        unused()
+    }
+    async fn rule(&self, _: WorkspaceId, _: RuleId) -> Result<Rule, RepositoryError> {
+        unused()
+    }
+    async fn save_rule(
+        &self,
+        _: WorkspaceId,
+        _: Option<u64>,
+        _: Rule,
+    ) -> Result<(), RepositoryError> {
+        unused()
+    }
+    async fn delete_rule(&self, _: WorkspaceId, _: RuleId, _: u64) -> Result<(), RepositoryError> {
+        unused()
+    }
+    async fn enqueue_rule_application(
+        &self,
+        _: WorkspaceId,
+        _: Rule,
+    ) -> Result<Uuid, RepositoryError> {
+        unused()
+    }
+    async fn rule_application_progress(
+        &self,
+        _: WorkspaceId,
+        _: Uuid,
+    ) -> Result<RuleApplicationProgress, RepositoryError> {
+        unused()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::SubscriptionRepository for Repository {
     async fn subscription(&self, id: SubscriptionId) -> Result<Subscription, RepositoryError> {
         if id == self.subscription.id() {
             Ok(self.subscription.clone())
@@ -251,79 +305,6 @@ impl ReaderRepository for Repository {
     ) -> Result<u64, RepositoryError> {
         unused()
     }
-    async fn article(&self, _: WorkspaceId, _: ArticleId) -> Result<Article, RepositoryError> {
-        unused()
-    }
-    async fn articles_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Article>, RepositoryError> {
-        unused()
-    }
-    async fn article_presentations_by_workspace(
-        &self,
-        _: WorkspaceId,
-    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
-        unused()
-    }
-    async fn save_article(
-        &self,
-        _: WorkspaceId,
-        _: Option<u64>,
-        _: Article,
-    ) -> Result<(), RepositoryError> {
-        unused()
-    }
-    async fn enqueue_article_full_text_refresh(
-        &self,
-        _: WorkspaceId,
-        _: &Article,
-    ) -> Result<(), RepositoryError> {
-        unused()
-    }
-    async fn rules_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Rule>, RepositoryError> {
-        unused()
-    }
-    async fn rule(&self, _: WorkspaceId, _: RuleId) -> Result<Rule, RepositoryError> {
-        unused()
-    }
-    async fn save_rule(
-        &self,
-        _: WorkspaceId,
-        _: Option<u64>,
-        _: Rule,
-    ) -> Result<(), RepositoryError> {
-        unused()
-    }
-    async fn delete_rule(&self, _: WorkspaceId, _: RuleId, _: u64) -> Result<(), RepositoryError> {
-        unused()
-    }
-    async fn enqueue_rule_application(
-        &self,
-        _: WorkspaceId,
-        _: Rule,
-    ) -> Result<Uuid, RepositoryError> {
-        unused()
-    }
-    async fn rule_application_progress(
-        &self,
-        _: WorkspaceId,
-        _: Uuid,
-    ) -> Result<RuleApplicationProgress, RepositoryError> {
-        unused()
-    }
-    async fn record_login_attempt(
-        &self,
-        _: &str,
-        _: DateTime<Utc>,
-        _: u32,
-    ) -> Result<bool, RepositoryError> {
-        unused()
-    }
-    async fn mark_articles_read_atomic(
-        &self,
-        _: WorkspaceId,
-        _: Vec<Article>,
-    ) -> Result<(), RepositoryError> {
-        unused()
-    }
     async fn import_subscriptions_atomic(
         &self,
         _: WorkspaceId,
@@ -337,6 +318,44 @@ impl ReaderRepository for Repository {
         _: Vec<(String, Subscription, SeedSource, serde_json::Value)>,
     ) -> Result<(), RepositoryError> {
         unused()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::WorkspaceRepository for Repository {
+    async fn workspace(&self, id: WorkspaceId) -> Result<Workspace, RepositoryError> {
+        if id == self.workspace.id() {
+            Ok(self.workspace.clone())
+        } else {
+            unused()
+        }
+    }
+    async fn workspaces_by_owner(&self, _: AccountId) -> Result<Vec<Workspace>, RepositoryError> {
+        unused()
+    }
+    async fn save_workspace(
+        &self,
+        expected: Option<u64>,
+        value: Workspace,
+    ) -> Result<(), RepositoryError> {
+        self.saved_workspace.lock().unwrap().push((expected, value));
+        Ok(())
+    }
+    async fn restore_workspace_with_refreshes(
+        &self,
+        expected: u64,
+        value: Workspace,
+        active: Vec<Subscription>,
+    ) -> Result<(), RepositoryError> {
+        self.saved_workspace
+            .lock()
+            .unwrap()
+            .push((Some(expected), value));
+        self.refreshes
+            .lock()
+            .unwrap()
+            .extend(active.into_iter().map(|subscription| subscription.id()));
+        Ok(())
     }
 }
 

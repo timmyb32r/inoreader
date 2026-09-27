@@ -3,19 +3,25 @@
 The product uses a cool-slate neutral palette with teal actions. Components use
 semantic tokens only; light and dark themes expose the same meanings.
 
-| Meaning | Light | Dark | Token |
-|---|---|---|---|
-| App background | `#f5f7f9` | `#0c1117` | `--app-bg` |
-| Surface | `#ffffff` | `#151c24` | `--surface` |
-| Sidebar | `#edf1f4` | `#10171f` | `--sidebar` |
-| Border | `#cfd8de` | `#34404c` | `--line` |
-| Primary text | `#0b1220` | `#edf4f7` | `--text-primary` |
-| Muted text | `#64717d` | `#9aa8b5` | `--text-muted` |
-| Accent | `#0d9488` | `#39b8aa` | `--accent` |
-| Accent hover | `#0f7f76` | `#55c9bb` | `--accent-hover` |
-| Selected surface | `#e5f2f0` | `#173532` | `--selected` |
-| Error | `#b42318` | `#ff8f86` | `--error` |
-| Warning | `#9a6700` | `#efc15c` | `--warning` |
+Tokens are owned by `web/src/styles.css` (`:root` and `.theme-dark`).
+Components must not define competing neutral palettes. The architecture test
+rejects references to undefined tokens.
+
+| Meaning | Token |
+|---|---|
+| App background | `--bg` |
+| Surface / raised / muted | `--surface` / `--surface-raised` / `--surface-muted` |
+| Border / strong border | `--line` / `--line-strong` |
+| Primary / muted text | `--text` / `--text-muted` |
+| Accent / hover / selected surface | `--accent` / `--accent-deep` / `--accent-soft` |
+| Warning / warning surface | `--warning` / `--warning-soft` |
+| Error / error surface | `--danger` / `--danger-soft` |
+| Focus / elevation | `--focus` / `--shadow` |
+
+`ModalDialog` owns focus trapping/restoration and modal dismissal. `FloatingPanel`
+and `useFloatingPanel` own movable nonmodal overlays. `StatusRegion` stays mounted
+inside the panel's reserved row. `AsyncButton` locks on activation and replaces
+its visual content without removing the label's layout footprint.
 
 Interactive controls keep their dimensions across idle, pressed, pending,
 success, and error. Feedback appears on the initiating control or in a reserved

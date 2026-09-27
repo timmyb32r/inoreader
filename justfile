@@ -28,6 +28,9 @@ seed-validate manifest:
 
 # Complete release gate, including hermetic Docker acceptance tests.
 check-release:
+    python3 tools/generate_api_contracts.py --check
+    cd web && npm run format:check
+    cd web && npm run build
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo test --workspace --all-targets --all-features

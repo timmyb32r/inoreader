@@ -12,7 +12,7 @@ where
         &self,
         key: &str,
         input: DefinitionsInput,
-    ) -> Result<DefinitionReply, AiError> {
+    ) -> Result<ProviderReply, AiError> {
         let mut response = self
             .http
             .execute_stream(
@@ -34,7 +34,7 @@ where
                 }
             }
         }
-        Ok(DefinitionReply {
+        Ok(ProviderReply {
             status: response.status.as_u16(),
             body,
             interrupted,

@@ -153,3 +153,30 @@ fn chinese_original_is_not_a_russian_translation_in_provider_or_storage() {
         .is_err());
     }
 }
+
+#[test]
+fn frozen_translation_input_round_trips_and_rejects_corrupted_execution() {
+    let config = crate::tests::translation_config();
+    let input = TranslationInput::new(&config, "磁盘。").unwrap();
+    let stored = serde_json::to_value(&input).unwrap();
+    let restored: TranslationInput = serde_json::from_value(stored.clone()).unwrap();
+    assert_eq!(input.identity().unwrap(), restored.identity().unwrap());
+    let mut different = config.clone();
+    different.model = "different-model".into();
+    assert_ne!(
+        input.identity().unwrap(),
+        TranslationInput::new(&different, "磁盘。")
+            .unwrap()
+            .identity()
+            .unwrap()
+    );
+    let mut broken = stored.clone();
+    broken["source"] = "different source".into();
+    assert!(serde_json::from_value::<TranslationInput>(broken).is_err());
+    let mut unknown = stored.clone();
+    unknown["validator_version"] = "unknown-validator".into();
+    assert!(serde_json::from_value::<TranslationInput>(unknown).is_err());
+    let mut broken = stored;
+    broken["body"]["max_tokens"] = 0.into();
+    assert!(serde_json::from_value::<TranslationInput>(broken).is_err());
+}

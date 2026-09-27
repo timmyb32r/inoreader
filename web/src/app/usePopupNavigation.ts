@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-const isPopup = (path: string) => path.split("?")[0].startsWith("/subscriptions");
+const isPopup = (path: string) =>
+  path.split("?")[0].startsWith("/subscriptions");
 const currentUrl = () => location.pathname + location.search + location.hash;
 const parents = (): string[] => history.state?.popupParents ?? [];
 
@@ -15,7 +16,10 @@ export function usePopupNavigation(confirmDiscard: () => boolean) {
   confirm.current = confirmDiscard;
   useEffect(() => {
     const pop = () => {
-      if (!closing.current && !confirm.current()) { history.pushState(previousState.current, "", previous.current); return; }
+      if (!closing.current && !confirm.current()) {
+        history.pushState(previousState.current, "", previous.current);
+        return;
+      }
       closing.current = false;
       previous.current = currentUrl();
       previousState.current = history.state;
@@ -45,5 +49,10 @@ export function usePopupNavigation(confirmDiscard: () => boolean) {
     previous.current = currentUrl();
     setUrl(previous.current);
   };
-  return { path: url.split("?")[0], backgroundPath: (parents()[0] ?? "/reader").split("?")[0], navigate, close };
+  return {
+    path: url.split("?")[0],
+    backgroundPath: (parents()[0] ?? "/reader").split("?")[0],
+    navigate,
+    close,
+  };
 }

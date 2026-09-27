@@ -409,7 +409,7 @@ fn web_feed_extraction_summary_uses_the_effective_selectors() {
 fn web_feed_url_change_is_rejected_before_preview() {
     let stats = reader_application::SubscriptionStats {
         editable_web_feed: true,
-        source_type: "web".into(),
+        source_type: reader_application::SourceType::Web,
         ..Default::default()
     };
     assert!(matches!(
@@ -471,7 +471,7 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         subscription_ids: vec![],
         subscription_titles: vec!["Feed A".into(), "Feed B".into()],
         safe_html: Some("<p>First</p><p>Second <strong>paragraph</strong></p>".into()),
-        full_text_status: "failed",
+        full_text_status: reader_application::ContentStatus::Failed,
         failure_reason: Some("upstream timeout".into()),
     };
     let json = serde_json::to_value(article_view(&presentation)).unwrap();
@@ -735,13 +735,45 @@ fn route_unused<T>() -> Result<T, RepositoryError> {
     Err(RepositoryError::NotFound)
 }
 #[async_trait::async_trait]
-impl ReaderRepository for RouteRepository {
-    async fn readiness(&self) -> Result<(), RepositoryError> {
-        Ok(())
-    }
-    async fn save_job(&self, _: Option<u64>, _: DurableJob) -> Result<(), RepositoryError> {
+impl reader_application::ArticleRepository for RouteRepository {
+    async fn article(&self, _: WorkspaceId, _: ArticleId) -> Result<Article, RepositoryError> {
         route_unused()
     }
+    async fn articles_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Article>, RepositoryError> {
+        route_unused()
+    }
+    async fn article_presentations_by_workspace(
+        &self,
+        _: WorkspaceId,
+    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
+        route_unused()
+    }
+    async fn save_article(
+        &self,
+        _: WorkspaceId,
+        _: Option<u64>,
+        _: Article,
+    ) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+    async fn enqueue_article_full_text_refresh(
+        &self,
+        _: WorkspaceId,
+        _: &Article,
+    ) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+    async fn mark_articles_read_atomic(
+        &self,
+        _: WorkspaceId,
+        _: Vec<Article>,
+    ) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+}
+
+#[async_trait::async_trait]
+impl reader_application::IdentityRepository for RouteRepository {
     async fn account(&self, id: AccountId) -> Result<AccountRecord, RepositoryError> {
         if id == self.account.id {
             Ok(self.account.clone())
@@ -816,40 +848,63 @@ impl ReaderRepository for RouteRepository {
     ) -> Result<(), RepositoryError> {
         route_unused()
     }
-    async fn workspace(&self, id: WorkspaceId) -> Result<Workspace, RepositoryError> {
-        if id == self.workspace.id() {
-            Ok(self.workspace.clone())
-        } else {
-            route_unused()
-        }
-    }
-    async fn workspaces_by_owner(&self, _: AccountId) -> Result<Vec<Workspace>, RepositoryError> {
+    async fn record_login_attempt(
+        &self,
+        _: &str,
+        _: DateTime<Utc>,
+        _: u32,
+    ) -> Result<bool, RepositoryError> {
         route_unused()
     }
-    async fn save_workspace(
-        &self,
-        expected: Option<u64>,
-        value: Workspace,
-    ) -> Result<(), RepositoryError> {
-        self.saved_workspace.lock().unwrap().push((expected, value));
+}
+
+#[async_trait::async_trait]
+impl reader_application::OperationsRepository for RouteRepository {
+    async fn readiness(&self) -> Result<(), RepositoryError> {
         Ok(())
     }
-    async fn restore_workspace_with_refreshes(
-        &self,
-        expected: u64,
-        value: Workspace,
-        active: Vec<Subscription>,
-    ) -> Result<(), RepositoryError> {
-        self.saved_workspace
-            .lock()
-            .unwrap()
-            .push((Some(expected), value));
-        self.refreshes
-            .lock()
-            .unwrap()
-            .extend(active.into_iter().map(|subscription| subscription.id()));
-        Ok(())
+    async fn save_job(&self, _: Option<u64>, _: DurableJob) -> Result<(), RepositoryError> {
+        route_unused()
     }
+}
+
+#[async_trait::async_trait]
+impl reader_application::RuleRepository for RouteRepository {
+    async fn rules_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Rule>, RepositoryError> {
+        route_unused()
+    }
+    async fn rule(&self, _: WorkspaceId, _: RuleId) -> Result<Rule, RepositoryError> {
+        route_unused()
+    }
+    async fn save_rule(
+        &self,
+        _: WorkspaceId,
+        _: Option<u64>,
+        _: Rule,
+    ) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+    async fn delete_rule(&self, _: WorkspaceId, _: RuleId, _: u64) -> Result<(), RepositoryError> {
+        route_unused()
+    }
+    async fn enqueue_rule_application(
+        &self,
+        _: WorkspaceId,
+        _: Rule,
+    ) -> Result<Uuid, RepositoryError> {
+        route_unused()
+    }
+    async fn rule_application_progress(
+        &self,
+        _: WorkspaceId,
+        _: Uuid,
+    ) -> Result<RuleApplicationProgress, RepositoryError> {
+        route_unused()
+    }
+}
+
+#[async_trait::async_trait]
+impl reader_application::SubscriptionRepository for RouteRepository {
     async fn subscription(&self, id: SubscriptionId) -> Result<Subscription, RepositoryError> {
         if id == self.subscription.id() {
             Ok(self.subscription.clone())
@@ -928,79 +983,6 @@ impl ReaderRepository for RouteRepository {
     ) -> Result<u64, RepositoryError> {
         route_unused()
     }
-    async fn article(&self, _: WorkspaceId, _: ArticleId) -> Result<Article, RepositoryError> {
-        route_unused()
-    }
-    async fn articles_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Article>, RepositoryError> {
-        route_unused()
-    }
-    async fn article_presentations_by_workspace(
-        &self,
-        _: WorkspaceId,
-    ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
-        route_unused()
-    }
-    async fn save_article(
-        &self,
-        _: WorkspaceId,
-        _: Option<u64>,
-        _: Article,
-    ) -> Result<(), RepositoryError> {
-        route_unused()
-    }
-    async fn enqueue_article_full_text_refresh(
-        &self,
-        _: WorkspaceId,
-        _: &Article,
-    ) -> Result<(), RepositoryError> {
-        route_unused()
-    }
-    async fn rules_by_workspace(&self, _: WorkspaceId) -> Result<Vec<Rule>, RepositoryError> {
-        route_unused()
-    }
-    async fn rule(&self, _: WorkspaceId, _: RuleId) -> Result<Rule, RepositoryError> {
-        route_unused()
-    }
-    async fn save_rule(
-        &self,
-        _: WorkspaceId,
-        _: Option<u64>,
-        _: Rule,
-    ) -> Result<(), RepositoryError> {
-        route_unused()
-    }
-    async fn delete_rule(&self, _: WorkspaceId, _: RuleId, _: u64) -> Result<(), RepositoryError> {
-        route_unused()
-    }
-    async fn enqueue_rule_application(
-        &self,
-        _: WorkspaceId,
-        _: Rule,
-    ) -> Result<Uuid, RepositoryError> {
-        route_unused()
-    }
-    async fn rule_application_progress(
-        &self,
-        _: WorkspaceId,
-        _: Uuid,
-    ) -> Result<RuleApplicationProgress, RepositoryError> {
-        route_unused()
-    }
-    async fn record_login_attempt(
-        &self,
-        _: &str,
-        _: DateTime<Utc>,
-        _: u32,
-    ) -> Result<bool, RepositoryError> {
-        route_unused()
-    }
-    async fn mark_articles_read_atomic(
-        &self,
-        _: WorkspaceId,
-        _: Vec<Article>,
-    ) -> Result<(), RepositoryError> {
-        route_unused()
-    }
     async fn import_subscriptions_atomic(
         &self,
         _: WorkspaceId,
@@ -1024,4 +1006,54 @@ impl ReaderRepository for RouteRepository {
             .filter(|v| v.id == id)
             .ok_or(RepositoryError::NotFound)
     }
+}
+
+#[async_trait::async_trait]
+impl reader_application::WorkspaceRepository for RouteRepository {
+    async fn workspace(&self, id: WorkspaceId) -> Result<Workspace, RepositoryError> {
+        if id == self.workspace.id() {
+            Ok(self.workspace.clone())
+        } else {
+            route_unused()
+        }
+    }
+    async fn workspaces_by_owner(&self, _: AccountId) -> Result<Vec<Workspace>, RepositoryError> {
+        route_unused()
+    }
+    async fn save_workspace(
+        &self,
+        expected: Option<u64>,
+        value: Workspace,
+    ) -> Result<(), RepositoryError> {
+        self.saved_workspace.lock().unwrap().push((expected, value));
+        Ok(())
+    }
+    async fn restore_workspace_with_refreshes(
+        &self,
+        expected: u64,
+        value: Workspace,
+        active: Vec<Subscription>,
+    ) -> Result<(), RepositoryError> {
+        self.saved_workspace
+            .lock()
+            .unwrap()
+            .push((Some(expected), value));
+        self.refreshes
+            .lock()
+            .unwrap()
+            .extend(active.into_iter().map(|subscription| subscription.id()));
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn article_command_resolves_ownership_before_any_article_access() {
+    let (state, _, subscription) = route_fixture(AccountId::new(), None);
+    let result = reader_application::article_commands::OwnedWorkspace::resolve(
+        state.repository.as_ref(),
+        AccountId::new(),
+        subscription.workspace_id(),
+    )
+    .await;
+    assert!(matches!(result, Err(RepositoryError::NotFound)));
 }

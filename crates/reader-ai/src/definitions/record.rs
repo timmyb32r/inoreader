@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum DefinitionState {
@@ -8,6 +9,7 @@ pub enum DefinitionState {
     Completed { result: DefinitionResult },
     Failed { error: String },
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefinitionsJob {
@@ -123,6 +125,7 @@ pub struct ClaimedDefinitions {
     pub lease: Uuid,
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DefinitionsView {

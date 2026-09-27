@@ -16,6 +16,7 @@ fn is_han(c: char) -> bool {
     matches!(c as u32, 0x3400..=0x9fff | 0xf900..=0xfaff | 0x20000..=0x323af)
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TranslationSegment {
@@ -35,6 +36,7 @@ impl TranslationSegment {
         }
     }
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "TranslationWire")]
 pub struct ParagraphTranslation {
@@ -42,6 +44,7 @@ pub struct ParagraphTranslation {
     translation: String,
     segments: Vec<TranslationSegment>,
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TranslationWire {
@@ -172,6 +175,7 @@ impl ParagraphTranslation {
     }
 }
 
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TranslationState {
@@ -180,6 +184,7 @@ pub enum TranslationState {
     Completed { result: ParagraphTranslation },
     Failed { error: String },
 }
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParagraphJob {
@@ -195,6 +200,9 @@ pub struct ParagraphJob {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TranslationRecord {
     pub owner: Uuid,
+    /// None means a historical attempt predates captured execution input. Such an
+    /// attempt can be displayed, but must never execute under a substituted prompt.
+    pub input: Option<TranslationInput>,
     pub source_revision: String,
     pub cost_rates: crate::CostRates,
     pub job: ParagraphJob,
@@ -207,39 +215,105 @@ pub struct ClaimedTranslation {
 /// Validated provider execution input. Construction checks all configured
 /// size/context limits before a paid request; the service checks membership.
 /// No public mutable fields or deserialization bypass this boundary.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "TranslationInputWire")]
 pub struct TranslationInput {
     source: String,
     body: Value,
+    limits: crate::InputLimits,
+    max_message_bytes: usize,
+    validator_version: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TranslationInputWire {
+    source: String,
+    body: Value,
+    limits: crate::InputLimits,
+    max_message_bytes: usize,
+    validator_version: String,
+}
+impl TryFrom<TranslationInputWire> for TranslationInput {
+    type Error = AiError;
+    fn try_from(v: TranslationInputWire) -> Result<Self, AiError> {
+        let l = &v.limits;
+        let messages = v.body["messages"]
+            .as_array()
+            .filter(|m| m.len() == 2)
+            .ok_or(AiError::Protocol)?;
+        let system = messages[0]["content"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or(AiError::Protocol)?;
+        let content = messages[1]["content"].as_str().ok_or(AiError::Protocol)?;
+        let source: Value = serde_json::from_str(content).map_err(|_| AiError::Protocol)?;
+        if source != json!({"paragraph":v.source})
+            || messages[0]["role"] != "system"
+            || messages[1]["role"] != "user"
+            || v.validator_version != "paragraph-ru-exact-v2"
+            || v.body["model"].as_str().is_none_or(str::is_empty)
+            || v.body["stream"] != false
+            || v.body["thinking"] != json!({"type":"disabled"})
+            || v.body["response_format"] != json!({"type":"json_object"})
+            || v.body["temperature"] != 0
+        {
+            return Err(AiError::Protocol);
+        }
+        let output = v.body["max_tokens"]
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|n| *n > 0)
+            .ok_or(AiError::Context)?;
+        if v.source.trim().is_empty() || v.source.len() > v.max_message_bytes {
+            return Err(AiError::Message);
+        }
+        let bytes = system
+            .len()
+            .checked_add(content.len())
+            .ok_or(AiError::Context)?;
+        let bound = l
+            .framing_tokens_per_message
+            .checked_mul(2)
+            .and_then(|n| n.checked_add(l.framing_tokens_base))
+            .and_then(|n| n.checked_add(bytes))
+            .and_then(|n| n.checked_add(output))
+            .ok_or(AiError::Context)?;
+        if l.context_tokens == 0
+            || l.framing_tokens_base == 0
+            || l.framing_tokens_per_message == 0
+            || l.max_response_bytes == 0
+            || bytes > l.max_input_bytes
+            || bound > l.context_tokens
+        {
+            return Err(AiError::Context);
+        }
+        Ok(Self {
+            source: v.source,
+            body: v.body,
+            limits: v.limits,
+            max_message_bytes: v.max_message_bytes,
+            validator_version: v.validator_version,
+        })
+    }
 }
 impl TranslationInput {
     pub fn new(config: &AiConfig, source: &str) -> Result<Self, AiError> {
         config.validate()?;
-        if source.trim().is_empty() || source.len() > config.max_message_bytes {
-            return Err(AiError::Message);
-        }
-        let content =
-            serde_json::to_string(&json!({"paragraph":source})).map_err(|_| AiError::Protocol)?;
-        let bytes = PROMPT
-            .len()
-            .checked_add(content.len())
-            .ok_or(AiError::Context)?;
-        let bound = config
-            .framing_tokens_per_message
-            .checked_mul(2)
-            .and_then(|v| v.checked_add(config.framing_tokens_base))
-            .and_then(|v| v.checked_add(bytes))
-            .and_then(|v| v.checked_add(config.max_output_tokens))
-            .ok_or(AiError::Context)?;
-        if bytes > config.max_input_bytes || bound > config.context_tokens {
-            return Err(AiError::Context);
-        }
-        Ok(Self {
-            source: source.into(),
-            body: json!({"model":config.model,"messages":[{"role":"system","content":PROMPT},{"role":"user","content":content}],"stream":false,"thinking":{"type":"disabled"},"response_format":{"type":"json_object"},"max_tokens":config.max_output_tokens,"temperature":0}),
-        })
+        TranslationInputWire{
+            source:source.into(), limits:crate::InputLimits::from(config),max_message_bytes:config.max_message_bytes,validator_version:"paragraph-ru-exact-v2".into(),
+            body:json!({"model":config.model,"messages":[{"role":"system","content":PROMPT},{"role":"user","content":serde_json::to_string(&json!({"paragraph":source})).map_err(|_|AiError::Protocol)?}],"stream":false,"thinking":{"type":"disabled"},"response_format":{"type":"json_object"},"max_tokens":config.max_output_tokens,"temperature":0})
+        }.try_into()
     }
     pub fn source(&self) -> &str {
         &self.source
+    }
+    pub fn model(&self) -> &str {
+        self.body["model"]
+            .as_str()
+            .expect("validated execution model")
+    }
+    pub fn identity(&self) -> Result<String, AiError> {
+        serde_json::to_string(self).map_err(|_| AiError::Protocol)
     }
 }
 

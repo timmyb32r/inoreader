@@ -39,12 +39,12 @@ pub async fn verify(
     let claim = store.claim_definitions(60).await.unwrap().unwrap();
     assert!(store.claim_definitions(60).await.unwrap().is_none());
     let raw=json!({"choices":[{"finish_reason":"stop","message":{"content":json!({"entities":[{"name":"CDC","kind":"abbreviation","explanation":"Change Data Capture — получение изменений данных.","insufficientContext":false}]}).to_string()}}],"usage":{"prompt_tokens":10,"completion_tokens":8,"prompt_cache_hit_tokens":2,"prompt_cache_miss_tokens":8}}).to_string().into_bytes();
-    let reply = DefinitionReply {
+    let reply = ProviderReply {
         status: 200,
         body: raw.clone(),
         interrupted: false,
     };
-    let result = reply.result(&snapshot).unwrap();
+    let result = reply.definition_result(&snapshot).unwrap();
     store
         .finish_definitions(
             &claim,
@@ -135,7 +135,7 @@ pub async fn verify(
                 error: "invalid JSON".into()
             },
             None,
-            Some(DefinitionReply {
+            Some(ProviderReply {
                 status: 200,
                 body: b"partial raw".to_vec(),
                 interrupted: true

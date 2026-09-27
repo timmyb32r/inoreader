@@ -2,7 +2,7 @@ use super::*;
 struct Translator(AtomicUsize);
 #[async_trait]
 impl AiProvider for Translator {
-    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<DefinitionReply, AiError> {
+    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<ProviderReply, AiError> {
         Err(AiError::Unavailable)
     }
     async fn balance(&self, _: &str) -> Result<Balance, AiError> {
@@ -16,26 +16,16 @@ impl AiProvider for Translator {
     ) -> Result<CompletedGeneration, AiError> {
         unreachable!()
     }
-    async fn translate(
-        &self,
-        _: &str,
-        input: TranslationInput,
-    ) -> Result<(ParagraphTranslation, Usage), AiError> {
+    async fn translate(&self, _: &str, input: TranslationInput) -> Result<ProviderReply, AiError> {
         self.0.fetch_add(1, Ordering::SeqCst);
         assert_eq!(input.source(), "Exact source 12.5%.");
-        Ok((
-            ParagraphTranslation::from_response(
-                input.source(),
-                r#"{"translation":"Точный источник 12.5%.","words":[{"source":"Exact","pinyin":null,"translation":"точный"},{"source":"source","pinyin":null,"translation":"источник"},{"source":"12.5","pinyin":null,"translation":"12.5"}]}"#,
-            )?,
-            Usage {
-                prompt_tokens: 10,
-                completion_tokens: 20,
-                prompt_cache_hit_tokens: 0,
-                prompt_cache_miss_tokens: 10,
-                estimated_cost_usd: None,
-            },
-        ))
+        Ok(ProviderReply {
+            status:200,interrupted:false,
+            body:serde_json::to_vec(&serde_json::json!({
+                "choices":[{"finish_reason":"stop","message":{"content":r#"{"translation":"Точный источник 12.5%.","words":[{"source":"Exact","pinyin":null,"translation":"точный"},{"source":"source","pinyin":null,"translation":"источник"},{"source":"12.5","pinyin":null,"translation":"12.5"}]}"#}}],
+                "usage":{"prompt_tokens":10,"completion_tokens":20,"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":10}
+            })).unwrap(),
+        })
     }
 }
 pub async fn verify(
@@ -145,6 +135,57 @@ pub async fn verify(
         .unwrap();
     assert_eq!(cached.id, job.id);
     assert_eq!(provider.0.load(Ordering::SeqCst), 1);
+    let (raw,status,interrupted,document):(Vec<u8>,i32,bool,String)=sqlx::query_as("SELECT raw_response,response_status,response_interrupted,document FROM ai_translations WHERE id=$1").bind(job.id).fetch_one(pool).await.unwrap();
+    let retained = ProviderReply {
+        status: u16::try_from(status).unwrap(),
+        body: raw,
+        interrupted,
+    };
+    assert_eq!(
+        retained
+            .translation_result("Exact source 12.5%.")
+            .unwrap()
+            .source(),
+        "Exact source 12.5%."
+    );
+    assert_eq!(
+        provider.0.load(Ordering::SeqCst),
+        1,
+        "offline replay must not bill again"
+    );
+    let record: TranslationRecord = serde_json::from_str(&document).unwrap();
+    let mut other_model = policy(owner).config().clone();
+    other_model.model = "another-model".into();
+    let mut changed = record.clone();
+    changed.job.id = Uuid::new_v4();
+    changed.job.model = other_model.model.clone();
+    changed.job.state = TranslationState::Queued;
+    changed.input = Some(TranslationInput::new(&other_model, &changed.job.source).unwrap());
+    let changed_id = changed.job.id;
+    assert_eq!(
+        store.create_translation(changed).await.unwrap().id,
+        changed_id,
+        "cache must include execution input"
+    );
+    sqlx::query("UPDATE ai_translations SET status='failed',document=jsonb_set(document::jsonb,'{job}',document::jsonb->'job'||jsonb_build_object('status','failed','error','test-only'))::text WHERE id=$1").bind(changed_id).execute(pool).await.unwrap();
+    // Corrupt one completed payload deliberately; the rest of the list survives
+    // and no original bytes are rewritten by the read/diagnostic path.
+    sqlx::query("UPDATE ai_translations SET document=jsonb_set(document::jsonb,'{job,result,segments}','[]'::jsonb)::text WHERE id=$1").bind(job.id).execute(pool).await.unwrap();
+    let broken = store.translations(owner, workspace, article).await.unwrap();
+    assert!(broken
+        .iter()
+        .any(|r| r.id == job.id && matches!(r.state, TranslationState::Failed { .. })));
+    sqlx::query("UPDATE ai_translations SET document=$2 WHERE id=$1")
+        .bind(job.id)
+        .bind(document)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM ai_translations WHERE id=$1")
+        .bind(changed_id)
+        .execute(pool)
+        .await
+        .unwrap();
     // Simulate an expired in-flight attempt: never repeat an uncertain paid call.
     sqlx::query("UPDATE ai_translations SET status='generating',lease=$2,lease_until=now()-interval '1 second' WHERE id=$1").bind(job.id).bind(Uuid::new_v4()).execute(pool).await.unwrap();
     assert!(store.claim_translation(5).await.unwrap().is_none());
@@ -176,6 +217,7 @@ pub async fn verify(
                 TranslationState::Failed {
                     error: "stale".into()
                 },
+                None,
                 None
             )
             .await,
@@ -198,10 +240,30 @@ pub async fn verify(
         .await
         .unwrap();
     sqlx::query("UPDATE ai_translations SET status='queued',document=jsonb_set(document::jsonb,'{owner}',to_jsonb($2::text))::text WHERE id=$1").bind(retry.id).bind(other.to_string()).execute(pool).await.unwrap();
-    assert!(matches!(
-        store.claim_translation(5).await,
-        Err(AiError::Storage)
-    ));
+    assert!(
+        matches!(
+            store.translations(owner, workspace, article).await,
+            Err(AiError::Storage)
+        ),
+        "identity corruption must fail closed before exposing source text"
+    );
+    let corrupt: String = sqlx::query_scalar("SELECT document FROM ai_translations WHERE id=$1")
+        .bind(retry.id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(store.claim_translation(5).await.unwrap().is_none());
+    let quarantined: (String, String) =
+        sqlx::query_as("SELECT status,document FROM ai_translations WHERE id=$1")
+            .bind(retry.id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(quarantined, ("failed".into(), corrupt));
+    assert!(
+        store.claim_translation(5).await.unwrap().is_none(),
+        "corrupt row must not block subsequent queue scans"
+    );
     sqlx::query("UPDATE ai_translations SET status='failed',document=$2 WHERE id=$1")
         .bind(retry.id)
         .bind(saved)

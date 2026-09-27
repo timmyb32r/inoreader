@@ -1,72 +1,210 @@
+import { wireFixture } from "./wire-fixtures.mjs";
 import { expect, test, type Page } from "@playwright/test";
 import type { AiProfile, ArticleChat } from "../src/api/ai";
 
-const exampleChat = (articleId = "a", id = "chat-a"): ArticleChat => ({ id, articleId, workspaceId: "ws", title: `Article ${articleId.toUpperCase()}`, sourceUrl: "https://example.test/article", createdAt: "2026-09-26T12:00:00Z", model: "mock-deepseek", promptVersion: "candidate-1", status: "completed", providerCalls: [], messages: [{ id: "assistant", role: "assistant", purpose: "summary", phase: "verifying", status: "complete", content: "# Original title\n\n**Kafka** stores events.\n\n> Exact statement.\n\n<script>window.infected = true</script>\n\n[Source](https://example.test/article)\n\n![Tracking](https://tracking.example.test/pixel)", createdAt: "2026-09-26T12:00:00Z" }] });
+const exampleChat = (articleId = "a", id = "chat-a"): ArticleChat => ({
+  id,
+  articleId,
+  workspaceId: "ws",
+  title: `Article ${articleId.toUpperCase()}`,
+  sourceUrl: "https://example.test/article",
+  createdAt: "2026-09-26T12:00:00Z",
+  model: "mock-deepseek",
+  promptVersion: "candidate-1",
+  status: "completed",
+  providerCalls: [],
+  messages: [
+    {
+      id: "assistant",
+      role: "assistant",
+      purpose: "summary",
+      phase: "verifying",
+      status: "complete",
+      content:
+        "# Original title\n\n**Kafka** stores events.\n\n> Exact statement.\n\n<script>window.infected = true</script>\n\n[Source](https://example.test/article)\n\n![Tracking](https://tracking.example.test/pixel)",
+      createdAt: "2026-09-26T12:00:00Z",
+    },
+  ],
+});
 
-async function fixture(page: Page, initialProfile: AiProfile = { configured: true, enabled: true }) {
-  const state = { profile: initialProfile, versions: [] as ArticleChat[], mutations: [] as { path: string; body: Record<string, unknown> }[], reads: [] as string[], hold: false, status: "generating" as ArticleChat["status"] };
-  const articles = ["a", "b"].map(id => ({ id, title: `Article ${id.toUpperCase()}`, url: `https://example.test/${id}`, source: "Example", subscriptionIds: ["source"], excerpt: "Article excerpt", body: ["Exact statement.", "Full article body."], fullText: "ready", age: "2026-09-26T12:00:00Z", read: false, later: false }));
+async function fixture(
+  page: Page,
+  initialProfile: AiProfile = { configured: true, enabled: true },
+) {
+  const state = {
+    profile: initialProfile,
+    versions: [] as ArticleChat[],
+    mutations: [] as { path: string; body: Record<string, unknown> }[],
+    reads: [] as string[],
+    hold: false,
+    status: "generating" as ArticleChat["status"],
+  };
+  const articles = ["a", "b"].map((id) => ({
+    id,
+    title: `Article ${id.toUpperCase()}`,
+    url: `https://example.test/${id}`,
+    source: "Example",
+    subscriptionIds: ["source"],
+    excerpt: "Article excerpt",
+    body: ["Exact statement.", "Full article body."],
+    fullText: "ready",
+    age: "2026-09-26T12:00:00Z",
+    read: false,
+    later: false,
+  }));
   const articlePage = { articles, total: 2, unreadTotal: 2 };
-  await page.route("**/api/**", async route => {
-    const request = route.request(), url = new URL(request.url()), path = url.pathname;
+  await page.route("**/api/**", async (route) => {
+    const request = route.request(),
+      url = new URL(request.url()),
+      path = url.pathname;
     const body = request.postData() ? request.postDataJSON() : {};
-    if (request.method() !== "GET") state.mutations.push({ path, body }); else state.reads.push(path);
-    if (path === "/api/bootstrap") return route.fulfill({ json: { account: { id: "owner", displayName: "Author", initials: "AU" }, workspaces: [{ id: "ws", name: "Personal", archived: false }], activeWorkspaceId: "ws", subscriptions: [], articlePage } });
-    if (path === "/api/articles") return route.fulfill({ json: articlePage });
-    const article = articles.find(item => path === `/api/articles/${item.id}` || path === `/api/articles/${item.id}/state`);
-    if (article) return route.fulfill({ json: { ...article, ...body } });
+    if (request.method() !== "GET") state.mutations.push({ path, body });
+    else state.reads.push(path);
+    if (path === "/api/bootstrap")
+      return route.fulfill({
+        json: wireFixture({
+          account: { id: "owner", displayName: "Author", initials: "AU" },
+          workspaces: [{ id: "ws", name: "Personal", archived: false }],
+          activeWorkspaceId: "ws",
+          subscriptions: [],
+          articlePage,
+        }),
+      });
+    if (path === "/api/articles")
+      return route.fulfill({ json: wireFixture(articlePage) });
+    const article = articles.find(
+      (item) =>
+        path === `/api/articles/${item.id}` ||
+        path === `/api/articles/${item.id}/state`,
+    );
+    if (article)
+      return route.fulfill({ json: wireFixture({ ...article, ...body }) });
     if (path === "/api/ai/profile" || path === "/api/ai/balance") {
-      while (state.hold && request.method() === "PUT") await new Promise(resolve => setTimeout(resolve, 25));
-      if (request.method() === "PUT") state.profile = { configured: true, enabled: true, balance: { available: true, updatedAt: "2026-09-26T13:00:00Z", balances: [{ currency: "USD", total: "8.123456", granted: "0", toppedUp: "8.123456" }] } };
-      if (request.method() === "DELETE") state.profile = { configured: false, enabled: false };
-      return route.fulfill({ json: state.profile });
+      while (state.hold && request.method() === "PUT")
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      if (request.method() === "PUT")
+        state.profile = {
+          configured: true,
+          enabled: true,
+          balance: {
+            available: true,
+            updatedAt: "2026-09-26T13:00:00Z",
+            balances: [
+              {
+                currency: "USD",
+                total: "8.123456",
+                granted: "0",
+                toppedUp: "8.123456",
+              },
+            ],
+          },
+        };
+      if (request.method() === "DELETE")
+        state.profile = { configured: false, enabled: false };
+      return route.fulfill({ json: wireFixture(state.profile) });
     }
-    if (path.endsWith("/chats")) return route.fulfill({ json: state.versions.filter(chat => path.includes(`/articles/${chat.articleId}/`)) });
+    if (path.endsWith("/chats"))
+      return route.fulfill({
+        json: wireFixture(
+          state.versions.filter((chat) =>
+            path.includes(`/articles/${chat.articleId}/`),
+          ),
+        ),
+      });
     if (path.endsWith("/chat")) {
-      const id = path.split("/")[3], chat = { ...exampleChat(id, `chat-${id}-${state.versions.length}`), status: state.status, messages: [{ ...exampleChat(id).messages[0], status: "streaming" as const, phase: "generating" as const, content: "" }] };
+      const id = path.split("/")[3],
+        chat = {
+          ...exampleChat(id, `chat-${id}-${state.versions.length}`),
+          status: state.status,
+          messages: [
+            {
+              ...exampleChat(id).messages[0],
+              status: "streaming" as const,
+              phase: "generating" as const,
+              content: "",
+            },
+          ],
+        };
       state.versions.unshift(chat);
-      return route.fulfill({ json: chat });
+      return route.fulfill({ json: wireFixture(chat) });
     }
     if (path.startsWith("/api/ai/chats/")) {
-      const id = path.split("/")[4], chat = state.versions.find(item => item.id === id)!;
-      if (path.endsWith("/stop")) { chat.status = "cancelled"; return route.fulfill({ json: chat }); }
-      if (path.endsWith("/messages") || path.endsWith("/retry")) { chat.status = "generating"; return route.fulfill({ json: chat }); }
+      const id = path.split("/")[4],
+        chat = state.versions.find((item) => item.id === id)!;
+      if (path.endsWith("/stop")) {
+        chat.status = "cancelled";
+        return route.fulfill({ json: wireFixture(chat) });
+      }
+      if (path.endsWith("/messages") || path.endsWith("/retry")) {
+        chat.status = "generating";
+        return route.fulfill({ json: wireFixture(chat) });
+      }
       chat.status = state.status;
-      if (chat.status === "completed") chat.messages = exampleChat(chat.articleId, chat.id).messages;
-      return route.fulfill({ json: chat });
+      if (chat.status === "completed")
+        chat.messages = exampleChat(chat.articleId, chat.id).messages;
+      return route.fulfill({ json: wireFixture(chat) });
     }
-    return route.fulfill({ json: [] });
+    return route.fulfill({ json: wireFixture([]) });
   });
   return state;
 }
 
-test("chat drag, response, collapse and viewport resize keep reader/composer targets stable", async ({ page }) => {
+test("chat drag, response, collapse and viewport resize keep reader/composer targets stable", async ({
+  page,
+}) => {
   const state = await fixture(page);
   await page.goto("/reader");
-  const summarize = page.getByRole("button", { name: "Summarize", exact: true });
+  const summarize = page.getByRole("button", {
+    name: "Summarize",
+    exact: true,
+  });
   await expect(summarize).toBeVisible();
-  expect(state.mutations.filter(call => call.path.includes("/chat"))).toHaveLength(0);
-  const toolbar = page.locator(".reader-toolbar"), before = await toolbar.boundingBox();
+  expect(
+    state.mutations.filter((call) => call.path.includes("/chat")),
+  ).toHaveLength(0);
+  const toolbar = page.locator(".reader-toolbar"),
+    before = await toolbar.boundingBox();
   await summarize.dblclick();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
   await expect(chat).toBeVisible();
   await expect(chat.getByRole("status")).toHaveAttribute("aria-busy", "true");
-  await expect.poll(() => state.mutations.filter(call => call.path.endsWith("/chat")).length).toBe(1);
+  await expect
+    .poll(
+      () =>
+        state.mutations.filter((call) => call.path.endsWith("/chat")).length,
+    )
+    .toBe(1);
   expect(await toolbar.boundingBox()).toEqual(before);
-  const handle = chat.getByRole("button", { name: "Move chat with arrow keys or drag" });
-  const handleBox = (await handle.boundingBox())!, chatBefore = (await chat.boundingBox())!;
+  const handle = chat.getByRole("button", {
+    name: "Move chat with arrow keys or drag",
+  });
+  const handleBox = (await handle.boundingBox())!,
+    chatBefore = (await chat.boundingBox())!;
   await page.mouse.move(handleBox.x + 40, handleBox.y + 25);
-  await page.mouse.down(); await page.mouse.move(handleBox.x - 120, handleBox.y - 10, { steps: 8 }); await page.mouse.up();
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x - 120, handleBox.y - 10, { steps: 8 });
+  await page.mouse.up();
   expect((await chat.boundingBox())!.x).toBeLessThan(chatBefore.x);
   expect(await toolbar.boundingBox()).toEqual(before);
-  const composer = chat.getByLabel("Message DeepSeek"), composerBefore = await composer.boundingBox();
+  const composer = chat.getByLabel("Message DeepSeek"),
+    composerBefore = await composer.boundingBox();
   state.status = "completed";
   await expect(chat.getByText("Kafka", { exact: true })).toBeVisible();
   expect(await composer.boundingBox()).toEqual(composerBefore);
   expect(await toolbar.boundingBox()).toEqual(before);
-  expect(await page.evaluate(() => (window as Window & { infected?: boolean }).infected)).toBeUndefined();
+  expect(
+    await page.evaluate(
+      () => (window as Window & { infected?: boolean }).infected,
+    ),
+  ).toBeUndefined();
   await expect(chat.locator("script, img")).toHaveCount(0);
-  await expect(chat.getByRole("link", { name: "Source" })).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(chat.getByRole("link", { name: "Source" })).toHaveAttribute(
+    "rel",
+    "noopener noreferrer",
+  );
   await page.screenshot({ path: test.info().outputPath("article-chat.png") });
   await composer.fill("Keep my draft");
   await chat.getByRole("button", { name: "Minimize chat" }).click();
@@ -75,32 +213,55 @@ test("chat drag, response, collapse and viewport resize keep reader/composer tar
   await expect(composer).toHaveValue("Keep my draft");
   await page.setViewportSize({ width: 390, height: 720 });
   const mobile = (await chat.boundingBox())!;
-  expect(mobile.x).toBeGreaterThanOrEqual(0); expect(mobile.x + mobile.width).toBeLessThanOrEqual(390);
-  expect(mobile.y).toBeGreaterThanOrEqual(0); expect(mobile.y + mobile.height).toBeLessThanOrEqual(720);
+  expect(mobile.x).toBeGreaterThanOrEqual(0);
+  expect(mobile.x + mobile.width).toBeLessThanOrEqual(390);
+  expect(mobile.y).toBeGreaterThanOrEqual(0);
+  expect(mobile.y + mobile.height).toBeLessThanOrEqual(720);
   await page.setViewportSize({ width: 640, height: 300 });
-  const compact = (await chat.boundingBox())!, compactComposer = (await composer.boundingBox())!;
-  const compactSend = (await chat.getByRole("button", { name: "Send", exact: true }).boundingBox())!;
-  expect(compact.y).toBeGreaterThanOrEqual(0); expect(compact.y + compact.height).toBeLessThanOrEqual(300);
+  const compact = (await chat.boundingBox())!,
+    compactComposer = (await composer.boundingBox())!;
+  const compactSend = (await chat
+    .getByRole("button", { name: "Send", exact: true })
+    .boundingBox())!;
+  expect(compact.y).toBeGreaterThanOrEqual(0);
+  expect(compact.y + compact.height).toBeLessThanOrEqual(300);
   expect(compactComposer.y).toBeGreaterThanOrEqual(compact.y + 60);
-  expect(compactSend.y + compactSend.height).toBeLessThanOrEqual(compact.y + compact.height);
-  expect(await chat.getByRole("button", { name: "Send", exact: true }).evaluate(element => {
-    const rect = element.getBoundingClientRect();
-    return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
-  })).toBe(true);
-  await expect(chat.getByRole("button", { name: "Profile", exact: true })).toHaveCount(0);
+  expect(compactSend.y + compactSend.height).toBeLessThanOrEqual(
+    compact.y + compact.height,
+  );
+  expect(
+    await chat
+      .getByRole("button", { name: "Send", exact: true })
+      .evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(
+            rect.x + rect.width / 2,
+            rect.y + rect.height / 2,
+          ),
+        );
+      }),
+  ).toBe(true);
+  await expect(
+    chat.getByRole("button", { name: "Profile", exact: true }),
+  ).toHaveCount(0);
   await expect(chat.getByRole("combobox")).toHaveCount(0);
   expect(await composer.boundingBox()).toEqual(compactComposer);
   await chat.getByRole("button", { name: "Close chat" }).click();
   await expect(chat).not.toBeVisible();
 });
 
-test("profile key saving and balance updates preserve controls and never store the secret in the browser", async ({ page }) => {
+test("profile key saving and balance updates preserve controls and never store the secret in the browser", async ({
+  page,
+}) => {
   const state = await fixture(page, { configured: false, enabled: false });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", { name: "Article chat: Article A" });
   await expect(chat.getByRole("status")).toContainText("Add and validate");
-  expect(state.mutations.filter(call => call.path.endsWith("/chat"))).toHaveLength(0);
+  expect(
+    state.mutations.filter((call) => call.path.endsWith("/chat")),
+  ).toHaveLength(0);
   await page.getByRole("button", { name: "Account menu" }).click();
   await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
   const profile = page.getByRole("dialog", { name: "Profile", exact: true });
@@ -109,64 +270,103 @@ test("profile key saving and balance updates preserve controls and never store t
   await field.fill("test-ui-secret");
   await expect(field).toHaveAttribute("type", "password");
   await expect(field).toHaveAttribute("autocomplete", "none");
-  const save = profile.getByRole("button", { name: "Save API key" }), balance = profile.getByRole("button", { name: "Refresh balance" });
-  const saveBefore = await save.boundingBox(), balanceBefore = await balance.boundingBox();
+  const save = profile.getByRole("button", { name: "Save API key" }),
+    balance = profile.getByRole("button", { name: "Refresh balance" });
+  const saveBefore = await save.boundingBox(),
+    balanceBefore = await balance.boundingBox();
   state.hold = true;
   await save.dblclick();
   await expect(profile.getByRole("button", { name: "Saving…" })).toBeDisabled();
   expect(await balance.boundingBox()).toEqual(balanceBefore);
-  expect(state.mutations.filter(call => call.path === "/api/ai/profile")).toHaveLength(1);
+  expect(
+    state.mutations.filter((call) => call.path === "/api/ai/profile"),
+  ).toHaveLength(1);
   state.hold = false;
   await expect(profile.getByText("8.123456 USD")).toBeVisible();
   expect(await save.boundingBox()).toEqual(saveBefore);
   expect(await balance.boundingBox()).toEqual(balanceBefore);
   await expect(profile.getByLabel("Replace DeepSeek API key")).toHaveValue("");
-  const storage = await page.evaluate(() => JSON.stringify({ local: { ...localStorage }, session: { ...sessionStorage } }));
+  const storage = await page.evaluate(() =>
+    JSON.stringify({
+      local: { ...localStorage },
+      session: { ...sessionStorage },
+    }),
+  );
   expect(storage).not.toContain("test-ui-secret");
 });
 
-test("chat stays bound to its article and reopens without generation; waiting full text can be stopped", async ({ page }) => {
+test("chat stays bound to its article and reopens without generation; waiting full text can be stopped", async ({
+  page,
+}) => {
   const state = await fixture(page);
   state.status = "waiting_content";
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
-  await expect(chat.getByRole("status")).toContainText("Waiting for the full article");
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
+  await expect(chat.getByRole("status")).toContainText(
+    "Waiting for the full article",
+  );
   await page.getByRole("heading", { name: "Article B", level: 2 }).click();
   await expect(chat).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Article B", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Article B", level: 1 }),
+  ).toBeVisible();
   await chat.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Stopped");
-  await expect(chat.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+  await expect(
+    chat.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeEnabled();
   await chat.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("heading", { name: "Article A", level: 2 }).click();
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Stopped");
-  expect(state.mutations.filter(call => call.path.endsWith("/chat"))).toHaveLength(1);
+  expect(
+    state.mutations.filter((call) => call.path.endsWith("/chat")),
+  ).toHaveLength(1);
   await page.reload();
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Stopped");
-  expect(state.mutations.filter(call => call.path.endsWith("/chat"))).toHaveLength(1);
+  expect(
+    state.mutations.filter((call) => call.path.endsWith("/chat")),
+  ).toHaveLength(1);
 });
 
-test("lost message acknowledgements retain one operation and stable controls until explicit recovery", async ({ page }) => {
+test("lost message acknowledgements retain one operation and stable controls until explicit recovery", async ({
+  page,
+}) => {
   const state = await fixture(page);
   state.status = "completed";
   state.versions.push(exampleChat());
   const operations: { operationId: string; content: string }[] = [];
   let release!: () => void;
-  const held = new Promise<void>(resolve => { release = resolve; });
-  await page.route("**/api/ai/chats/*/messages", async route => {
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/ai/chats/*/messages", async (route) => {
     operations.push(route.request().postDataJSON());
-    if (operations.length === 1) { await held; return route.abort("connectionreset"); }
-    return route.fulfill({ json: state.versions[0] });
+    if (operations.length === 1) {
+      await held;
+      return route.abort("connectionreset");
+    }
+    return route.fulfill({ json: wireFixture(state.versions[0]) });
   });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
-  const composer = chat.getByLabel("Message DeepSeek"), send = chat.getByRole("button", { name: "Send", exact: true });
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
+  const composer = chat.getByLabel("Message DeepSeek"),
+    send = chat.getByRole("button", { name: "Send", exact: true });
   await composer.fill("Explain the mechanism");
-  const before = { composer: await composer.boundingBox(), send: await send.boundingBox(), toolbar: await page.locator(".reader-toolbar").boundingBox() };
+  const before = {
+    composer: await composer.boundingBox(),
+    send: await send.boundingBox(),
+    toolbar: await page.locator(".reader-toolbar").boundingBox(),
+  };
   await send.dblclick();
   await expect(send).toBeDisabled();
   await expect(send).toHaveAttribute("aria-busy", "true");
@@ -174,15 +374,21 @@ test("lost message acknowledgements retain one operation and stable controls unt
   expect(await composer.boundingBox()).toEqual(before.composer);
   expect(await send.boundingBox()).toEqual(before.send);
   release();
-  await expect(chat.getByRole("status")).toContainText("request outcome is unknown");
+  await expect(chat.getByRole("status")).toContainText(
+    "request outcome is unknown",
+  );
   await expect(send).toBeDisabled();
-  await expect(chat.getByRole("button", { name: "New summary" })).toBeDisabled();
+  await expect(
+    chat.getByRole("button", { name: "New summary" }),
+  ).toBeDisabled();
   await chat.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(send).toBeDisabled();
   expect(await composer.boundingBox()).toEqual(before.composer);
   expect(await send.boundingBox()).toEqual(before.send);
-  expect(await page.locator(".reader-toolbar").boundingBox()).toEqual(before.toolbar);
+  expect(await page.locator(".reader-toolbar").boundingBox()).toEqual(
+    before.toolbar,
+  );
   await chat.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(composer).toHaveValue("");
   expect(operations).toHaveLength(2);
@@ -191,7 +397,9 @@ test("lost message acknowledgements retain one operation and stable controls unt
   expect(await send.boundingBox()).toEqual(before.send);
 });
 
-test("closing Profile during key save still enables the account when saving completes", async ({ page }) => {
+test("closing Profile during key save still enables the account when saving completes", async ({
+  page,
+}) => {
   const state = await fixture(page, { configured: false, enabled: false });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
@@ -211,121 +419,247 @@ test("closing Profile during key save still enables the account when saving comp
   await chat.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Writing summary");
-  expect(state.mutations.filter(call => call.path.endsWith("/chat"))).toHaveLength(1);
+  expect(
+    state.mutations.filter((call) => call.path.endsWith("/chat")),
+  ).toHaveLength(1);
 });
 
-test("early summary is readable while checking; final replacement preserves reading position and controls", async ({ page }) => {
+test("early summary is readable while checking; final replacement preserves reading position and controls", async ({
+  page,
+}) => {
   const state = await fixture(page);
-  const preview = "Early summary preview\n\n" + Array.from({ length: 24 }, (_, n) => `Paragraph ${n}: useful technical details.`).join("\n\n");
-  const current: ArticleChat = { ...exampleChat(), status: "generating", messages: [{ ...exampleChat().messages[0], phase: "generating", status: "streaming", content: "" }] };
+  const preview =
+    "Early summary preview\n\n" +
+    Array.from(
+      { length: 24 },
+      (_, n) => `Paragraph ${n}: useful technical details.`,
+    ).join("\n\n");
+  const current: ArticleChat = {
+    ...exampleChat(),
+    status: "generating",
+    messages: [
+      {
+        ...exampleChat().messages[0],
+        phase: "generating",
+        status: "streaming",
+        content: "",
+      },
+    ],
+  };
   state.versions.push(current);
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
   await expect(chat.getByRole("status")).toContainText("Writing summary");
-  const send = chat.getByRole("button", { name: "Send", exact: true }), composer = chat.getByLabel("Message DeepSeek"), toolbar = page.locator(".reader-toolbar");
-  const before = { send: await send.boundingBox(), composer: await composer.boundingBox(), toolbar: await toolbar.boundingBox() };
-  await expect(chat.getByRole("button", { name: "Copy response" })).toBeDisabled();
-  current.messages[0].phase = "verifying"; current.messages[0].content = preview;
+  const send = chat.getByRole("button", { name: "Send", exact: true }),
+    composer = chat.getByLabel("Message DeepSeek"),
+    toolbar = page.locator(".reader-toolbar");
+  const before = {
+    send: await send.boundingBox(),
+    composer: await composer.boundingBox(),
+    toolbar: await toolbar.boundingBox(),
+  };
+  await expect(
+    chat.getByRole("button", { name: "Copy response" }),
+  ).toBeDisabled();
+  current.messages[0].phase = "verifying";
+  current.messages[0].content = preview;
   state.status = "verifying";
-  await expect(chat.getByText("Early summary preview", { exact: true })).toBeVisible();
+  await expect(
+    chat.getByText("Early summary preview", { exact: true }),
+  ).toBeVisible();
   await expect(chat.getByRole("status")).toContainText("Checking facts");
-  await expect(chat.getByRole("button", { name: "Copy response" })).toBeEnabled();
+  await expect(
+    chat.getByRole("button", { name: "Copy response" }),
+  ).toBeEnabled();
   await expect(chat.getByRole("combobox")).toHaveCount(0);
   await expect(chat.getByLabel("Provider request costs")).toHaveCount(0);
-  await expect(chat.getByRole("button", { name: "Profile", exact: true })).toHaveCount(0);
+  await expect(
+    chat.getByRole("button", { name: "Profile", exact: true }),
+  ).toHaveCount(0);
   await expect(send).toBeDisabled();
-  await expect(chat.getByRole("button", { name: "New summary" })).toBeDisabled();
+  await expect(
+    chat.getByRole("button", { name: "New summary" }),
+  ).toBeDisabled();
   expect(await send.boundingBox()).toEqual(before.send);
   expect(await composer.boundingBox()).toEqual(before.composer);
   await page.screenshot({ path: test.info().outputPath("early-summary.png") });
   const messages = chat.getByLabel("Conversation messages");
-  await messages.evaluate(element => { element.scrollTop = 140; });
-  const scrollTop = await messages.evaluate(element => element.scrollTop);
-  const handle = chat.getByRole("button", { name: "Move chat with arrow keys or drag" });
+  await messages.evaluate((element) => {
+    element.scrollTop = 140;
+  });
+  const scrollTop = await messages.evaluate((element) => element.scrollTop);
+  const handle = chat.getByRole("button", {
+    name: "Move chat with arrow keys or drag",
+  });
   const box = (await handle.boundingBox())!;
-  await page.mouse.move(box.x + 30, box.y + 15); await page.mouse.down();
+  await page.mouse.move(box.x + 30, box.y + 15);
+  await page.mouse.down();
   state.status = "completed";
   await expect.poll(() => state.versions[0].status).toBe("completed");
-  await expect(chat.getByText("Early summary preview", { exact: true })).toHaveCount(1);
+  await expect(
+    chat.getByText("Early summary preview", { exact: true }),
+  ).toHaveCount(1);
   await expect(chat.getByText("Kafka", { exact: true })).toHaveCount(0);
   await page.mouse.up();
   await expect(chat.getByText("Kafka", { exact: true })).toHaveCount(1);
-  expect(await messages.evaluate(element => element.scrollTop)).toBe(scrollTop);
+  expect(await messages.evaluate((element) => element.scrollTop)).toBe(
+    scrollTop,
+  );
   expect(await send.boundingBox()).toEqual(before.send);
   expect(await composer.boundingBox()).toEqual(before.composer);
   expect(await toolbar.boundingBox()).toEqual(before.toolbar);
-  await page.screenshot({ path: test.info().outputPath("simplified-chat.png") });
-  expect(state.mutations.filter(call => call.path.includes("/chat"))).toHaveLength(0);
+  await page.screenshot({
+    path: test.info().outputPath("simplified-chat.png"),
+  });
+  expect(
+    state.mutations.filter((call) => call.path.includes("/chat")),
+  ).toHaveLength(0);
 });
 
-test("failed verification keeps the preview; retry and stop give immediate feedback without shifting the composer", async ({ page }) => {
+test("failed verification keeps the preview; retry and stop give immediate feedback without shifting the composer", async ({
+  page,
+}) => {
   const state = await fixture(page);
-  const current: ArticleChat = { ...exampleChat(), status: "failed", error: "Verification provider timeout", messages: [{ ...exampleChat().messages[0], status: "failed", content: "Early preview survives" }] };
-  state.status = "failed"; state.versions.push(current);
+  const current: ArticleChat = {
+    ...exampleChat(),
+    status: "failed",
+    error: "Verification provider timeout",
+    messages: [
+      {
+        ...exampleChat().messages[0],
+        status: "failed",
+        content: "Early preview survives",
+      },
+    ],
+  };
+  state.status = "failed";
+  state.versions.push(current);
   let releaseRetry!: () => void, releaseStop!: () => void;
-  const retryGate = new Promise<void>(resolve => { releaseRetry = resolve; }), stopGate = new Promise<void>(resolve => { releaseStop = resolve; });
-  let retries = 0, stops = 0;
-  await page.route("**/api/ai/chats/*/retry", async route => {
-    retries++; await retryGate;
-    state.status = "verifying"; current.status = "verifying"; delete current.error;
-    current.messages.push({ ...current.messages[0], id: "retry-assistant", status: "pending" });
-    await route.fulfill({ json: current });
+  const retryGate = new Promise<void>((resolve) => {
+      releaseRetry = resolve;
+    }),
+    stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+  let retries = 0,
+    stops = 0;
+  await page.route("**/api/ai/chats/*/retry", async (route) => {
+    retries++;
+    await retryGate;
+    state.status = "verifying";
+    current.status = "verifying";
+    delete current.error;
+    current.messages.push({
+      ...current.messages[0],
+      id: "retry-assistant",
+      status: "pending",
+    });
+    await route.fulfill({ json: wireFixture(current) });
   });
-  await page.route("**/api/ai/chats/*/stop", async route => {
-    stops++; await stopGate;
-    state.status = "cancelled"; current.status = "cancelled"; current.messages[1].status = "interrupted";
-    await route.fulfill({ json: current });
+  await page.route("**/api/ai/chats/*/stop", async (route) => {
+    stops++;
+    await stopGate;
+    state.status = "cancelled";
+    current.status = "cancelled";
+    current.messages[1].status = "interrupted";
+    await route.fulfill({ json: wireFixture(current) });
   });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
-  const retry = chat.getByRole("button", { name: "Retry", exact: true }), composer = chat.getByLabel("Message DeepSeek");
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
+  const retry = chat.getByRole("button", { name: "Retry", exact: true }),
+    composer = chat.getByLabel("Message DeepSeek");
   await expect(chat.getByRole("status")).toContainText("Verification failed");
-  await expect(chat.getByRole("status")).toHaveAttribute("title", "Verification provider timeout");
+  await expect(chat.getByRole("status")).toHaveAttribute(
+    "title",
+    "Verification provider timeout",
+  );
   await expect(chat.getByText("Early preview survives")).toBeVisible();
-  const before = { composer: await composer.boundingBox(), toolbar: await page.locator(".reader-toolbar").boundingBox() };
-  await composer.fill("Retain my question"); await composer.press("Control+Enter");
-  expect(state.mutations.filter(call => call.path.endsWith("/messages"))).toHaveLength(0);
+  const before = {
+    composer: await composer.boundingBox(),
+    toolbar: await page.locator(".reader-toolbar").boundingBox(),
+  };
+  await composer.fill("Retain my question");
+  await composer.press("Control+Enter");
+  expect(
+    state.mutations.filter((call) => call.path.endsWith("/messages")),
+  ).toHaveLength(0);
   await retry.dblclick();
   await expect(chat.getByRole("status")).toContainText("Retrying verification");
-  await expect(retry).toBeDisabled(); expect(retries).toBe(1);
+  await expect(retry).toBeDisabled();
+  expect(retries).toBe(1);
   expect(await composer.boundingBox()).toEqual(before.composer);
   releaseRetry();
   await expect(chat.getByRole("status")).toContainText("Checking facts");
   const stop = chat.getByRole("button", { name: "Stop", exact: true });
   await stop.dblclick();
   await expect(chat.getByRole("status")).toContainText("Stopping");
-  await expect(stop).toBeDisabled(); expect(stops).toBe(1);
+  await expect(stop).toBeDisabled();
+  expect(stops).toBe(1);
   expect(await composer.boundingBox()).toEqual(before.composer);
   releaseStop();
-  await expect(chat.getByRole("status")).toContainText("Stopped during verification");
+  await expect(chat.getByRole("status")).toContainText(
+    "Stopped during verification",
+  );
   await expect(chat.getByRole("status")).toHaveAttribute("aria-busy", "false");
   await expect(chat.getByText("Early preview survives")).toHaveCount(2);
   await expect(composer).toHaveValue("Retain my question");
   expect(await composer.boundingBox()).toEqual(before.composer);
-  expect(await page.locator(".reader-toolbar").boundingBox()).toEqual(before.toolbar);
+  expect(await page.locator(".reader-toolbar").boundingBox()).toEqual(
+    before.toolbar,
+  );
 });
 
-test("verification cannot replace selected text until the reader releases the selection", async ({ page }) => {
+test("verification cannot replace selected text until the reader releases the selection", async ({
+  page,
+}) => {
   const state = await fixture(page);
   state.status = "verifying";
-  state.versions.push({ ...exampleChat(), status: "verifying", messages: [{ ...exampleChat().messages[0], status: "streaming", content: "Select this early summary while it is checked." }] });
+  state.versions.push({
+    ...exampleChat(),
+    status: "verifying",
+    messages: [
+      {
+        ...exampleChat().messages[0],
+        status: "streaming",
+        content: "Select this early summary while it is checked.",
+      },
+    ],
+  });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", { name: "Article chat: Article A", exact: true });
-  const preview = chat.getByText("Select this early summary while it is checked.", { exact: true });
+  const chat = page.getByRole("dialog", {
+    name: "Article chat: Article A",
+    exact: true,
+  });
+  const preview = chat.getByText(
+    "Select this early summary while it is checked.",
+    { exact: true },
+  );
   await expect(preview).toBeVisible();
   const composer = await chat.getByLabel("Message DeepSeek").boundingBox();
-  await preview.evaluate(element => {
-    const range = document.createRange(); range.selectNodeContents(element);
-    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range);
+  await preview.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
   });
   state.status = "completed";
   await expect.poll(() => state.versions[0].status).toBe("completed");
   await expect(preview).toBeVisible();
-  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe("Select this early summary while it is checked.");
+  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+    "Select this early summary while it is checked.",
+  );
   await page.evaluate(() => window.getSelection()!.removeAllRanges());
   await expect(chat.getByText("Kafka", { exact: true })).toBeVisible();
-  expect(await chat.getByLabel("Message DeepSeek").boundingBox()).toEqual(composer);
+  expect(await chat.getByLabel("Message DeepSeek").boundingBox()).toEqual(
+    composer,
+  );
 });

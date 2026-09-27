@@ -13,16 +13,29 @@ pub(super) async fn observe(request: Request, next: Next) -> Response {
         .map(MatchedPath::as_str)
         .unwrap_or("unmatched")
         .to_owned();
-    let started = Instant::now();
-    let response = next.run(request).await;
-    let completion = Completion {
-        method: method.as_str(),
-        operation: &operation,
-        status: response.status().as_u16(),
-        elapsed_ms: started.elapsed().as_millis(),
-    };
-    log::info!(target: "reader_server::api_request", "{completion}");
-    response
+    let context = reader_runtime::Context::request();
+    context
+        .scope(async move {
+            let started = Instant::now();
+            let mut response = next.run(request).await;
+            response.headers_mut().insert(
+                "x-request-id",
+                context
+                    .request_id
+                    .to_string()
+                    .parse()
+                    .expect("UUID is a valid header"),
+            );
+            let completion = Completion {
+                method: method.as_str(),
+                operation: &operation,
+                status: response.status().as_u16(),
+                elapsed_ms: started.elapsed().as_millis(),
+            };
+            log::info!(target: "reader_server::api_request", "{completion}");
+            response
+        })
+        .await
 }
 
 pub(super) struct Completion<'a> {

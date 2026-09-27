@@ -101,8 +101,13 @@ impl PostgresAiStore {
         let mut record = checked(row)?;
         record.mark_running()?;
         let lease = Uuid::new_v4();
-        sqlx::query("UPDATE ai_definitions SET status='generating',document=$2,lease=$3,lease_until=now()+$4::bigint*interval '1 second' WHERE id=$1")
-            .bind(record.job().id).bind(encode(&record)?).bind(lease).bind(seconds).execute(&mut *tx).await.map_err(storage)?;
+        let queue_wait_us: i64 = sqlx::query_scalar("UPDATE ai_definitions SET status='generating',document=$2,lease=$3,lease_until=now()+$4::bigint*interval '1 second' WHERE id=$1 RETURNING (extract(epoch FROM now()-created_at)*1000000)::bigint")
+            .bind(record.job().id).bind(encode(&record)?).bind(lease).bind(seconds).fetch_one(&mut *tx).await.map_err(storage)?;
+        log::info!(
+            "ai_claim class=definitions job_id={} queue_wait_us={}",
+            record.job().id,
+            queue_wait_us
+        );
         tx.commit().await.map_err(storage)?;
         Ok(Some(ClaimedDefinitions { record, lease }))
     }
@@ -111,7 +116,7 @@ impl PostgresAiStore {
         claim: &ClaimedDefinitions,
         state: DefinitionState,
         usage: Option<Usage>,
-        reply: Option<DefinitionReply>,
+        reply: Option<ProviderReply>,
     ) -> Result<(), AiError> {
         let status = match &state {
             DefinitionState::Completed { .. } => "completed",

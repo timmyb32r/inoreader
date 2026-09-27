@@ -31,8 +31,36 @@ CREATE TABLE IF NOT EXISTS articles (
     revision BIGINT NOT NULL CHECK (revision >= 0),
     document TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS articles_by_workspace_arrival
-    ON articles ((split_part(id, '/', 1)), ((document::jsonb ->> 'first_arrived_at')) DESC, id DESC);
+-- Materialized, rebuildable read projection; exact source documents stay TEXT.
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS workspace_key TEXT
+    GENERATED ALWAYS AS (split_part(id,'/',1)) STORED;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS article_key TEXT
+    GENERATED ALWAYS AS (split_part(id,'/',2)) STORED;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS is_read BOOLEAN
+    GENERATED ALWAYS AS ((document::jsonb #>> '{state,read}')::boolean) STORED;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS is_later BOOLEAN
+    GENERATED ALWAYS AS ((document::jsonb #>> '{state,later}')::boolean) STORED;
+-- Ordering uses an exact decimal calendar key including nanoseconds. Timestamp precision alone
+-- would collapse distinct source instants; source bytes are never rewritten.
+CREATE OR REPLACE FUNCTION reader_arrival_order(value TEXT) RETURNS NUMERIC
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE parts TEXT[];
+BEGIN
+    parts := regexp_match(value, '^([-+]?[0-9]{4,6})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?Z$');
+    IF parts IS NULL THEN
+        RAISE EXCEPTION 'unsupported article timestamp representation';
+    END IF;
+    -- This key retains leap seconds, year zero and signed extended years too;
+    -- no cast through PostgreSQL's narrower timestamp representation occurs.
+    RETURN (((((parts[1]::numeric*100+parts[2]::numeric)*100+parts[3]::numeric)*100+parts[4]::numeric)*100+parts[5]::numeric)*100+parts[6]::numeric)*1000000000
+        + CASE WHEN parts[7] IS NULL THEN 0 ELSE rpad(parts[7],9,'0')::numeric END;
+END $$;
+ALTER TABLE articles ADD COLUMN IF NOT EXISTS arrival_order NUMERIC
+    GENERATED ALWAYS AS (reader_arrival_order(document::jsonb ->> 'first_arrived_at')) STORED;
+CREATE INDEX IF NOT EXISTS articles_page ON articles(workspace_key,arrival_order DESC,id DESC);
+CREATE INDEX IF NOT EXISTS articles_unread_page ON articles(workspace_key,arrival_order DESC,id DESC) WHERE NOT is_read;
+CREATE INDEX IF NOT EXISTS articles_later_page ON articles(workspace_key,arrival_order DESC,id DESC) WHERE is_later;
+DROP INDEX IF EXISTS articles_by_workspace_arrival;
 
 CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY,

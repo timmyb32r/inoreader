@@ -126,6 +126,7 @@ impl AiService {
         operation: Uuid,
         regenerate: bool,
     ) -> Result<ArticleChat, AiError> {
+        log::info!("ai_submission operation_id={operation}");
         let prior = self.store.chats(owner, workspace, article).await?;
         // Retried starts and reopening never need a key or consume model credit.
         if let Some(existing) = prior
@@ -214,6 +215,7 @@ impl AiService {
         operation: Uuid,
         content: String,
     ) -> Result<ArticleChat, AiError> {
+        log::info!("ai_submission operation_id={operation}");
         if content.trim().is_empty() || content.len() > self.policy.config().max_message_bytes {
             return Err(AiError::Message);
         }
@@ -226,6 +228,7 @@ impl AiService {
         id: Uuid,
         operation: Uuid,
     ) -> Result<ArticleChat, AiError> {
+        log::info!("ai_submission operation_id={operation}");
         self.enqueue(owner, id, operation, OperationKind::Retry)
             .await
     }
@@ -236,6 +239,7 @@ impl AiService {
         operation: Uuid,
         kind: OperationKind,
     ) -> Result<ArticleChat, AiError> {
+        log::info!("ai_submission operation_id={operation}");
         let prior = self.store.chat(owner, id).await?;
         if let Some(op) = prior.operations.iter().find(|op| op.id == operation) {
             if op.kind != kind {

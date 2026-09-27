@@ -1,5 +1,8 @@
 use chrono::{Duration as ChronoDuration, Utc};
-use reader_application::{AccountRecord, ReaderRepository, RepositoryError};
+use reader_application::{AccountRecord, RepositoryError};
+use reader_application::{
+    ArticleRepository, IdentityRepository, SubscriptionRepository, WorkspaceRepository,
+};
 use reader_core::{
     AccountId, Article, ArticleId, ArticleLocation, ArticleState, DedupKey, ReasonPolicy, SourceId,
     Subscription, SubscriptionId, Workspace, WorkspaceId,
@@ -21,6 +24,11 @@ mod ai_tests;
 #[path = "support/glossary.rs"]
 mod glossary_tests;
 
+#[path = "support/browser.rs"]
+mod browser_tests;
+#[path = "support/read_projection.rs"]
+mod read_projection;
+
 const POSTGRES_IMAGE: &str =
     "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
@@ -40,6 +48,8 @@ impl PostgresContainer {
                 "--detach",
                 "--name",
                 &name,
+                "--tmpfs",
+                "/var/lib/postgresql/data:rw,size=1g",
                 "--security-opt",
                 "no-new-privileges:true",
                 "--publish",
@@ -105,7 +115,7 @@ impl PostgresContainer {
 
 impl Drop for PostgresContainer {
     fn drop(&mut self) {
-        let output = command("docker", &["rm", "--force", &self.name]);
+        let output = command("docker", &["rm", "--force", "--volumes", &self.name]);
         if !output.status.success() {
             eprintln!(
                 "failed to remove PostgreSQL acceptance container {}: {}",
@@ -153,6 +163,8 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     prepare_schema(&pool)
         .await
         .expect("prepare PostgreSQL schema a second time");
+
+    read_projection::verify(&pool).await;
 
     let migrated_key: String = sqlx::query_scalar(
         "SELECT dedup_key FROM library_dedup \
@@ -260,6 +272,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_article_state_conversion(&pool).await;
     ai_tests::verify(&pool).await;
     glossary_tests::verify(&pool).await;
+    browser_tests::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
 }
 

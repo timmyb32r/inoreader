@@ -1,7 +1,5 @@
-use crate::{
-    AccountRecord, InviteRecord, PasswordResetRecord, ReaderRepository, RepositoryError,
-    SessionRecord,
-};
+use crate::IdentityRepository;
+use crate::{AccountRecord, InviteRecord, PasswordResetRecord, RepositoryError, SessionRecord};
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Algorithm, Argon2, Params, Version,
@@ -77,7 +75,7 @@ pub struct AuthService<R> {
     policy: AuthPolicy,
 }
 
-impl<R: ReaderRepository> AuthService<R> {
+impl<R: IdentityRepository> AuthService<R> {
     pub fn new(repository: Arc<R>, policy: AuthPolicy) -> Self {
         Self { repository, policy }
     }
