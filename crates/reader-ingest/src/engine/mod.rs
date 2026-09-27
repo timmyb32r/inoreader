@@ -410,6 +410,7 @@ where
                 .publish_content(
                     lease,
                     ContentRevision {
+                        publication: crate::extract_publication(&source, &page.final_url),
                         record_id,
                         source_revision,
                         refresh_id: Uuid::new_v4(),

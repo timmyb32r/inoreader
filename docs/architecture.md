@@ -5,6 +5,10 @@ state transitions. `reader-application` coordinates use cases through ports.
 Collectors and the browser/HTTP runtime obtain untrusted external data. The PostgreSQL adapter owns persistence details. Server crates translate HTTP DTOs and embed the
 Preact build. The `inoreader` binary is the only composition root.
 
+The [publication-date contract](publication-dates.md) separates publisher dates
+from immutable workspace arrival times, preserves date precision, and describes
+page evidence, historical enrichment and read-model projection.
+
 Dependencies point toward domain contracts. Core never imports HTTP, PostgreSQL,
 CDP, or server code. Application code never embeds SQL. Adapters may depend on core and
 application ports, but never on sibling adapters. The source-level boundary guard

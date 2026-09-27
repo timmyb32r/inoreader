@@ -362,7 +362,7 @@ describe("subscription details", () => {
       title: "A useful post",
       excerpt: "",
       body: [],
-      age: "1h",
+      savedAt: "1h",
       read: false,
       later: false,
       fullText: "ready" as const,

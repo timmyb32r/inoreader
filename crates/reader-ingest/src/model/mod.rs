@@ -125,7 +125,7 @@ pub struct SourceRecord {
     key: DedupKey,
     description_media_type: Option<String>,
     feed_content_html: Option<String>,
-    published_at: Option<DateTime<Utc>>,
+    published_at: Option<reader_core::PublicationDate>,
     revision: u64,
 }
 impl SourceRecord {
@@ -171,8 +171,8 @@ impl SourceRecord {
     pub fn feed_content_html(&self) -> Option<&str> {
         self.feed_content_html.as_deref()
     }
-    pub fn published_at(&self) -> Option<DateTime<Utc>> {
-        self.published_at
+    pub fn published_at(&self) -> Option<&reader_core::PublicationDate> {
+        self.published_at.as_ref()
     }
     pub fn revision(&self) -> u64 {
         self.revision
@@ -402,6 +402,7 @@ pub struct ContentChunk {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContentRevision {
+    pub publication: Vec<reader_core::PublicationEvidence>,
     pub record_id: SourceRecordId,
     pub source_revision: u64,
     pub refresh_id: Uuid,
@@ -412,6 +413,8 @@ pub struct ContentRevision {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContentManifestPointer {
+    /// None means metadata has not been extracted; Some(empty) means no declaration.
+    pub publication: Option<Vec<reader_core::PublicationEvidence>>,
     pub record_id: SourceRecordId,
     pub source_revision: u64,
     pub refresh_id: Uuid,
@@ -423,6 +426,7 @@ pub struct ContentManifestPointer {
 impl From<&ContentRevision> for ContentManifestPointer {
     fn from(v: &ContentRevision) -> Self {
         Self {
+            publication: Some(v.publication.clone()),
             record_id: v.record_id,
             source_revision: v.source_revision,
             refresh_id: v.refresh_id,

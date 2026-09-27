@@ -1,55 +1,65 @@
+use futures_util::TryStreamExt;
 use reader_application::{PublicationDay, PublicationHistory, RepositoryError};
-use reader_core::{SubscriptionId, WorkspaceId};
+use reader_core::{PublicationEvidence, SubscriptionId, WorkspaceId};
 use sqlx::PgPool;
+use std::collections::BTreeMap;
 
-/// Only aggregate delivered origins from the authorized workspace/subscription.
-/// The existing by_subscription index bounds the join, and the wire response
-/// contains one row per publication day, never article bodies or source records.
+/// Stream date metadata, grouped by article, from the authorized subscription.
+/// Memory holds calendar-day totals and one article's origins, never bodies.
 pub(crate) async fn load(
     pool: &PgPool,
     workspace: WorkspaceId,
     subscription: SubscriptionId,
 ) -> Result<PublicationHistory, RepositoryError> {
-    let rows: Vec<(Option<String>, i64, i64)> = sqlx::query_as(
-        r#"WITH articles AS (
-            SELECT origin.article_id,
-                   MIN((record.document::jsonb->>'published_at')::timestamptz AT TIME ZONE 'UTC')::date AS day,
-                   COUNT(DISTINCT ((record.document::jsonb->>'published_at')::timestamptz AT TIME ZONE 'UTC')::date) AS dates
-            FROM library_origins origin
-            LEFT JOIN source_records record ON record.id=origin.source_record_id
-            WHERE origin.workspace_id=$1 AND origin.subscription_id=$2
-            GROUP BY origin.article_id
-        )
-        SELECT CASE WHEN dates=1 THEN day::text END,
-               CASE WHEN dates>1 THEN 2 ELSE dates END AS category,
-               COUNT(*)::bigint
-        FROM articles
-        GROUP BY 1,2 ORDER BY 1"#,
-    )
-    .bind(workspace.as_uuid().to_string())
-    .bind(subscription.as_uuid().to_string())
-    .fetch_all(pool)
-    .await
-    .map_err(|error| RepositoryError::Storage(error.to_string()))?;
+    let mut rows = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+        "SELECT o.article_id,r.document::jsonb->>'published_at',m.document FROM library_origins o LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id WHERE o.workspace_id=$1 AND o.subscription_id=$2 ORDER BY o.article_id,o.source_record_id")
+        .bind(workspace.as_uuid().to_string()).bind(subscription.as_uuid().to_string()).fetch(pool);
+    let mut current = None;
+    let mut evidence = Vec::new();
+    let mut days = BTreeMap::new();
     let mut history = PublicationHistory::default();
-    for (day, category, count) in rows {
-        let count = u64::try_from(count)
-            .map_err(|_| RepositoryError::Storage("invalid publication count".into()))?;
-        match (day, category) {
-            (Some(day), 1) => history.days.push(PublicationDay {
-                date: day
-                    .parse()
-                    .map_err(|_| RepositoryError::Storage("invalid publication date".into()))?,
-                count,
-            }),
-            (None, 0) => history.undated = count,
-            (None, 2) => history.conflicting = count,
-            _ => {
-                return Err(RepositoryError::Storage(
-                    "invalid publication aggregate".into(),
-                ))
-            }
+    while let Some((id, published, manifest)) = rows.try_next().await.map_err(storage)? {
+        if current.as_ref().is_some_and(|value| value != &id) {
+            accumulate(&evidence, &mut days, &mut history);
+            evidence.clear();
         }
+        current = Some(id);
+        let manifest = manifest
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(storage)?;
+        evidence.extend(crate::publication_dates::origin_publication(
+            published,
+            manifest.as_ref(),
+        )?);
     }
+    if current.is_some() {
+        accumulate(&evidence, &mut days, &mut history);
+    }
+    history.days = days
+        .into_iter()
+        .map(|(date, count)| PublicationDay { date, count })
+        .collect();
     Ok(history)
+}
+fn accumulate(
+    evidence: &[PublicationEvidence],
+    days: &mut BTreeMap<chrono::NaiveDate, u64>,
+    history: &mut PublicationHistory,
+) {
+    let candidates: std::collections::BTreeSet<_> = evidence
+        .iter()
+        .filter_map(|v| v.date())
+        .map(|v| v.day())
+        .collect();
+    if candidates.len() == 1 {
+        *days.entry(*candidates.first().unwrap()).or_default() += 1;
+    } else if candidates.len() > 1 {
+        history.conflicting += 1;
+    } else {
+        history.undated += 1;
+    }
+}
+fn storage(error: impl std::fmt::Display) -> RepositoryError {
+    RepositoryError::Storage(error.to_string())
 }

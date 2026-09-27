@@ -87,7 +87,7 @@ impl FeedDiscovery for ProductionDiscovery {
                 .take(initial_items)
                 .map(|v| FeedPreviewArticle {
                     title: v.title,
-                    published_at: v.published_at.map(|d| d.to_rfc3339()),
+                    published_at: v.published_at.map(|d| d.as_str().to_owned()),
                 })
                 .collect(),
         })
@@ -129,7 +129,7 @@ impl FeedDiscovery for ProductionDiscovery {
                     .take(initial_items)
                     .map(|v| FeedPreviewArticle {
                         title: v.key().title.clone(),
-                        published_at: v.published_at().map(|d| d.to_rfc3339()),
+                        published_at: v.published_at().map(|d| d.as_str().to_owned()),
                     })
                     .collect(),
             },

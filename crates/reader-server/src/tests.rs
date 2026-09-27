@@ -466,7 +466,8 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         origins: vec![],
         revision: 0,
     };
-    let presentation = reader_application::ArticlePresentation {
+    let mut presentation = reader_application::ArticlePresentation {
+        publication: Vec::new(),
         description_media_type: None,
         article,
         subscription_ids: vec![],
@@ -476,6 +477,22 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         failure_reason: Some("upstream timeout".into()),
     };
     let json = serde_json::to_value(article_view(&presentation)).unwrap();
+    assert_eq!(
+        json["savedAt"],
+        presentation.article.first_arrived_at.to_rfc3339()
+    );
+    assert!(json["publishedAt"].is_null());
+    assert_eq!(json["publicationStatus"], "unknown");
+    assert!(json.get("age").is_none());
+    presentation
+        .publication
+        .push(reader_core::PublicationEvidence {
+            source: "feed".into(),
+            raw: "2020-01-02".into(),
+        });
+    let dated = serde_json::to_value(article_view(&presentation)).unwrap();
+    assert_eq!(dated["publishedAt"], "2020-01-02");
+    assert_eq!(dated["savedAt"], json["savedAt"]);
     assert_eq!(json["url"], "https://example.test/post");
     assert_eq!(json["source"], "Feed A");
     assert_eq!(json["sources"], serde_json::json!(["Feed A", "Feed B"]));
@@ -1071,6 +1088,7 @@ async fn article_command_resolves_ownership_before_any_article_access() {
 fn description_rendering_uses_declared_format_without_changing_source() {
     let source = "<p>Rust &amp; <strong>SQL</strong></p><p>Next</p><script>bad()</script>";
     let mut value = reader_application::ArticlePresentation {
+        publication: Vec::new(),
         article: reader_core::Article {
             id: ArticleId::new(),
             key: DedupKey {

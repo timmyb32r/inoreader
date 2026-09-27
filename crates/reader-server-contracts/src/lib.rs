@@ -61,11 +61,22 @@ pub struct ArticleView {
     pub body: Vec<String>,
     pub body_html: Option<String>,
     pub author: Option<String>,
-    pub age: String,
+    pub saved_at: String,
+    pub published_at: Option<String>,
+    pub publication_status: PublicationStatus,
+    pub publication_sources: Vec<String>,
     pub read: bool,
     pub later: bool,
     pub full_text: FullTextStatus,
     pub full_text_reason: Option<String>,
+}
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationStatus {
+    Known,
+    Unknown,
+    Conflicting,
+    Invalid,
 }
 #[derive(schemars::JsonSchema, Debug, Serialize)]
 pub struct WorkspaceResponse {

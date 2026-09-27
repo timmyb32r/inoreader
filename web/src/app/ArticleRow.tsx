@@ -1,4 +1,4 @@
-import { formatArticleDate } from "../ui/formatArticleDate";
+import { ArticleDates } from "./ArticleDates";
 import { Icon } from "../ui/Icon";
 import type { Article } from "../api/viewModels";
 export function ArticleRow({
@@ -23,7 +23,7 @@ export function ArticleRow({
         <span class="article-row__source">
           {article.sources?.join(" · ") ?? article.source}
         </span>
-        <time>{formatArticleDate(article.age)}</time>
+        <ArticleDates article={article} />
         <h2>{article.title}</h2>
         <p>{article.excerpt}</p>
         <span class={`fulltext fulltext--${article.fullText}`}>

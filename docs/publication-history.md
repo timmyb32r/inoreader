@@ -9,8 +9,10 @@ retrying, or changing scale.
 
 `GET /api/subscriptions/{id}/publication-history` requires an authenticated
 subscription owner. PostgreSQL joins only delivered origins for that subscription
-and workspace to their source records, using the existing `by_subscription` and
-source-record primary-key indexes. The response contains sparse UTC day/count
+and workspace to their source records and publication metadata in content
+manifests, using the existing `by_subscription` and primary-key indexes. Feed
+publication dates take precedence; extracted page declarations fill missing dates.
+The query streams metadata rows and aggregates by article. The response contains sparse day/count
 buckets, `undated`, and `conflicting`; it never downloads article bodies. Counts
 include collected read and unread articles, irrespective of the current
 reader page. No publications are inferred before collection began.
@@ -20,7 +22,9 @@ once; origins on different days are reported as conflicting rather than selectin
 a date. Articles with no source publication date are reported as undated. Neither
 category is placed on the chart using an ingestion timestamp. Invalid persisted
 timestamps fail the query instead of becoming missing dates. UTC day bucketing is
-display-only aggregation; stored publication timestamps remain unchanged.
+display-only aggregation; stored publication timestamps remain unchanged. Date-only
+and timezone-less declarations keep their source calendar day. See
+[publication date contracts and historical enrichment](publication-dates.md).
 
 The PostgreSQL implementation supports this endpoint. Other repositories return
 an explicit unavailable error after checking ownership until implemented. The UI

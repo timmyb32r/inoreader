@@ -2836,6 +2836,7 @@ dependencies = [
  "async-trait",
  "axum",
  "chrono",
+ "futures-util",
  "log",
  "murmur3",
  "reader-ai",

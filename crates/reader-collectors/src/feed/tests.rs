@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn publication_is_not_updated_or_ingestion_time() {
+    let url = Url::parse("https://example.test/feed").unwrap();
+    let xml = br#"<feed xmlns="http://www.w3.org/2005/Atom"><id>f</id><title>f</title><updated>2026-01-01T00:00:00Z</updated><entry><id>a</id><title>A</title><published>2020-01-02T03:04:05Z</published><updated>2026-01-01T00:00:00Z</updated></entry><entry><id>b</id><title>B</title><updated>2026-01-01T00:00:00Z</updated></entry></feed>"#;
+    let values = parse_xml(xml, &url).unwrap();
+    assert_eq!(
+        values[0].published_at.as_ref().unwrap().as_str(),
+        "2020-01-02T03:04:05+00:00"
+    );
+    assert!(values[1].published_at.is_none());
+    let json = br#"{"items":[{"id":"a","date_published":"2020-01-02T03:04:05Z","date_modified":"2026-01-01T00:00:00Z"}]}"#;
+    assert_eq!(
+        parse_json(json, &url).unwrap()[0]
+            .published_at
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "2020-01-02T03:04:05+00:00"
+    );
+}
+
+#[test]
 fn parses_relative_json_feed_url_without_rewriting_query_or_fragment() {
     let records = parse_json(
         br#"{"items":[{"id":"1","url":"/a?q=1#x","title":"T","summary":""}]}"#,

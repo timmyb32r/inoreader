@@ -183,7 +183,9 @@ export function ArticleListPanel({
             ? `${(pageNumber - 1) * 50 + 1}–${Math.min(pageNumber * 50, pageTotal)} of ${pageTotal}`
             : "0 articles"}
         </span>
-        <span>Newest first</span>
+        <span title="Sorted by the date first saved in this workspace">
+          Newest saved first
+        </span>
       </div>
       <div class="article-scroll">
         {filtered.length ? (

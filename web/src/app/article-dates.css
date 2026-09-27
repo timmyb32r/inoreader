@@ -1,0 +1,24 @@
+.article-dates {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 15px;
+  height: 30px;
+  font-variant-numeric: tabular-nums;
+}
+.article-dates > span {
+  white-space: nowrap;
+}
+.article-dates__label {
+  display: inline-block;
+  width: 5.5em;
+}
+.article-row__main > .article-dates {
+  width: 22em;
+}
+.reader-meta .article-dates {
+  font-size: 11px;
+}

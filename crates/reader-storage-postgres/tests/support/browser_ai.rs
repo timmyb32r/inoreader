@@ -69,6 +69,7 @@ pub async fn service(
     let refresh = Uuid::new_v4();
     sqlx::query("INSERT INTO library_origins(workspace_id,article_id,subscription_id,source_record_id) VALUES($1,$2,$3,$4)").bind(workspace.as_uuid().to_string()).bind(article.as_uuid().to_string()).bind(subscription.id().as_uuid().to_string()).bind(record.as_uuid().to_string()).execute(pool).await.unwrap();
     let manifest = reader_ingest::ContentManifestPointer {
+        publication: None,
         record_id: record,
         source_revision: 1,
         refresh_id: refresh,

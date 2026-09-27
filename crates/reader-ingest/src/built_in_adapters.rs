@@ -166,7 +166,7 @@ impl BuiltInAdapterCollector {
                 url,
                 title,
                 string_field(row, "article_summary"),
-                DateTime::from_timestamp_millis(ms),
+                DateTime::from_timestamp_millis(ms).map(Into::into),
                 None,
             )?)
         }
@@ -209,7 +209,7 @@ impl BuiltInAdapterCollector {
                         .from_local_datetime(&v)
                         .single()
                 })
-                .map(|v| v.with_timezone(&Utc));
+                .map(|v| reader_core::PublicationDate::from(v.with_timezone(&Utc)));
             if title.is_empty() || published.is_none() {
                 continue;
             }
@@ -269,7 +269,7 @@ impl BuiltInAdapterCollector {
                             .from_local_datetime(&v)
                             .single()
                     })
-                    .map(|v| v.with_timezone(&Utc));
+                    .map(|v| reader_core::PublicationDate::from(v.with_timezone(&Utc)));
                 let url = if kind == 1 {
                     string_field(row, "outUrl").and_then(|v| Url::parse(&v).ok())
                 } else {
@@ -369,8 +369,7 @@ impl BuiltInAdapterCollector {
             let path = captures.get(2).unwrap().as_str();
             let date = NaiveDate::parse_from_str(&path[7..15], "%Y%m%d")
                 .ok()
-                .and_then(|v| v.and_hms_opt(0, 0, 0))
-                .map(|v| DateTime::from_naive_utc_and_offset(v, Utc));
+                .and_then(|v| reader_core::PublicationDate::parse(&v.to_string()));
             let url = Url::parse(&format!(
                 "https://github.com/digoal/blog/blob/master/{path}"
             ))
@@ -452,7 +451,8 @@ impl BuiltInAdapterCollector {
                 .captures(&raw_date)
                 .and_then(|v| v.get(1))
                 .and_then(|v| v.as_str().parse::<i64>().ok())
-                .and_then(DateTime::from_timestamp_millis);
+                .and_then(DateTime::from_timestamp_millis)
+                .map(Into::into);
             record(source, url, title, None, published, Some(content.html()))
         }))
         .buffered(2)
@@ -479,27 +479,16 @@ fn text_field(value: &serde_json::Value, names: &[&str]) -> String {
         .find_map(|name| string_field(value, name))
         .unwrap_or_default()
 }
-fn parse_date(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value.trim())
-        .ok()
-        .map(|v| v.with_timezone(&Utc))
-        .or_else(|| {
-            ["%Y-%m-%d", "%m/%d/%Y", "%B %d, %Y", "%b %d, %Y"]
-                .iter()
-                .find_map(|format| {
-                    NaiveDate::parse_from_str(value.trim(), format)
-                        .ok()
-                        .and_then(|v| v.and_hms_opt(0, 0, 0))
-                        .map(|v| DateTime::from_naive_utc_and_offset(v, Utc))
-                })
-        })
+fn parse_date(value: &str) -> Option<reader_core::PublicationDate> {
+    reader_core::PublicationDate::parse(value)
 }
+
 fn record(
     source: &SourceDefinition,
     url: Url,
     title: String,
     description: Option<String>,
-    published_at: Option<DateTime<Utc>>,
+    published_at: Option<reader_core::PublicationDate>,
     content_html: Option<String>,
 ) -> Result<SourceRecord, FetchError> {
     let parsed = ParsedRecord {

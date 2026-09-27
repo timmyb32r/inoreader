@@ -25,11 +25,13 @@ type PresentationRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
 );
 type PresentationOrigin = (
     String,
     Subscription,
     Option<reader_ingest::ContentManifestPointer>,
+    Option<String>,
     Option<String>,
     Option<String>,
 );

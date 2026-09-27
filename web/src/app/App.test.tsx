@@ -163,7 +163,7 @@ describe("reader application", () => {
     );
     const timestamped = {
       ...articles[0],
-      age: "2026-09-26T14:06:26.316789727+00:00",
+      savedAt: "2026-09-26T14:06:26.316789727+00:00",
       author: undefined,
     };
     const client = mockClient();

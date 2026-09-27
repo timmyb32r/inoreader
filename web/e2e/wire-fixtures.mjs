@@ -7,7 +7,14 @@ export function wireFixture(value) {
     Object.entries(value).map(([k, v]) => [k, wireFixture(v)]),
   );
   if ("fullText" in result && "url" in result)
-    return { sources: [], subscriptionIds: [], ...result };
+    return {
+      sources: [],
+      subscriptionIds: [],
+      publishedAt: null,
+      publicationStatus: "unknown",
+      publicationSources: [],
+      ...result,
+    };
   if ("status" in result && "count" in result && "name" in result)
     return {
       sourceTitle: result.name,

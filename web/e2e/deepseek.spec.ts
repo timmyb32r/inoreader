@@ -48,7 +48,7 @@ async function fixture(
     excerpt: "Article excerpt",
     body: ["Exact statement.", "Full article body."],
     fullText: "ready",
-    age: "2026-09-26T12:00:00Z",
+    savedAt: "2026-09-26T12:00:00Z",
     read: false,
     later: false,
   }));

@@ -58,6 +58,7 @@ pub struct PasswordResetRecord {
 }
 #[derive(Clone, Debug)]
 pub struct ArticlePresentation {
+    pub publication: Vec<reader_core::PublicationEvidence>,
     pub article: Article,
     pub subscription_ids: Vec<SubscriptionId>,
     pub subscription_titles: Vec<String>,

@@ -96,6 +96,18 @@ pub(super) fn subscription_view(
 }
 pub(super) fn article_view(value: &reader_application::ArticlePresentation) -> ArticleView {
     let mut view = article_domain_view(&value.article);
+    let date = reader_core::resolve_publication(&value.publication);
+    view.publication_status = if date.is_some() {
+        reader_server_contracts::PublicationStatus::Known
+    } else if value.publication.is_empty() {
+        reader_server_contracts::PublicationStatus::Unknown
+    } else if value.publication.iter().any(|v| v.date().is_some()) {
+        reader_server_contracts::PublicationStatus::Conflicting
+    } else {
+        reader_server_contracts::PublicationStatus::Invalid
+    };
+    view.published_at = date.map(|v| v.as_str().to_owned());
+    view.publication_sources = value.publication.iter().map(|v| v.source.clone()).collect();
     if matches!(
         value.description_media_type.as_deref(),
         Some("text/html" | "application/xhtml+xml")
@@ -226,7 +238,10 @@ pub(super) fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         },
         body_html: None,
         author: None,
-        age: value.first_arrived_at.to_rfc3339(),
+        saved_at: value.first_arrived_at.to_rfc3339(),
+        published_at: None,
+        publication_status: reader_server_contracts::PublicationStatus::Unknown,
+        publication_sources: Vec::new(),
         read: value.state.read,
         later: value.state.later,
         full_text: FullTextStatus::Pending,

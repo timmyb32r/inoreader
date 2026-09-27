@@ -516,6 +516,7 @@ pub async fn verify(pool: &PgPool) {
     sqlx::query("INSERT INTO library_origins(workspace_id,article_id,subscription_id,source_record_id) VALUES($1,$2,$3,$4)").bind(ws.to_string()).bind(a.to_string()).bind(subscription.id().as_uuid().to_string()).bind(source_record.as_uuid().to_string()).execute(pool).await.unwrap();
     let refresh = Uuid::new_v4();
     let pointer = reader_ingest::ContentManifestPointer {
+        publication: None,
         record_id: source_record,
         source_revision: 7,
         refresh_id: refresh,

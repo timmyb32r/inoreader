@@ -14,7 +14,7 @@ export type Article = ViewModel<
   | "title"
   | "excerpt"
   | "body"
-  | "age"
+  | "savedAt"
   | "read"
   | "later"
   | "fullText"

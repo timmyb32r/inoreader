@@ -37,6 +37,8 @@ mod article_delivery;
 mod browser_tests;
 #[path = "support/bulk_read.rs"]
 mod bulk_read;
+#[path = "support/publication.rs"]
+mod publication;
 #[path = "support/read_projection.rs"]
 mod read_projection;
 
@@ -171,6 +173,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     schema_upgrade::verify(&pool).await;
     schema_contracts::verify(&pool).await;
     schema_contracts::upgrade_roundtrip(&pool).await;
+    publication::verify(&pool).await;
 
     let oversized_key = "x".repeat(20_000);
     sqlx::query(

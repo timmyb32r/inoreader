@@ -5,7 +5,7 @@ import type { AiClient } from "../api/ai";
 import { ParagraphReader } from "../translation/ParagraphReader";
 import { AsyncButton } from "../ui/AsyncButton";
 import { Icon, type IconName } from "../ui/Icon";
-import { formatArticleDate } from "../ui/formatArticleDate";
+import { ArticleDates } from "./ArticleDates";
 import type { Article } from "../api/viewModels";
 
 export function ArticleReader({
@@ -49,7 +49,7 @@ export function ArticleReader({
       <span class="source__mark">{article.source.slice(0, 1)}</span>
       <div>
         <strong>{article.source}</strong>
-        <time>{formatArticleDate(article.age)}</time>
+        <ArticleDates article={article} />
       </div>
     </>
   );

@@ -1,7 +1,9 @@
 use super::*;
+use crate::publication_dates::origin_publication;
 type OriginPresentationRow = (
     String,
     String,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -14,14 +16,15 @@ impl PostgresRepository {
         include_content: bool,
     ) -> Result<ArticlePresentation, RepositoryError> {
         let rows: Vec<OriginPresentationRow> = sqlx::query_as(
-            "SELECT o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2",
+            "SELECT o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2",
         ).bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).fetch_all(&self.pool).await.map_err(storage)?;
         let mut subscription_ids = Vec::new();
         let mut subscription_titles = Vec::new();
         let mut manifests = Vec::new();
         let mut failure_reason = None;
         let mut description_media_type = None;
-        for (record, subscription, manifest, failure, media_type) in rows {
+        let mut publication = Vec::new();
+        for (record, subscription, manifest, failure, media_type, published) in rows {
             merge_media_type(&mut description_media_type, media_type)?;
             let subscription: Subscription =
                 serde_json::from_str(&subscription).map_err(storage)?;
@@ -38,12 +41,13 @@ impl PostgresRepository {
             {
                 subscription_titles.push(subscription.title().to_owned());
             }
+            let manifest = manifest
+                .map(|v| serde_json::from_str::<reader_ingest::ContentManifestPointer>(&v))
+                .transpose()
+                .map_err(storage)?;
+            publication.extend(origin_publication(published, manifest.as_ref())?);
             if let Some(manifest) = manifest {
-                manifests.push((
-                    record,
-                    serde_json::from_str::<reader_ingest::ContentManifestPointer>(&manifest)
-                        .map_err(storage)?,
-                ));
+                manifests.push((record, manifest));
             }
             if let Some(failure) = failure {
                 failure_reason = serde_json::from_str::<serde_json::Value>(&failure)
@@ -77,6 +81,7 @@ impl PostgresRepository {
             reader_application::ContentStatus::Pending
         };
         Ok(ArticlePresentation {
+            publication,
             article,
             subscription_ids,
             subscription_titles,
@@ -116,7 +121,7 @@ impl PostgresRepository {
             .map(|value| value.id.as_uuid().to_string())
             .collect();
         let rows: Vec<PresentationRow> = sqlx::query_as(
-            "SELECT o.article_id,o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2)",
+            "SELECT o.article_id,o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2)",
         )
         .bind(workspace.as_uuid().to_string())
         .bind(&ids)
@@ -124,7 +129,7 @@ impl PostgresRepository {
         .await
         .map_err(storage)?;
         let mut origins: HashMap<String, Vec<PresentationOrigin>> = HashMap::new();
-        for (article_id, record, subscription, manifest, failure, media_type) in rows {
+        for (article_id, record, subscription, manifest, failure, media_type, published) in rows {
             let subscription: Subscription =
                 serde_json::from_str(&subscription).map_err(storage)?;
             subscription.validate(self.reason_policy).map_err(storage)?;
@@ -149,6 +154,7 @@ impl PostgresRepository {
                 manifest,
                 failure,
                 media_type,
+                published,
             ));
         }
         articles
@@ -162,8 +168,10 @@ impl PostgresRepository {
                 let mut latest = None;
                 let mut failure_reason = None;
                 let mut description_media_type = None;
-                for (record, subscription, manifest, failure, media_type) in rows {
+                let mut publication = Vec::new();
+                for (record, subscription, manifest, failure, media_type, published) in rows {
                     merge_media_type(&mut description_media_type, media_type)?;
+                    publication.extend(origin_publication(published, manifest.as_ref())?);
                     if !subscription_ids.contains(&subscription.id()) {
                         subscription_ids.push(subscription.id());
                     }
@@ -194,6 +202,7 @@ impl PostgresRepository {
                     reader_application::ContentStatus::Pending
                 };
                 Ok(ArticlePresentation {
+                    publication,
                     article,
                     subscription_ids,
                     subscription_titles,

@@ -15,7 +15,7 @@ test("paragraph translation preserves article geometry and links, deduplicates c
     bodyHtml:
       '<h2>技术细节</h2><p>磁<strong>盘</strong> 读取。</p><p>下一段保持原位。</p><p><a href="https://example.test/source">来源</a></p>',
     fullText: "ready",
-    age: "2026-09-27T10:00:00Z",
+    savedAt: "2026-09-27T10:00:00Z",
     read: false,
     later: false,
   };
@@ -187,7 +187,7 @@ for (const target of [
       body: [],
       bodyHtml: `${target.includes("fragment") ? source : ""}<h2>${target === ".article-content h2" ? source : "Heading"}</h2><p>Body paragraph stays here.</p>`,
       fullText: "ready",
-      age: "2026-09-27",
+      savedAt: "2026-09-27",
       read: false,
       later: false,
     };

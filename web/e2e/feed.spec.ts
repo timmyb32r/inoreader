@@ -15,7 +15,7 @@ test("Feed contains unread articles; reading keeps rows fixed and subscription h
     subscriptionIds: ["sub"],
     excerpt: "Excerpt",
     body: [],
-    age: "2026-09-26T00:00:00Z",
+    savedAt: "2026-09-26T00:00:00Z",
     later: false,
     fullText: "ready",
   }));

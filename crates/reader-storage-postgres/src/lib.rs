@@ -4,6 +4,8 @@ mod ai;
 mod content_snapshot;
 mod glossary;
 mod ingest_store;
+mod publication_backfill;
+mod publication_dates;
 mod publication_history;
 mod repository;
 pub mod schema;
@@ -11,6 +13,7 @@ pub mod schema;
 pub use ai::PostgresAiStore;
 pub use glossary::PostgresGlossaryStore;
 pub use ingest_store::PostgresIngestStore;
+pub use publication_backfill::backfill_publication_dates;
 pub use repository::PostgresRepository;
 pub use schema::{prepare_schema, upgrade_schema, verify_schema};
 

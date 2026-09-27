@@ -80,7 +80,9 @@ async fn infoq_requires_success_envelope_and_public_identity() {
         .unwrap();
     assert_eq!(values.len(), 1);
     assert_eq!(
-        values[0].published_at().unwrap().timestamp_millis(),
+        chrono::DateTime::parse_from_rfc3339(values[0].published_at().unwrap().as_str())
+            .unwrap()
+            .timestamp_millis(),
         1789108800096
     );
 }
@@ -95,7 +97,7 @@ async fn modb_filters_non_public_rows_and_parses_shanghai_time() {
         .unwrap();
     assert_eq!(values.len(), 1);
     assert_eq!(
-        values[0].published_at().unwrap().to_rfc3339(),
+        values[0].published_at().unwrap().as_str(),
         "2026-09-18T04:29:38+00:00"
     );
 }
@@ -140,10 +142,7 @@ async fn digoal_accepts_only_dated_markdown_paths() {
         .await
         .unwrap();
     assert_eq!(values.len(), 1);
-    assert_eq!(
-        values[0].published_at().unwrap().date_naive().to_string(),
-        "2026-09-16"
-    );
+    assert_eq!(values[0].published_at().unwrap().as_str(), "2026-09-16");
 }
 #[tokio::test]
 async fn mirrorship_requires_listing_detail_title_identity() {

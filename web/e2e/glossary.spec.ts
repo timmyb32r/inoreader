@@ -37,7 +37,7 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
     excerpt: "Intro",
     body: ["CDC and Kafka."],
     fullText: "ready",
-    age: "2026-09-26T12:00:00Z",
+    savedAt: "2026-09-26T12:00:00Z",
     read: false,
     later: false,
   };

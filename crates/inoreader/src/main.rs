@@ -70,6 +70,11 @@ enum Command {
         workspace: uuid::Uuid,
     },
     PrioritizeJobs,
+    /// Audit every source; optionally enrich missing dates from retained HTML.
+    BackfillPublicationDates {
+        #[arg(long)]
+        apply: bool,
+    },
     BenchmarkLibrary {
         workspace_id: uuid::Uuid,
     },
@@ -119,6 +124,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reader_storage_postgres::verify_schema(&pool).await?;
     }
     match cli.command {
+        Command::BackfillPublicationDates { apply } => {
+            let report = reader_storage_postgres::backfill_publication_dates(
+                &pool,
+                std::num::NonZeroU32::new(u32::try_from(config.ingest.batch_items)?)
+                    .ok_or("batch_items must be positive")?,
+                config.ingest.max_input_bytes,
+                apply,
+            )
+            .await?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Command::CheckConfig | Command::Seed { apply: false, .. } => unreachable!(),
         Command::ReindexTelegramGlossary { owner, workspace } => {
             let policy = reader_glossary::GlossaryPolicy::new(

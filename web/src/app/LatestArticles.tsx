@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
-import { formatArticleDate } from "../ui/formatArticleDate";
+import { ArticleDates } from "./ArticleDates";
 import type { Article } from "../api/viewModels";
 import "./latest-articles.css";
 
@@ -59,8 +59,8 @@ export function LatestArticles({
               >
                 <strong>{article.title}</strong>
                 <span>
-                  {formatArticleDate(article.age)} ·{" "}
-                  {article.read ? "Read" : "Unread"}
+                  <ArticleDates article={article} />
+                  <span> · {article.read ? "Read" : "Unread"}</span>
                 </span>
               </button>
             </article>

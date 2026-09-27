@@ -3,7 +3,6 @@ use crate::{
     SelectorLanguage, SourceDefinition, SourceKind, SourceRecord, WebLoading,
 };
 use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc};
 use reader_collectors::ParsedRecord;
 use scraper::{ElementRef, Html, Selector};
 use std::sync::Arc;
@@ -94,8 +93,21 @@ pub fn extract_selected_records(
                     return Ok(());
                 }
             }
-            let published_at = selected_text(extraction.date_selector())?
-                .and_then(|value| parse_visible_date(&value));
+            let published_at = if let Some(selector) = extraction.date_selector() {
+                let selector = Selector::parse(selector.expression())
+                    .map_err(|_| FetchError::Rejected("invalid_date_selector".into()))?;
+                card.select(&selector).next().and_then(|node| {
+                    let raw = node
+                        .value()
+                        .attr("datetime")
+                        .or_else(|| node.value().attr("content"))
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| node.text().collect::<String>());
+                    parse_visible_date(&raw)
+                })
+            } else {
+                None
+            };
             let content_html = if let Some(value) = extraction.content_selector() {
                 let selector = Selector::parse(value.expression())
                     .map_err(|_| FetchError::Rejected("invalid_content_selector".into()))?;
@@ -138,20 +150,8 @@ pub fn extract_selected_records(
     Ok(records)
 }
 
-fn parse_visible_date(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value.trim())
-        .ok()
-        .map(|value| value.with_timezone(&Utc))
-        .or_else(|| {
-            ["%Y-%m-%d", "%Y/%m/%d", "%b %d, %Y", "%B %d, %Y"]
-                .iter()
-                .find_map(|format| {
-                    NaiveDate::parse_from_str(value.trim(), format)
-                        .ok()
-                        .and_then(|date| date.and_hms_opt(0, 0, 0))
-                        .map(|value| DateTime::from_naive_utc_and_offset(value, Utc))
-                })
-        })
+fn parse_visible_date(value: &str) -> Option<reader_core::PublicationDate> {
+    reader_core::PublicationDate::parse(value)
 }
 
 /// Conservative in-process readability: prefer the first semantic article or
