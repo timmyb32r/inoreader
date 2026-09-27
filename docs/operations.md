@@ -15,8 +15,7 @@ directory containing browser state.
 
 Copy `config.example.yaml` to `config.yaml`, set the public origin, and create a
 random single-line PostgreSQL password in `secrets/postgres-password` with mode
-`0600`. The YDB endpoint and `secrets/ydb-key.json` are required only while the
-one-way migration is available. Keep configuration and secrets outside version
+`0600`. Keep configuration and secrets outside version
 control. `check-config` validates the PostgreSQL password-file reference without
 connecting to the database:
 
@@ -45,8 +44,7 @@ artifacts, repository history, runtime configuration, and credentials out of
 the build context.
 
 The PostgreSQL pool size and acquire deadline are explicit validated settings.
-The YDB request, concurrency, and retry settings apply only to migration-source
-reads. All values must be positive before a connection is attempted.
+All values must be positive before a connection is attempted.
 Authentication exposes the Argon2id memory, time, and parallelism costs; invalid
 combinations fail startup validation and the chosen costs are embedded in every
 new password hash.
@@ -59,19 +57,11 @@ TLS terminates at the Caddy reverse proxy in `compose.yaml`. Set
 `EXTERNAL_HOST` in `.env` to the same DNS name as `server.external_origin`.
 Caddy obtains and renews its certificate; ports 80 and 443 must be reachable
 from the Internet. The proxy must preserve the
-configured external origin and must not expose Chromium or YDB ports.
-
-`compose.local.yaml` starts only the real local YDB implementation for an
-isolated developer machine and persists it in a named volume. Start the app and
-Chromium separately with a local config, so the production secret definition is
-never weakened for convenience. Before a release gate, pin the YDB image to the
-exact version approved for the target Serverless service; `latest` is not release
-evidence. A host-run app uses endpoint `grpc://127.0.0.1:2136`, database path
-`/local`, and an explicitly selected anonymous local credential provider.
+configured external origin and must not expose Chromium or PostgreSQL ports.
 
 ## Backup and restore
 
-PostgreSQL is the production source of truth. Back up the named
+PostgreSQL is the production source of truth. Back up the database persisted in the named
 `postgres-data` volume with `pg_dump --format=custom` from the pinned PostgreSQL
 image, write to a new operator-owned path, and keep the password in the Docker
 secret. A valid backup is not just a successful command: restore it into a fresh
@@ -79,33 +69,26 @@ PostgreSQL database, run `prepare-schema`, compare every table count, and run th
 authentication, library, content, queue, and cross-user isolation smoke tests
 before accepting it.
 
-The one-way YDB migration keeps the old YDB database unchanged for rollback.
-Before cutover, stop the application, run `migrate-ydb-to-postgres`, and wait for
-the command to report all 33 table counts, byte totals, and fingerprints. The
-command refuses a non-empty PostgreSQL target and reads YDB rows in primary-key
-order. It commits the import atomically, reads every row back from PostgreSQL,
-and requires exact typed row equality in addition to the recorded counts and
-fingerprints. Only then replace the active configuration and start workers.
+A custom-format backup can be created from the running PostgreSQL container:
 
 ```sh
-docker compose stop app
-docker compose run --rm --no-deps \
-  -v ./config.postgres.yaml:/etc/inoreader/config.postgres.yaml:ro \
-  app --config /etc/inoreader/config.postgres.yaml migrate-ydb-to-postgres
-docker compose up -d --force-recreate app
+umask 077
+set -o noclobber
+docker compose exec -T postgres pg_dump -U inoreader -d inoreader -Fc > NEW_BACKUP_PATH.dump
 ```
 
-Do not write to both databases. A rollback stops PostgreSQL-backed writers
-before restoring the saved YDB configuration. Keep the immutable YDB source and
-its service-account key for the explicit rollback window; remove migration
-credentials from the runtime after that window closes.
+Check the command's exit status and the archive with `pg_restore --list`. Keep
+incomplete output after a failed dump separate from accepted backups. Restore
+only into a newly created, separate empty database using `pg_restore
+--exit-on-error --single-transaction`; do not use `--clean` against the running
+database. Preserve the AI credential master key separately. Restoring the DB
+without its matching master key cannot recover encrypted API or bot credentials.
 
 The release gate includes the digest-pinned PostgreSQL Docker acceptance test.
 It creates the complete schema, checks idempotency and constraints, exercises
 lease theft fencing, and proves that two users may share a public fetch source
-without sharing workspace, subscription, activity, note, or article state. The
-existing YDB Docker tests remain migration-source coverage until the rollback
-window ends. Missing Docker is a hard failure, never a skipped test.
+without sharing workspace, subscription, activity, note, or article state. It also dumps and restores the entire database, comparing every field in every
+application table, restoring schema/indexes and resuming a saved job. Missing Docker is a hard failure, never a skipped test.
 
 ## Initial source seed
 
@@ -137,7 +120,7 @@ reuse of a key fails without partial changes.
 
 ## Failure behavior
 
-YDB unavailability makes readiness fail and never selects local or in-memory
+PostgreSQL unavailability makes readiness fail and never selects local or in-memory
 storage. Chromium unavailability degrades browser-backed jobs while ordinary
 feed ingestion and reading saved articles continue. `archive_budget_bytes` is a
 diagnostic telemetry threshold in v1; it never deletes content, truncates input,

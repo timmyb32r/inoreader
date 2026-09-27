@@ -18,6 +18,7 @@ source-inventory:
 
 operational-assets:
     python3 tools/check_operational_assets.py
+    python3 -m unittest discover -s tools/tests
 
 seed-preview account workspace output="seed-manifest.json":
     python3 tools/prepare_seed_manifest.py --inventory source-inventory/inventory.json --account-id {{account}} --workspace-id {{workspace}} --output {{output}}
@@ -33,7 +34,7 @@ check-release:
     bash tools/run_chromium_acceptance.sh
     cd web && npm test
     cd web && npm run test:e2e
-    ./tools/test_ydb_backup_restore.sh
     python3 scripts/check_crate_boundaries.py
     ruby tools/validate_source_inventory.rb source-inventory/inventory.json
     python3 tools/check_operational_assets.py
+    python3 -m unittest discover -s tools/tests

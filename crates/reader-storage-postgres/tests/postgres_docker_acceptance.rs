@@ -260,7 +260,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_article_state_conversion(&pool).await;
     ai_tests::verify(&pool).await;
     glossary_tests::verify(&pool).await;
-    verify_glossary_backup_restore(&container, &pool).await;
+    verify_database_backup_restore(&container, &pool).await;
 }
 
 async fn verify_article_state_conversion(pool: &PgPool) {
@@ -859,18 +859,53 @@ fn assert_success(operation: &str, output: &Output) {
     );
 }
 
-async fn verify_glossary_backup_restore(container: &PostgresContainer, pool: &PgPool) {
-    let output=command("docker",&["exec",&container.name,"sh","-c","pg_dump -U inoreader -d inoreader -Fc -f /tmp/glossary.dump && createdb -U inoreader glossary_restore && pg_restore --exit-on-error -U inoreader -d glossary_restore /tmp/glossary.dump"]);
-    assert_success("dump and restore real PostgreSQL glossary", &output);
+async fn verify_database_backup_restore(container: &PostgresContainer, pool: &PgPool) {
+    let source_id = SourceId::new();
+    let source = SourceDefinition::new(
+        source_id,
+        url::Url::parse("https://backup.example/feed").unwrap(),
+        SourceKind::XmlFeed,
+    )
+    .unwrap();
+    sqlx::query("INSERT INTO sources(id,revision,document) VALUES($1,0,$2)")
+        .bind(source_id.as_uuid().to_string())
+        .bind(serde_json::to_string(&source).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    let pending = JobId::new();
+    let item = WorkItem::PollSource { source_id };
+    sqlx::query("INSERT INTO ingest_jobs(id,status,run_at_ms,first_attempt_ms,origin_key,attempt,item,revision) VALUES($1,'ready',(SELECT COALESCE(min(run_at_ms),0)-1 FROM ingest_jobs),$2,'https://backup.example',0,$3,0)")
+        .bind(pending.as_uuid().to_string()).bind(Utc::now().timestamp_millis()).bind(serde_json::to_string(&item).unwrap()).execute(pool).await.unwrap();
+    let output=command("docker",&["exec",&container.name,"sh","-c","pg_dump -U inoreader -d inoreader -Fc -f /tmp/reader.dump && createdb -U inoreader reader_restore && pg_restore --exit-on-error -U inoreader -d reader_restore /tmp/reader.dump"]);
+    assert_success("dump and restore the complete PostgreSQL database", &output);
     let restored = PgPoolOptions::new()
         .max_connections(2)
         .connect(&format!(
-            "{}/glossary_restore",
+            "{}/reader_restore",
             container.connection_string().rsplit_once('/').unwrap().0
         ))
         .await
         .unwrap();
-    for table in [
+    let tables_sql = "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename";
+    let original_tables: Vec<String> = sqlx::query_scalar(tables_sql)
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let restored_tables: Vec<String> = sqlx::query_scalar(tables_sql)
+        .fetch_all(&restored)
+        .await
+        .unwrap();
+    assert_eq!(
+        original_tables, restored_tables,
+        "restore includes every application table"
+    );
+    let required_nonempty = [
+        "accounts",
+        "workspaces",
+        "subscriptions",
+        "articles",
+        "ingest_jobs",
         "glossary_channels",
         "glossary_receipts",
         "glossary_events",
@@ -878,12 +913,52 @@ async fn verify_glossary_backup_restore(container: &PostgresContainer, pool: &Pg
         "glossary_definitions",
         "ai_definitions",
         "ai_definition_operations",
-    ] {
-        let sql=format!("SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT to_jsonb(t) v FROM {table} t) rows");
+    ];
+    for table in original_tables {
+        let sql=format!("SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT to_jsonb(t) v FROM \"{table}\" t) rows");
         let original: String = sqlx::query_scalar(&sql).fetch_one(pool).await.unwrap();
         let copy: String = sqlx::query_scalar(&sql).fetch_one(&restored).await.unwrap();
-        assert_ne!(original, "[]", "fixture must exercise {table}");
+        if required_nonempty.contains(&table.as_str()) {
+            assert_ne!(original, "[]", "fixture must exercise {table}");
+        }
         assert_eq!(original, copy, "backup retains every field in {table}");
     }
+    // Catalog identity changes when restoring into the separate test database;
+    // column types, collation names, defaults, constraints and ordering do not.
+    for sql in [
+        "SELECT jsonb_agg((to_jsonb(c) - 'table_catalog' - 'udt_catalog' - 'domain_catalog' - 'collation_catalog') ORDER BY table_name,ordinal_position)::text FROM information_schema.columns c WHERE table_schema='public'",
+        "SELECT jsonb_agg(to_jsonb(i) ORDER BY indexname)::text FROM pg_indexes i WHERE schemaname='public'",
+    ] {
+        let original: String = sqlx::query_scalar(sql).fetch_one(pool).await.unwrap();
+        let copy: String = sqlx::query_scalar(sql).fetch_one(&restored).await.unwrap();
+        assert_eq!(original, copy, "restore preserves columns and indexes");
+    }
+    let store = PostgresIngestStore::new(
+        restored.clone(),
+        ChronoDuration::minutes(5),
+        1,
+        ChronoDuration::days(1),
+    )
+    .unwrap();
+    let now = Utc::now();
+    let resumed = store
+        .claim("restored-worker", now, now + ChronoDuration::seconds(30))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        resumed.job_id, pending,
+        "restored pending work is resumable"
+    );
+    store.complete(pending, resumed.token).await.unwrap();
+    let original_status: String = sqlx::query_scalar("SELECT status FROM ingest_jobs WHERE id=$1")
+        .bind(pending.as_uuid().to_string())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        original_status, "ready",
+        "restore verification cannot mutate the source database"
+    );
     restored.close().await;
 }

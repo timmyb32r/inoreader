@@ -25,7 +25,6 @@ use reader_server_contracts::{
     WebFeedRecipeDraft,
 };
 use reader_storage_postgres::{prepare_schema, PostgresIngestStore, PostgresRepository};
-use reader_storage_ydb::{export_migration_snapshot, ProductionYdbTransport, YdbClientLimits};
 use reader_web_runtime::{
     ExternalRequestCompletion, ExternalRequestObserver, OutboundHttpClient, OutboundLimits,
     OutboundPolicy, RawOutboundLimits, ReqwestPinnedTransport, TokioDnsResolver,
@@ -35,7 +34,6 @@ use url::Url;
 
 mod ai;
 mod glossary;
-mod migration;
 
 #[derive(Parser)]
 struct Cli {
@@ -62,7 +60,6 @@ enum Command {
     BenchmarkLibrary {
         workspace_id: uuid::Uuid,
     },
-    MigrateYdbToPostgres,
     MigratePersonalFeedLinks {
         inventory: PathBuf,
         workspace_id: uuid::Uuid,
@@ -242,19 +239,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             repository.apply_seed_atomic(workspace.id(), values).await?;
             println!("seed applied atomically: {count} selected sources");
         }
-        Command::MigrateYdbToPostgres => {
-            require_ydb_credentials(&config)?;
-            let source = connect_ydb_migration_source(&config).await?;
-            let snapshot = export_migration_snapshot(source.as_ref()).await?;
-            migration::import_snapshot(&pool, &snapshot).await?;
-            for table in &snapshot.tables {
-                println!(
-                    "migrated {} rows={} utf8_bytes={} fingerprint={:032x}",
-                    table.table.name, table.row_count, table.utf8_bytes, table.fingerprint
-                );
-            }
-            println!("YDB to PostgreSQL migration verified");
-        }
         Command::MigratePersonalFeedLinks {
             inventory,
             workspace_id,
@@ -298,27 +282,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Serve => {
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
             serve(&config, pool, policy).await?;
-        }
-    }
-    Ok(())
-}
-
-fn require_ydb_credentials(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
-    let name = &config.database.migration_source_ydb.credentials_env;
-    let value = std::env::var(name)
-        .map_err(|_| format!("missing credentials environment variable {name}"))?;
-    if value.trim().is_empty() {
-        return Err(format!("credentials environment variable {name} is empty").into());
-    }
-    if name.ends_with("_FILE_CREDENTIALS") {
-        let metadata = std::fs::metadata(&value).map_err(|error| {
-            format!("credential file referenced by {name} is unavailable: {error}")
-        })?;
-        if !metadata.is_file() || metadata.len() == 0 {
-            return Err(format!(
-                "credential file referenced by {name} must be a non-empty regular file"
-            )
-            .into());
         }
     }
     Ok(())
@@ -387,26 +350,6 @@ fn init_logging(format: LogFormat) {
         });
     }
     let _ = builder.try_init();
-}
-
-async fn connect_ydb_migration_source(
-    config: &Config,
-) -> Result<Arc<ProductionYdbTransport>, Box<dyn std::error::Error>> {
-    let source = &config.database.migration_source_ydb;
-    let connection = format!(
-        "{}/{}",
-        source.endpoint.trim_end_matches('/'),
-        source.database_path.trim_start_matches('/')
-    );
-    let limits = YdbClientLimits::new(
-        Duration::from_secs(source.request_timeout_seconds),
-        source.max_concurrency,
-        source.retry_attempts,
-        Duration::from_millis(source.retry_initial_backoff_milliseconds),
-    )?;
-    Ok(Arc::new(
-        ProductionYdbTransport::connect_from_environment(&connection, limits).await?,
-    ))
 }
 
 fn load_seed(path: &std::path::Path) -> Result<SeedManifest, Box<dyn std::error::Error>> {
@@ -1164,3 +1107,7 @@ fn ui_asset(path: &str) -> Option<reader_server_ui::Asset> {
 
 #[cfg(test)]
 mod main_tests;
+
+#[cfg(test)]
+#[path = "tests/cli.rs"]
+mod cli_tests;

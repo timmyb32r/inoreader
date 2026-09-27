@@ -408,7 +408,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
 ```
 
-The release test command must include the hermetic YDB/Chromium and
+The release test command must include the hermetic PostgreSQL/Chromium and
 backup/restore Docker acceptance tests. These tests must fail clearly when
 Docker or a required image is unavailable; they must never silently skip.
 Do not claim that the release gate passed when only the compile-only development

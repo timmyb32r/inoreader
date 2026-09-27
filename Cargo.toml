@@ -9,7 +9,6 @@ members = [
   "crates/reader-collectors",
   "crates/reader-ingest",
   "crates/reader-storage-postgres",
-  "crates/reader-storage-ydb",
   "crates/reader-server-contracts",
   "crates/reader-server",
   "crates/reader-server-ui",
@@ -47,4 +46,3 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal
 tower-http = { version = "0.6", features = ["trace", "timeout"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
-ydb = "=0.18.0"

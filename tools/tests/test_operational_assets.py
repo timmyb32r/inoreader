@@ -21,11 +21,10 @@ class OperationalAssetsTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         files = (
-            "Dockerfile", "compose.yaml", "compose.local.yaml", ".dockerignore",
+            "Dockerfile", "compose.yaml", ".dockerignore",
             "config.example.yaml", "docs/operations.md", "docs/seed-manifest.schema.json",
             "docs/deepseek-operations.md", "source-inventory/coverage-matrix.json",
-            "web/dist/index.html", "web/package-lock.json", "tools/test_ydb_backup_restore.sh",
-            "tools/fixtures/ydb_backup_restore.sql", "tools/ydb_backup.sh", "tools/ydb_restore.sh",
+            "web/dist/index.html", "web/package-lock.json",
             "prompts/reading-data-news/transport.md", "justfile", ".github/workflows/ci.yml",
         )
         for relative in files:
@@ -61,6 +60,20 @@ class OperationalAssetsTest(unittest.TestCase):
         )
         for file, before, after in changes:
             with self.subTest(file=file, before=before):
+                original = (self.root / file).read_text()
+                self.replace(file, before, after)
+                self.assertEqual(self.check(), 1)
+                (self.root / file).write_text(original)
+
+    def test_postgres_credentials_durable_volume_and_acceptance_are_required(self):
+        changes = (
+            ("compose.yaml", "target: postgres-password", "target: wrong-password"),
+            ("compose.yaml", "postgres-data:/var/lib/postgresql/data", "transient:/var/lib/postgresql/data"),
+            ("justfile", "cargo test --workspace --all-targets --all-features", "cargo check"),
+            (".github/workflows/ci.yml", "cargo test --workspace --all-targets --all-features", "cargo check"),
+        )
+        for file, before, after in changes:
+            with self.subTest(file=file):
                 original = (self.root / file).read_text()
                 self.replace(file, before, after)
                 self.assertEqual(self.check(), 1)

@@ -7,5 +7,5 @@ export default defineConfig({
   testDir:"./e2e",testMatch:"**/real-backend.acceptance.spec.ts",timeout:60_000,retries:0,
   reporter:[["html",{open:"never",outputFolder:"playwright-report-acceptance"}],["list"]],
   use:{baseURL,trace:"retain-on-failure",screenshot:"only-on-failure"},
-  projects:[{name:"real-backend-ydb",use:{...devices["Desktop Chrome"]}}],
+  projects:[{name:"real-backend-postgres",use:{...devices["Desktop Chrome"]}}],
 });

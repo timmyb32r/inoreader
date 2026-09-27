@@ -8,13 +8,12 @@ placeholder in v1.
 
 The product contract is [SPEC.md](SPEC.md). The implementation is still under
 active construction; source-code presence is not evidence that the real
-YDB/Chromium acceptance gate has passed.
+PostgreSQL/Chromium acceptance gate has passed.
 
 ## Architecture
 
 The release contains one `inoreader` binary. It serves the same-origin API and a
-compile-time embedded `web/dist` build. The deployed reader uses PostgreSQL; a
-separate YDB adapter is also available. Chromium is a sidecar reached through CDP for JavaScript pages;
+compile-time embedded `web/dist` build. PostgreSQL is the only storage implementation. Chromium is a sidecar reached through CDP for JavaScript pages;
 it is not part of the application binary.
 
 The important module boundaries are documented in
@@ -22,7 +21,6 @@ The important module boundaries are documented in
 
 - `reader-core` owns valid domain values and transitions;
 - `reader-application` coordinates use cases through narrow ports;
-- `reader-storage-ydb` owns YQL, schema, transactions, leases, and persistence;
 - `reader-storage-postgres` owns PostgreSQL persistence and transaction boundaries;
 - `reader-ai` owns account-scoped article conversations and the DeepSeek integration;
 - `reader-collectors` parses feeds and site-specific formats;
@@ -36,7 +34,6 @@ The important module boundaries are documented in
 - Node.js 22 and npm for rebuilding the UI
 - `just` for repository commands
 - Docker Compose for the packaged app/PostgreSQL/Chromium topology
-- an accessible YDB database and official `ydb` CLI when using the YDB adapter
 
 ## Build and development checks
 
@@ -64,7 +61,7 @@ binary into the runtime image.
 Copy `config.example.yaml` to the untracked `config.yaml` and replace every
 environment-specific value. All resource and safety limits are explicit; unknown
 fields and unsupported content policy values are rejected. Compose references
-untracked secrets for PostgreSQL, the optional YDB credentials and AI credential
+untracked secrets for PostgreSQL and AI credential
 encryption. Follow [docs/deepseek-operations.md](docs/deepseek-operations.md) for the
 32-byte encryption key; never replace an existing key during deployment.
 
@@ -75,14 +72,7 @@ docker compose up --build
 ```
 
 Production Compose contains the app, Caddy, PostgreSQL and Chromium.
-`compose.local.yaml` starts a real local YDB container for isolated adapter work:
-
-```sh
-docker compose -f compose.local.yaml up -d
-```
-
-Do not treat the local image tagged `latest` as release evidence. Pin the exact
-approved YDB version before an acceptance run.
+The PostgreSQL Docker acceptance test starts its own isolated, digest-pinned service.
 
 ## Source inventory and seed review
 
@@ -106,7 +96,7 @@ and [docs/operations.md](docs/operations.md) for the atomic application contract
 ## Operations
 
 [docs/operations.md](docs/operations.md) covers production topology, health and
-failure behavior, seed review, and guarded YDB backup/restore commands. Restore
+failure behavior, seed review, and PostgreSQL backup/restore procedures. Restore
 must target a separate fresh database and is successful only after archived
 content, primary row counts, content manifests, and pending job recovery have
 been verified.
@@ -124,4 +114,4 @@ modules; cross-component tests belong in `tests/`. Frontend component tests use
 Vitest and Testing Library, and browser flows use Playwright. CI's ordinary job
 is compile-only plus static contract checks. The manual release job runs the
 broader suite and retains Playwright diagnostics, but a complete A01-A30 result
-also requires operator-provided real YDB and Chromium acceptance infrastructure.
+also requires operator-provided real PostgreSQL and Chromium acceptance infrastructure.

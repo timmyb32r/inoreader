@@ -75,7 +75,7 @@ pub enum StoreError {
     Unavailable(String),
 }
 
-/// YDB is the source of truth for all methods. Implementations must use the
+/// PostgreSQL is the source of truth for all methods. Implementations must use the
 /// lease token as a fencing token. `commit_poll` atomically upserts immutable
 /// source-record revisions and a fan-out outbox entry. `deliver` atomically
 /// confirms exact key equality, attaches the origin or creates the library

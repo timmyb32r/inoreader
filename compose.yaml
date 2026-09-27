@@ -22,15 +22,12 @@ services:
     build: .
     command: ["--config", "/etc/inoreader/config.yaml", "serve"]
     environment:
-      YDB_SERVICE_ACCOUNT_KEY_FILE_CREDENTIALS: /run/secrets/ydb-key.json
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
       AI_ENCRYPTION_KEY_FILE: /run/secrets/ai-encryption-key
     volumes:
       - ./config.yaml:/etc/inoreader/config.yaml:ro
       - ./prompts:/etc/inoreader/prompts:ro
     secrets:
-      - source: ydb-key
-        target: ydb-key.json
       - source: postgres-password
         target: postgres-password
       - source: ai-encryption-key
@@ -112,8 +109,6 @@ services:
     networks:
       - browser-control
 secrets:
-  ydb-key:
-    file: ./secrets/ydb-key.json
   postgres-password:
     file: ./secrets/postgres-password
   ai-encryption-key:

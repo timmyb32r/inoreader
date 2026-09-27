@@ -2,21 +2,19 @@
 
 The application is a modular monolith. `reader-core` owns valid domain values and
 state transitions. `reader-application` coordinates use cases through ports.
-Collectors and the browser/HTTP runtime obtain untrusted external data. Storage
-adapters own persistence details; the deployed reader uses PostgreSQL, and the
-YDB adapter remains independently available. Server crates translate HTTP DTOs and embed the
+Collectors and the browser/HTTP runtime obtain untrusted external data. The PostgreSQL adapter owns persistence details. Server crates translate HTTP DTOs and embed the
 Preact build. The `inoreader` binary is the only composition root.
 
 Dependencies point toward domain contracts. Core never imports HTTP, PostgreSQL,
-YDB, CDP, or server code. Application code never embeds SQL or YQL. Adapters may depend on core and
+CDP, or server code. Application code never embeds SQL. Adapters may depend on core and
 application ports, but never on sibling adapters. The source-level boundary guard
 in `scripts/check_crate_boundaries.py` makes the initial direction discoverable;
 Cargo type checking remains the authoritative compiler boundary.
 
 `reader-ingest` is the durable background-work boundary. It depends on feed
-parsers and the shared web runtime, but neither on YDB nor the HTTP server. A
+parsers and the shared web runtime, but neither on PostgreSQL nor the HTTP server. A
 worker claims a single fenced job and performs network work outside database
-transactions. Both database adapters implement the semantic `IngestStore` operations:
+transactions. The PostgreSQL adapter implements the semantic `IngestStore` operations:
 poll commit plus fan-out outbox, exact-key delivery plus origin attachment, and
 chunk publication plus manifest switch. Every operation checks the current lease
 token. Retry may repeat any operation; source identity, delivery origin and
@@ -28,7 +26,7 @@ subscription pause or workspace archive. Browser collection reports an explicit
 degraded capability when CDP is unavailable; RSS/Atom/JSON polling and the reader
 remain usable. No adapter falls back to an in-memory queue or database.
 
-The YDB adapter uses these durable logical keys (escaped tuple components, never
+The PostgreSQL adapter uses these durable logical keys (escaped tuple components, never
 concatenated ambiguous user text): `source_id`; `(source_id, upstream_id)` for
 source-record idempotency; `(workspace_id, exact_location, title,
 description_presence, description)` for a library candidate; `(workspace_id,
@@ -39,8 +37,7 @@ lease token, run time and fan-out cursor are stored as separate typed columns so
 claim/renew/complete can use indexed predicates without parsing JSON.
 
 `commit_poll`, `deliver`, and `publish_content` are native database transactions.
-YDB checks the typed lease inside its serializable transaction; PostgreSQL locks
-and checks the job row in the transaction that writes its results. A general sequence of `compare_and_swap` calls is not an
+PostgreSQL locks and checks the job row in the transaction that writes its results. A general sequence of `compare_and_swap` calls is not an
 implementation of these operations. Feed validators are committed with a
 successful poll and sent as `If-None-Match`/`If-Modified-Since`; HTTP 304 updates
 no records and creates no fan-out work.
@@ -61,8 +58,7 @@ Production Compose contains Caddy, the application, PostgreSQL and Chromium.
 PostgreSQL uses a durable volume on the private database network. The app also
 joins a public-egress network and an internal browser-control network; Chromium
 joins only browser-control. CDP is private and the browser container has no direct
-Internet route. No service receives `docker.sock`. The separate local YDB topology
-remains available for adapter acceptance tests.
+Internet route. No service receives `docker.sock`. PostgreSQL acceptance tests start an isolated digest-pinned container.
 
 ## Article conversations
 

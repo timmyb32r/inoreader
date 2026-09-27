@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("real backend and YDB preserve a reader mutation @acceptance",async({page})=>{
+test("real backend and PostgreSQL preserve a reader mutation @acceptance",async({page})=>{
   await page.goto("/");
   await expect(page.getByRole("heading",{name:/^Feed \(\d+\)$/})).toBeVisible();
   const first=page.locator(".article-row").first();await first.getByRole("button",{name:/Save article|Remove from saved/}).click();

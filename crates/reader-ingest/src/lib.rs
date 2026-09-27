@@ -3,7 +3,7 @@
 //! This crate owns no database client and no HTTP implementation. Network reads
 //! cross [`FeedFetcher`]; every durable transition crosses [`IngestStore`]. The
 //! latter deliberately exposes semantic atomic operations instead of generic
-//! queries, so a YDB adapter can enforce idempotency and fencing in one
+//! queries, so a PostgreSQL adapter can enforce idempotency and fencing in one
 //! transaction. There is no production in-memory fallback.
 
 mod built_in_adapters;

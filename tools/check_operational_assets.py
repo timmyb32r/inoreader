@@ -16,15 +16,12 @@ def main() -> int:
     required = (
         "Dockerfile",
         "compose.yaml",
-        "compose.local.yaml",
         "config.example.yaml",
         "docs/operations.md",
         "docs/seed-manifest.schema.json",
         "source-inventory/coverage-matrix.json",
         "web/dist/index.html",
         "web/package-lock.json",
-        "tools/test_ydb_backup_restore.sh",
-        "tools/fixtures/ydb_backup_restore.sql",
         "docs/deepseek-operations.md",
         "prompts/reading-data-news/transport.md",
     )
@@ -39,8 +36,9 @@ def main() -> int:
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
     if 'command: ["/usr/local/bin/inoreader"' in compose:
         failures.append("Compose command must not repeat the Dockerfile ENTRYPOINT")
-    if "target: ydb-key.json" not in compose:
-        failures.append("Compose must mount the YDB secret at the configured credential path")
+    for expected in ("POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password", "target: postgres-password", "postgres-data:/var/lib/postgresql/data"):
+        if expected not in compose:
+            failures.append(f"Compose lacks the PostgreSQL persistence contract {expected!r}")
     for expected in (
         "AI_ENCRYPTION_KEY_FILE: /run/secrets/ai-encryption-key",
         "target: ai-encryption-key",
@@ -57,8 +55,6 @@ def main() -> int:
         failures.append("production Compose must not mount docker.sock")
     if 'ports: ["9222"]' in compose or '9222:9222' in compose:
         failures.append("Chromium CDP must not be published to the host")
-    if "YDB_USE_IN_MEMORY_PDISKS" in compose:
-        failures.append("production Compose must not contain local YDB")
     if not re.search(r"browser-control:\s*\n\s+name:.*\n\s+internal:\s*true", compose):
         failures.append("browser-control network must be internal")
     app_match = re.search(r"^  app:\n(.*?)(?=^  \S|^\S|\Z)", compose, re.M | re.S)
@@ -88,32 +84,14 @@ def main() -> int:
     if 'USER 10001:10001' not in final_stage or 'ENTRYPOINT ["/usr/local/bin/inoreader"]' not in final_stage:
         failures.append("final image must run the one app binary as the unprivileged user")
 
-    backup = (ROOT / "tools/ydb_backup.sh").read_text(encoding="utf-8")
-    restore = (ROOT / "tools/ydb_restore.sh").read_text(encoding="utf-8")
-    for expected in ("tools dump", "refusing to overwrite existing backup path", "backup_directory="):
-        if expected not in backup:
-            failures.append(f"backup wrapper lacks {expected!r}")
-    for expected in ("tools restore", "restore target must differ", "requires an interactive terminal", "backup manifest identity"):
-        if expected not in restore:
-            failures.append(f"restore wrapper lacks {expected!r}")
-
-    acceptance = (ROOT / "tools/test_ydb_backup_restore.sh").read_text(encoding="utf-8")
-    fixture = (ROOT / "tools/fixtures/ydb_backup_restore.sql").read_text(encoding="utf-8")
-    local_compose = (ROOT / "compose.local.yaml").read_text(encoding="utf-8")
+    postgres = re.search(r"^  postgres:\n(.*?)(?=^  \S|^\S|\Z)", compose, re.M | re.S)
+    if postgres is None or "@sha256:" not in postgres.group(1):
+        failures.append("PostgreSQL image must be digest-pinned")
     release_gate = (ROOT / "justfile").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    for expected in ("@sha256:", "ydb_backup.sh", "ydb_restore.sh", "resumable-job", "rebuilt-counter"):
-        if expected not in acceptance:
-            failures.append(f"A24 Docker acceptance lacks {expected!r}")
-    for table in ("articles", "rules", "content_manifests", "staged_content_chunks", "library_origins", "ingest_jobs"):
-        if not re.search(rf"CREATE TABLE(?: IF NOT EXISTS)? {table}\b", fixture):
-            failures.append(f"A24 fixture lacks {table!r}")
-    if "@sha256:" not in local_compose or ":latest" in local_compose:
-        failures.append("local YDB Compose image must be digest-pinned")
-    if "./tools/test_ydb_backup_restore.sh" not in release_gate:
-        failures.append("release gate does not run A24 Docker acceptance")
-    if "./tools/test_ydb_backup_restore.sh" not in workflow:
-        failures.append("release CI does not run A24 Docker acceptance")
+    for name, content in (("release gate", release_gate), ("release CI", workflow)):
+        if "cargo test --workspace --all-targets --all-features" not in content:
+            failures.append(f"{name} must run PostgreSQL persistence and backup/restore acceptance")
 
     if failures:
         print("\n".join(failures), file=sys.stderr)

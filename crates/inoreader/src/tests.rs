@@ -149,22 +149,6 @@ fn credentials_reference_must_be_a_portable_environment_name() {
 #[test]
 fn operator_endpoints_and_paths_are_validated_before_io() {
     let mut value = example();
-    value.database.migration_source_ydb.endpoint = "https://ydb.example.test".into();
-    assert!(matches!(
-        Config::validate(&value),
-        Err(ConfigError::Invalid(
-            "database.migration_source_ydb.endpoint"
-        ))
-    ));
-    let mut value = example();
-    value.database.migration_source_ydb.database_path = "relative".into();
-    assert!(matches!(
-        Config::validate(&value),
-        Err(ConfigError::Invalid(
-            "database.migration_source_ydb.database_path"
-        ))
-    ));
-    let mut value = example();
     value.browser.cdp_endpoint = "http://user@chromium:9222/path".into();
     assert!(matches!(
         Config::validate(&value),
@@ -213,23 +197,11 @@ fn external_request_format_follows_configured_mode() {
 }
 #[test]
 fn unknown_fields_fail() {
-    let value = r#"[server]
-listen="x"
-surprise=true
-[ydb]
-endpoint="e"
-database="d"
-credentials_env="TOKEN"
-[subscriptions]
-pause_reason_max_bytes=1
-[http]
-request_timeout_ms=1
-redirect_hops=1
-max_response_bytes=1
-[jobs]
-lease_ms=1
-max_attempts=1
-concurrency=1
-"#;
-    assert!(toml::from_str::<Config>(value).is_err());
+    let mut value: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    value["database"]["migration_source_ydb"] = serde_yaml::Value::Mapping(Default::default());
+    assert!(
+        serde_yaml::from_value::<Config>(value).is_err(),
+        "removed database settings must fail explicitly"
+    );
 }
