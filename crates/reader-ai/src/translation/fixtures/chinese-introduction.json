@@ -1,0 +1,418 @@
+{
+  "source": "近日，AI “顶流” 学者李飞飞的最新长文《从语言到世界：空间智能是人工智能的下一个前沿》刷屏时，整个科技圈再次被 “升维” 的焦虑击中。她指出，AI 的下一个前沿是 “空间智能”—— 让 AI 真正理解和交互物理世界。她将其称为 “世界模型”（World Models），并强调了其三大核心能力：生",
+  "response": {
+    "translation": "Недавно, когда новейшая длинная статья «顶流»-учёного в области ИИ Ли Фэйфэй «От языка к миру: пространственный интеллект — следующий рубеж искусственного интеллекта» заполонила экраны, всё технологическое сообщество вновь было поражено тревогой «повышения размерности». Она указала, что следующий рубеж ИИ — это «пространственный интеллект» — позволить ИИ по-настоящему понимать физический мир и взаимодействовать с ним. Она назвала его «модель мира» (World Models) и подчеркнула три его ключевые способности: генера",
+    "words": [
+      {
+        "source": "近日",
+        "pinyin": "jìnrì",
+        "translation": "недавно"
+      },
+      {
+        "source": "AI",
+        "pinyin": null,
+        "translation": "ИИ"
+      },
+      {
+        "source": "“",
+        "pinyin": null,
+        "translation": "«"
+      },
+      {
+        "source": "顶流",
+        "pinyin": "dǐngliú",
+        "translation": "топовый"
+      },
+      {
+        "source": "”",
+        "pinyin": null,
+        "translation": "»"
+      },
+      {
+        "source": "学者",
+        "pinyin": "xuézhě",
+        "translation": "учёный"
+      },
+      {
+        "source": "李飞飞",
+        "pinyin": "Lǐ Fēifēi",
+        "translation": "Ли Фэйфэй"
+      },
+      {
+        "source": "的",
+        "pinyin": "de",
+        "translation": "притяжательная частица"
+      },
+      {
+        "source": "最新",
+        "pinyin": "zuìxīn",
+        "translation": "новейший"
+      },
+      {
+        "source": "长文",
+        "pinyin": "chángwén",
+        "translation": "длинная статья"
+      },
+      {
+        "source": "《",
+        "pinyin": null,
+        "translation": "«"
+      },
+      {
+        "source": "从",
+        "pinyin": "cóng",
+        "translation": "от"
+      },
+      {
+        "source": "语言",
+        "pinyin": "yǔyán",
+        "translation": "язык"
+      },
+      {
+        "source": "到",
+        "pinyin": "dào",
+        "translation": "к"
+      },
+      {
+        "source": "世界",
+        "pinyin": "shìjiè",
+        "translation": "мир"
+      },
+      {
+        "source": "：",
+        "pinyin": null,
+        "translation": ":"
+      },
+      {
+        "source": "空间",
+        "pinyin": "kōngjiān",
+        "translation": "пространственный"
+      },
+      {
+        "source": "智能",
+        "pinyin": "zhìnéng",
+        "translation": "интеллект"
+      },
+      {
+        "source": "是",
+        "pinyin": "shì",
+        "translation": "является"
+      },
+      {
+        "source": "人工智能",
+        "pinyin": "réngōng zhìnéng",
+        "translation": "искусственный интеллект"
+      },
+      {
+        "source": "的",
+        "pinyin": "de",
+        "translation": "притяжательная частица"
+      },
+      {
+        "source": "下一个",
+        "pinyin": "xià yīgè",
+        "translation": "следующий"
+      },
+      {
+        "source": "前沿",
+        "pinyin": "qiányán",
+        "translation": "рубеж"
+      },
+      {
+        "source": "》",
+        "pinyin": null,
+        "translation": "»"
+      },
+      {
+        "source": "刷屏",
+        "pinyin": "shuāpíng",
+        "translation": "заполонила экраны"
+      },
+      {
+        "source": "时",
+        "pinyin": "shí",
+        "translation": "когда"
+      },
+      {
+        "source": "，",
+        "pinyin": null,
+        "translation": ","
+      },
+      {
+        "source": "整个",
+        "pinyin": "zhěnggè",
+        "translation": "всё"
+      },
+      {
+        "source": "科技圈",
+        "pinyin": "kējì quān",
+        "translation": "технологическое сообщество"
+      },
+      {
+        "source": "再次",
+        "pinyin": "zàicì",
+        "translation": "вновь"
+      },
+      {
+        "source": "被",
+        "pinyin": "bèi",
+        "translation": "пассивная частица"
+      },
+      {
+        "source": "“",
+        "pinyin": null,
+        "translation": "«"
+      },
+      {
+        "source": "升维",
+        "pinyin": "shēngwéi",
+        "translation": "повышение размерности"
+      },
+      {
+        "source": "”",
+        "pinyin": null,
+        "translation": "»"
+      },
+      {
+        "source": "的",
+        "pinyin": "de",
+        "translation": "притяжательная частица"
+      },
+      {
+        "source": "焦虑",
+        "pinyin": "jiāolǜ",
+        "translation": "тревога"
+      },
+      {
+        "source": "击中",
+        "pinyin": "jīzhòng",
+        "translation": "поражено"
+      },
+      {
+        "source": "。",
+        "pinyin": null,
+        "translation": "."
+      },
+      {
+        "source": "她",
+        "pinyin": "tā",
+        "translation": "она"
+      },
+      {
+        "source": "指出",
+        "pinyin": "zhǐchū",
+        "translation": "указала"
+      },
+      {
+        "source": "，",
+        "pinyin": null,
+        "translation": ","
+      },
+      {
+        "source": "AI",
+        "pinyin": null,
+        "translation": "ИИ"
+      },
+      {
+        "source": "的",
+        "pinyin": "de",
+        "translation": "притяжательная частица"
+      },
+      {
+        "source": "下一个",
+        "pinyin": "xià yīgè",
+        "translation": "следующий"
+      },
+      {
+        "source": "前沿",
+        "pinyin": "qiányán",
+        "translation": "рубеж"
+      },
+      {
+        "source": "是",
+        "pinyin": "shì",
+        "translation": "является"
+      },
+      {
+        "source": "“",
+        "pinyin": null,
+        "translation": "«"
+      },
+      {
+        "source": "空间",
+        "pinyin": "kōngjiān",
+        "translation": "пространственный"
+      },
+      {
+        "source": "智能",
+        "pinyin": "zhìnéng",
+        "translation": "интеллект"
+      },
+      {
+        "source": "”",
+        "pinyin": null,
+        "translation": "»"
+      },
+      {
+        "source": "——",
+        "pinyin": null,
+        "translation": "—"
+      },
+      {
+        "source": "让",
+        "pinyin": "ràng",
+        "translation": "позволить"
+      },
+      {
+        "source": "AI",
+        "pinyin": null,
+        "translation": "ИИ"
+      },
+      {
+        "source": "真正",
+        "pinyin": "zhēnzhèng",
+        "translation": "по-настоящему"
+      },
+      {
+        "source": "理解",
+        "pinyin": "lǐjiě",
+        "translation": "понимать"
+      },
+      {
+        "source": "和",
+        "pinyin": "hé",
+        "translation": "и"
+      },
+      {
+        "source": "交互",
+        "pinyin": "jiāohù",
+        "translation": "взаимодействовать"
+      },
+      {
+        "source": "物理",
+        "pinyin": "wùlǐ",
+        "translation": "физический"
+      },
+      {
+        "source": "世界",
+        "pinyin": "shìjiè",
+        "translation": "мир"
+      },
+      {
+        "source": "。",
+        "pinyin": null,
+        "translation": "."
+      },
+      {
+        "source": "她",
+        "pinyin": "tā",
+        "translation": "она"
+      },
+      {
+        "source": "将",
+        "pinyin": "jiāng",
+        "translation": "частица будущего/объекта"
+      },
+      {
+        "source": "其",
+        "pinyin": "qí",
+        "translation": "его"
+      },
+      {
+        "source": "称为",
+        "pinyin": "chēngwéi",
+        "translation": "назвала"
+      },
+      {
+        "source": "“",
+        "pinyin": null,
+        "translation": "«"
+      },
+      {
+        "source": "世界",
+        "pinyin": "shìjiè",
+        "translation": "мир"
+      },
+      {
+        "source": "模型",
+        "pinyin": "móxíng",
+        "translation": "модель"
+      },
+      {
+        "source": "”",
+        "pinyin": null,
+        "translation": "»"
+      },
+      {
+        "source": "（",
+        "pinyin": null,
+        "translation": "("
+      },
+      {
+        "source": "World",
+        "pinyin": null,
+        "translation": "World"
+      },
+      {
+        "source": "Models",
+        "pinyin": null,
+        "translation": "Models"
+      },
+      {
+        "source": "）",
+        "pinyin": null,
+        "translation": ")"
+      },
+      {
+        "source": "，",
+        "pinyin": null,
+        "translation": ","
+      },
+      {
+        "source": "并",
+        "pinyin": "bìng",
+        "translation": "и"
+      },
+      {
+        "source": "强调",
+        "pinyin": "qiángdiào",
+        "translation": "подчеркнула"
+      },
+      {
+        "source": "了",
+        "pinyin": "le",
+        "translation": "частица завершения"
+      },
+      {
+        "source": "其",
+        "pinyin": "qí",
+        "translation": "его"
+      },
+      {
+        "source": "三大",
+        "pinyin": "sān dà",
+        "translation": "три ключевые"
+      },
+      {
+        "source": "核心",
+        "pinyin": "héxīn",
+        "translation": "ключевые"
+      },
+      {
+        "source": "能力",
+        "pinyin": "nénglì",
+        "translation": "способности"
+      },
+      {
+        "source": "：",
+        "pinyin": null,
+        "translation": ":"
+      },
+      {
+        "source": "生",
+        "pinyin": "shēng",
+        "translation": "генер"
+      }
+    ]
+  }
+}

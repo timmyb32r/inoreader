@@ -655,7 +655,7 @@ fn translation_config() -> AiConfig {
 #[tokio::test]
 async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source() {
     let config = translation_config();
-    let payload = serde_json::json!({"translation":"Диск.","segments":[{"kind":"word","source":"磁盘","pinyin":"cípán","translation":"диск"},{"kind":"literal","source":"。"}]});
+    let payload = serde_json::json!({"translation":"Диск.","words":[{"source":"磁盘","pinyin":"cípán","translation":"диск"}]});
     let response = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":payload.to_string()}}],"usage":{"prompt_tokens":10,"completion_tokens":20,"prompt_cache_hit_tokens":2,"prompt_cache_miss_tokens":8}});
     let (adapter, requests) = provider(response.to_string(), StatusCode::OK);
     let (result, usage) = adapter
@@ -698,7 +698,7 @@ async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source
                 TranslationInput::new(&config, "另一个段落").unwrap()
             )
             .await,
-        Err(AiError::Protocol)
+        Err(AiError::Translation(_))
     ));
     let mut truncated = response.clone();
     truncated["choices"][0]["finish_reason"] = serde_json::json!("length");

@@ -71,3 +71,39 @@ for those particular metadata texts is not verified. Browser tests verify succes
 rendering with valid provider results. All temporary smoke sessions were removed.
 Provider-output reliability remains a separate limitation; no source normalization,
 weakened validation, or automatic paid retry was introduced to conceal it.
+
+## Follow-up: provider protocol reliability
+
+Reproduced the screenshot failure against DeepSeek Flash using the exact
+150-character introduction. The old response omitted a source space after
+`“升维”`, so the lossless concatenation check rejected the entire response.
+This was a fragile application/provider contract, not an unavailable API.
+
+Replaced model-generated literal segments with an exhaustive ordered dictionary.
+The server matches exact source entries and copies original punctuation/whitespace
+between them. It neither normalizes source nor guesses missing words. The prompt
+explicitly includes function particles, repeated words and truncated final words.
+Optional exact punctuation annotations are retained rather than rejected.
+Persisted/UI segments still reconstruct the original byte-for-byte. Detailed,
+credential-free Russian errors distinguish malformed format, missing/mismatched
+words and missing translation/pinyin. There is no automatic paid retry.
+
+Captured a real new-format response as a regression fixture. Also checked the
+previously failing mixed Chinese/English RBAC/GreptimeDB title against Flash.
+Unit tests exercise NBSP/tabs/newlines, repeated terms, C++, omitted/reordered/
+rewritten words, incomplete pinyin, and persisted literal corruption.
+
+Final validation: `just check-affected` and the complete `just check-release`
+passed (25 reader-ai tests, real PostgreSQL/YDB/Chromium acceptance, 132 frontend
+and 35 browser tests, backup/restore and architecture checks). The real-response
+fixture initially exposed an overly strict punctuation-entry check, which was
+corrected before deployment; the full release gate was then rerun successfully.
+
+Deployed `inoreader-app:translation-dictionary-20260927`, image
+`sha256:071937e0a2bb14e1d2f10e0f6edf70336dc59c49d3c70c63659e87e0ddfaecb5`.
+Readiness returned 204. Production smoke on the exact previously failing
+150-character introduction completed successfully: 83 annotated entries, exact
+source preserved, Chinese pinyin present, cached reopening reused the same job.
+Elapsed time including polling/cache check: 6.69 seconds; estimated request cost
+$0.002100036. The temporary session was deleted and cleanup verified.
+Evidence: ignored `.inoreader-state/deployments/translation-dictionary-20260927/smoke-report.json`.

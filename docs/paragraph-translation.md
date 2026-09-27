@@ -25,8 +25,14 @@ blocks are not. Inline code retains its original formatting.
 - `GET /api/articles/{id}/translations?workspace_id=...`: account/workspace-scoped
   persisted results and pending jobs. The UI polls only while work is outstanding.
 - `reader-ai::translation` owns the validated source segmentation contract.
-  Provider segments must concatenate to the exact original source, without
-  normalization, omitted punctuation, whitespace changes or reordering. Empty
+  The provider returns a complete ordered word dictionary, not a regenerated
+  paragraph. Exact word substrings are matched from left to right; gaps may only
+  contain punctuation/whitespace and are copied verbatim from the original.
+  Optional exact punctuation annotations are retained too; all supplied entries
+  must match the source and carry a nonempty translation. Missing, rewritten or
+  reordered letters/numbers fail. Stored segments must
+  still concatenate to the exact original source; no normalization, omitted
+  punctuation, whitespace changes or reordering are allowed. Empty
   translations, missing Chinese pinyin and malformed/incomplete responses fail.
   Persisted result deserialization repeats the validation.
 - `ai_translations` stores account/workspace/article ownership, exact source and

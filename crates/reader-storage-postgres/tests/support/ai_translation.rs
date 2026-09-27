@@ -23,7 +23,7 @@ impl AiProvider for Translator {
         Ok((
             ParagraphTranslation::from_response(
                 input.source(),
-                r#"{"translation":"Точный источник 12.5%.","segments":[{"kind":"word","source":"Exact","pinyin":null,"translation":"точный"},{"kind":"literal","source":" "},{"kind":"word","source":"source","pinyin":null,"translation":"источник"},{"kind":"literal","source":" "},{"kind":"word","source":"12.5","pinyin":null,"translation":"12.5"},{"kind":"literal","source":"%."}]}"#,
+                r#"{"translation":"Точный источник 12.5%.","words":[{"source":"Exact","pinyin":null,"translation":"точный"},{"source":"source","pinyin":null,"translation":"источник"},{"source":"12.5","pinyin":null,"translation":"12.5"}]}"#,
             )?,
             Usage {
                 prompt_tokens: 10,

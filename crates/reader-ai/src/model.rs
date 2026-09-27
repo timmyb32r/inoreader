@@ -39,6 +39,10 @@ pub enum AiError {
     Rejected,
     #[error("The provider returned an invalid or incomplete response")]
     Protocol,
+    #[error(
+        "Не удалось разобрать ответ DeepSeek: {0}. Исходный текст сохранён; попробуйте ещё раз."
+    )]
+    Translation(&'static str),
     #[error("A proposed verbatim quotation was absent from the article snapshot")]
     Quote,
     #[error("DeepSeek changed or omitted the original article title. Retry verification of the saved draft.")]
