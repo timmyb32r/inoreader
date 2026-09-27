@@ -107,3 +107,18 @@ source preserved, Chinese pinyin present, cached reopening reused the same job.
 Elapsed time including polling/cache check: 6.69 seconds; estimated request cost
 $0.002100036. The temporary session was deleted and cleanup verified.
 Evidence: ignored `.inoreader-state/deployments/translation-dictionary-20260927/smoke-report.json`.
+
+## Follow-up: clicking an annotated word
+
+Removed the word-click early return that only opened the word tooltip and bypassed
+paragraph selection. Word clicks now use the same cached paragraph action as the
+surrounding paragraph. Hover/focus still supplies the dictionary card; Enter/Space
+activate the same click path. Regression tests close the translation panel, click
+an annotated character, and verify immediate reopening with no additional POST or
+movement of the toolbar/following paragraph.
+
+Validation: affected check and complete release gate passed; 132 frontend tests
+and 35 browser scenarios passed. Deployed `inoreader-app:translation-word-click-20260927`
+(`sha256:e9a777128dfabbfc9a65c3acb85cb60be87083624bb174d564dcab9d5482fe42`)
+to `158.160.186.87`; readiness returned 204. No provider call or data migration
+was needed for this UI fix.

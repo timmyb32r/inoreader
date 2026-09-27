@@ -38,6 +38,11 @@ test("paragraph translation preserves article geometry and links, deduplicates c
  expect(await page.getByRole('tooltip').isVisible()).toBe(true);await expect(page.getByRole('tooltip')).toContainText('cípán');await expect(page.getByRole('tooltip')).toContainText('диск');
  await content.locator('[data-translation-word="1"]').hover();await expect(page.getByRole('tooltip')).toContainText('dúqǔ');expect(posts).toBe(1);
  await expect(content.getByRole('link',{name:'来源'})).toHaveAttribute('href','https://example.test/source');
+ await page.getByRole('button',{name:'Close paragraph translation'}).click();
+ await expect(page.getByRole('region',{name:'Paragraph translation'})).toHaveCount(0);
+ await content.locator('[data-translation-word="0"]').first().click();
+ await expect(page.getByRole('region',{name:'Paragraph translation'})).toContainText('Чтение с диска.');
+ expect(posts).toBe(1);expect(await following.boundingBox()).toEqual(before);expect(await page.locator('.reader-toolbar').boundingBox()).toEqual(toolbar);
  await page.screenshot({path:'/tmp/inoreader-paragraph-translation.png',fullPage:true});
  await page.keyboard.press('Escape');await expect(page.getByRole('tooltip')).toHaveCount(0);
  await button.click();await expect(content.locator('[data-translation-word]')).toHaveCount(0);expect(await following.boundingBox()).toEqual(before);

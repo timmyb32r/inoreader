@@ -86,10 +86,9 @@ export function ParagraphReader({client,workspaceId,articleId,html,body,enabled,
     <div ref={root} class={`paragraph-reader ${enabled?"paragraph-translation-mode":""}`} onMouseOver={event=>hovered(event.target)} onMouseLeave={()=>setWord(null)} onFocusIn={event=>hovered(event.target)} onFocusOut={()=>setWord(null)} onClick={event=>{
       if(!enabled)return;
       const target=event.target instanceof Element?event.target:null;
-      if(target?.closest("[data-translation-word]")){event.preventDefault();hovered(target);return;}
       const paragraph=target?.closest<HTMLElement>("[data-translatable]");
       if(paragraph&&window.getSelection()?.isCollapsed!==false){event.preventDefault();void translate(paragraph.textContent??"");}
-    }} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){const span=(event.target as Element).closest("[data-translation-word]");if(span){event.preventDefault();hovered(span);}}}}>{title&&<h1>{title}</h1>}{excerpt&&<p class="reader-deck">{excerpt}</p>}{children}<div class="article-content" dangerouslySetInnerHTML={html?{__html:html}:undefined}>{!html&&body.map((p,i)=><p key={i}>{p}</p>)}</div></div>
+    }} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){const span=(event.target as Element).closest("[data-translation-word]");if(span instanceof HTMLElement){event.preventDefault();span.click();}}}}>{title&&<h1>{title}</h1>}{excerpt&&<p class="reader-deck">{excerpt}</p>}{children}<div class="article-content" dangerouslySetInnerHTML={html?{__html:html}:undefined}>{!html&&body.map((p,i)=><p key={i}>{p}</p>)}</div></div>
     {enabled&&selection&&<section class="paragraph-result" role="region" aria-label="Paragraph translation" aria-busy={pending}>
       <header><strong>Перевод абзаца</strong><button class="icon-button" aria-label="Close paragraph translation" onClick={()=>setSelection("")}><Icon name="close"/></button></header>
       <div class="paragraph-result-body" aria-live="polite">{pending?<div class="paragraph-wait"><span class="spinner"/>Переводим абзац…</div>:error||current?.status==="failed"?<div role="alert">{error||(current?.status==="failed"?current.error:"")}</div>:current?.status==="completed"?<p>{current.result.translation}</p>:null}</div>

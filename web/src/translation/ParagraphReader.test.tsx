@@ -13,6 +13,14 @@ it("immediately shows pending, deduplicates clicks and displays word details wit
  await waitFor(()=>expect(container.querySelector('[data-translation-word]')).not.toBeNull());
  fireEvent.mouseOver(container.querySelector('[data-translation-word]')!);
  expect(screen.getByRole("tooltip")).toHaveTextContent("cípán");expect(screen.getByRole("tooltip")).toHaveTextContent("диск");expect(request).toHaveBeenCalledTimes(1);
+ for(const activation of ["click","Enter"," "]){
+  fireEvent.click(screen.getByRole("button",{name:"Close paragraph translation"}));
+  expect(screen.queryByRole("region",{name:"Paragraph translation"})).not.toBeInTheDocument();
+  const word=container.querySelector<HTMLElement>('[data-translation-word]')!;
+  if(activation==="click")fireEvent.click(word);else fireEvent.keyDown(word,{key:activation});
+  expect(screen.getByRole("region",{name:"Paragraph translation"})).toHaveTextContent("Диск.");
+  expect(request).toHaveBeenCalledTimes(1);
+ }
 });
 it("reuses the operation ID after an uncertain POST failure and keeps source intact",async()=>{
  const client=new AiClient(vi.fn());vi.spyOn(client,"translations").mockResolvedValue([]);

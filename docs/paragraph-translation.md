@@ -5,7 +5,9 @@ an enabled DeepSeek key and the article's full text is available. Clicking a
 paragraph queues a translation; hovering never calls the provider. Completed
 paragraphs have dotted word underlines. Hover/focus opens the selected dictionary
 card design: original word, Mandarin pinyin with tone marks, Russian meaning.
-Clicking a word also works on touch devices. Esc dismisses the card and paragraph
+Clicking a word (including touch, Enter or Space) opens its paragraph translation
+from the existing job without another provider request. Hover/focus keeps showing
+the word dictionary card. Esc dismisses the card and paragraph
 result. The button exits selection mode.
 
 The full Russian paragraph translation appears in a fixed overlay, so neither
