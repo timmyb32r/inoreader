@@ -70,6 +70,49 @@ async fn ai_routes_require_reader_auth_and_exact_origin() {
         app.clone().oneshot(request).await.unwrap().status(),
         StatusCode::FORBIDDEN
     );
+    for path in [
+        format!("/api/glossary/channel?workspace_id={workspace}"),
+        format!("/api/articles/{article}/definitions?workspace_id={workspace}"),
+    ] {
+        let request = axum::http::Request::builder()
+            .uri(path)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    for (method, path, body) in [
+        (
+            "PUT",
+            "/api/glossary/channel".to_owned(),
+            serde_json::json!({"workspaceId":workspace,"token":"123:secret"}),
+        ),
+        (
+            "POST",
+            "/api/glossary/channel/sync".to_owned(),
+            serde_json::json!({"workspaceId":workspace}),
+        ),
+        (
+            "POST",
+            format!("/api/articles/{article}/definitions"),
+            serde_json::json!({"workspaceId":workspace,"operationId":Uuid::new_v4()}),
+        ),
+    ] {
+        let request = axum::http::Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::COOKIE, "reader_session=route-token")
+            .header(header::ORIGIN, "https://attacker.test")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(body.to_string()))
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
     let profile = axum::http::Request::builder()
         .uri("/api/ai/profile")
         .header(header::COOKIE, "reader_session=route-token")

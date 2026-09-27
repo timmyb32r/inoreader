@@ -3,6 +3,7 @@
 
 mod config;
 mod crypto;
+mod definitions;
 mod generation;
 mod model;
 mod pricing;
@@ -13,6 +14,7 @@ mod translation;
 
 pub use config::*;
 pub use crypto::*;
+pub use definitions::*;
 pub use generation::*;
 pub use model::*;
 pub use pricing::*;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../ui/Icon";
 
-export function ChatCopyButton({ text, label }: { text: string; label: string }) {
+export function ChatCopyButton({ text, label, html }: { text: string; label: string; html?: () => string }) {
   const [state, setState] = useState<"idle" | "pending" | "copied" | "failed">("idle");
   const locked = useRef(false);
   const revision = useRef(0);
@@ -13,7 +13,12 @@ export function ChatCopyButton({ text, label }: { text: string; label: string })
       if (locked.current || !text) return;
       locked.current = true; setState("pending");
       const token = revision.current;
-      try { await navigator.clipboard.writeText(text); if (token === revision.current) setState("copied"); }
+      try {
+        if (html && typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
+          await navigator.clipboard.write([new ClipboardItem({"text/plain":new Blob([text],{type:"text/plain"}),"text/html":new Blob([html()],{type:"text/html"})})]);
+        } else await navigator.clipboard.writeText(text);
+        if (token === revision.current) setState("copied");
+      }
       catch { if (token === revision.current) setState("failed"); }
       finally { if (token === revision.current) locked.current = false; }
     }}>

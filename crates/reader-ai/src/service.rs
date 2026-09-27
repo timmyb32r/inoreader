@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::*;
 
+mod definitions;
 mod translation;
 mod worker;
 

@@ -17,6 +17,28 @@ fn policy() -> OutboundPolicy {
 }
 
 #[test]
+fn origin_restriction_rejects_secret_path_redirect_destinations() {
+    let restricted = policy()
+        .restricted_to_origin(&Url::parse("https://api.telegram.org").unwrap())
+        .unwrap();
+    assert!(restricted
+        .validate_url(&Url::parse("https://api.telegram.org/bot123:secret/getMe").unwrap())
+        .is_ok());
+    for other in [
+        "https://evil.test/bot123:secret/getMe",
+        "http://api.telegram.org/bot123:secret/getMe",
+        "https://api.telegram.org:444/bot123:secret/getMe",
+    ] {
+        let error = restricted
+            .validate_url(&Url::parse(other).unwrap())
+            .unwrap_err();
+        assert_eq!(error, OutboundError::OriginNotAllowed);
+        assert!(!error.to_string().contains("secret"));
+    }
+    assert!(!format!("{restricted:?}").contains("secret"));
+}
+
+#[test]
 fn plain_http_allowlist_is_exact_per_host() {
     let policy = OutboundPolicy::for_plain_http_hosts(
         ["feeds.example.test".to_owned()],

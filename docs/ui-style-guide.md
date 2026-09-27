@@ -40,3 +40,9 @@ card shows the exact word, Mandarin pinyin and Russian meaning on hover/focus.
 The whole-paragraph translation uses a fixed overlay with reserved header,
 content and footer dimensions; network completion never pushes the article.
 Annotation waits until text selection, pointer presses and active scrolling end.
+
+The «Термины» action opens a fixed, movable glossary panel. Its header, status
+row and footer keep fixed heights. Only the content pane scrolls. New definitions
+precede a divider and exact known channel paragraphs with source links. Async
+results defer during a press, selection or scrolling. Copy buttons write safe
+rendered HTML plus plain text; unavailable rich clipboard uses plain text.

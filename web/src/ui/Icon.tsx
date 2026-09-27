@@ -1,8 +1,9 @@
 import type { JSX } from "preact";
 
-export type IconName = "copy" | "send" | "stop" | "chat" | "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
+export type IconName = "book" | "copy" | "send" | "stop" | "chat" | "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
 
 const paths: Record<IconName, JSX.Element> = {
+  book: <><path d="M12 5v15M12 5C8 2 4 3 3 4v15c3-2 6-2 9 1 3-3 6-3 9-1V4c-3-2-6-1-9 1Z"/></>,
   copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></>,
   send: <><path d="m5 12 7-7 7 7M12 5v15"/></>,
   stop: <rect x="6" y="6" width="12" height="12" rx="2"/>,

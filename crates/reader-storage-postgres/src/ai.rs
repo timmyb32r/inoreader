@@ -12,9 +12,23 @@ use uuid::Uuid;
 use crate::PostgresRepository;
 
 mod calls;
+mod definitions;
 mod translations;
 
 pub const SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS ai_definitions (
+ id UUID PRIMARY KEY, owner UUID NOT NULL, workspace UUID NOT NULL, article UUID NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL, document TEXT NOT NULL,
+ input TEXT NOT NULL, lease UUID, lease_until TIMESTAMPTZ,
+ raw_response BYTEA, response_status INTEGER, response_interrupted BOOLEAN
+);
+CREATE INDEX IF NOT EXISTS ai_definitions_article ON ai_definitions(owner,workspace,article,created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_definitions_pending ON ai_definitions(status,created_at);
+CREATE TABLE IF NOT EXISTS ai_definition_operations (
+ owner UUID NOT NULL, operation UUID NOT NULL, job UUID NOT NULL REFERENCES ai_definitions(id),
+ workspace UUID NOT NULL, article UUID NOT NULL, regenerate BOOLEAN NOT NULL, PRIMARY KEY(owner,operation)
+);
+
 CREATE TABLE IF NOT EXISTS ai_translations (
     id UUID PRIMARY KEY, owner UUID NOT NULL, workspace UUID NOT NULL, article UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL, document TEXT NOT NULL,
@@ -186,6 +200,38 @@ fn set_attempt(record: &mut ChatRecord, state: MessageStatus) -> Result<(), AiEr
 
 #[async_trait]
 impl AiStore for PostgresAiStore {
+    async fn definitions(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Option<DefinitionsJob>, AiError> {
+        self.latest_definitions(owner, workspace, article).await
+    }
+    async fn create_definitions(
+        &self,
+        record: DefinitionsRecord,
+        operation: Uuid,
+        regenerate: bool,
+    ) -> Result<DefinitionsJob, AiError> {
+        self.insert_definitions(record, operation, regenerate).await
+    }
+    async fn claim_definitions(
+        &self,
+        lease_seconds: u64,
+    ) -> Result<Option<ClaimedDefinitions>, AiError> {
+        self.lease_definitions(lease_seconds).await
+    }
+    async fn finish_definitions(
+        &self,
+        claim: &ClaimedDefinitions,
+        state: DefinitionState,
+        usage: Option<Usage>,
+        reply: Option<DefinitionReply>,
+    ) -> Result<(), AiError> {
+        self.complete_definitions(claim, state, usage, reply).await
+    }
+
     async fn translations(
         &self,
         owner: Uuid,

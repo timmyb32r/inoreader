@@ -94,6 +94,13 @@ where
     T: OutboundTransport + 'static,
     O: ExternalRequestObserver + 'static,
 {
+    async fn definitions(
+        &self,
+        key: &str,
+        input: crate::DefinitionsInput,
+    ) -> Result<crate::DefinitionReply, AiError> {
+        self.define_entities(key, input).await
+    }
     async fn translate(
         &self,
         key: &str,

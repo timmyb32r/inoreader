@@ -345,6 +345,30 @@ pub struct Usage {
 
 #[async_trait]
 pub trait AiStore: Send + Sync {
+    async fn definitions(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Option<crate::DefinitionsJob>, AiError>;
+    async fn create_definitions(
+        &self,
+        record: crate::DefinitionsRecord,
+        operation: Uuid,
+        regenerate: bool,
+    ) -> Result<crate::DefinitionsJob, AiError>;
+    async fn claim_definitions(
+        &self,
+        lease_seconds: u64,
+    ) -> Result<Option<crate::ClaimedDefinitions>, AiError>;
+    async fn finish_definitions(
+        &self,
+        claim: &crate::ClaimedDefinitions,
+        state: crate::DefinitionState,
+        usage: Option<Usage>,
+        reply: Option<crate::DefinitionReply>,
+    ) -> Result<(), AiError>;
+
     async fn translations(
         &self,
         owner: Uuid,
@@ -449,6 +473,12 @@ pub trait AiStore: Send + Sync {
 
 #[async_trait]
 pub trait AiProvider: Send + Sync {
+    async fn definitions(
+        &self,
+        key: &str,
+        input: crate::DefinitionsInput,
+    ) -> Result<crate::DefinitionReply, AiError>;
+
     async fn translate(
         &self,
         key: &str,

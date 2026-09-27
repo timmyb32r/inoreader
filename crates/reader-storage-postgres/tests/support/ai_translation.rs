@@ -2,6 +2,9 @@ use super::*;
 struct Translator(AtomicUsize);
 #[async_trait]
 impl AiProvider for Translator {
+    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<DefinitionReply, AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn balance(&self, _: &str) -> Result<Balance, AiError> {
         unreachable!()
     }

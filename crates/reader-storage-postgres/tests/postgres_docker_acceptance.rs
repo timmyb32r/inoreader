@@ -18,6 +18,8 @@ use uuid::Uuid;
 
 #[path = "support/ai.rs"]
 mod ai_tests;
+#[path = "support/glossary.rs"]
+mod glossary_tests;
 
 const POSTGRES_IMAGE: &str =
     "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
@@ -192,7 +194,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 38); // Includes durable paragraph translation jobs.
+    assert_eq!(table_count, 45); // Includes channel raw events and glossary projections.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -257,6 +259,8 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
     ai_tests::verify(&pool).await;
+    glossary_tests::verify(&pool).await;
+    verify_glossary_backup_restore(&container, &pool).await;
 }
 
 async fn verify_article_state_conversion(pool: &PgPool) {
@@ -853,4 +857,33 @@ fn assert_success(operation: &str, output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+async fn verify_glossary_backup_restore(container: &PostgresContainer, pool: &PgPool) {
+    let output=command("docker",&["exec",&container.name,"sh","-c","pg_dump -U inoreader -d inoreader -Fc -f /tmp/glossary.dump && createdb -U inoreader glossary_restore && pg_restore --exit-on-error -U inoreader -d glossary_restore /tmp/glossary.dump"]);
+    assert_success("dump and restore real PostgreSQL glossary", &output);
+    let restored = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&format!(
+            "{}/glossary_restore",
+            container.connection_string().rsplit_once('/').unwrap().0
+        ))
+        .await
+        .unwrap();
+    for table in [
+        "glossary_channels",
+        "glossary_receipts",
+        "glossary_events",
+        "glossary_posts",
+        "glossary_definitions",
+        "ai_definitions",
+        "ai_definition_operations",
+    ] {
+        let sql=format!("SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT to_jsonb(t) v FROM {table} t) rows");
+        let original: String = sqlx::query_scalar(&sql).fetch_one(pool).await.unwrap();
+        let copy: String = sqlx::query_scalar(&sql).fetch_one(&restored).await.unwrap();
+        assert_ne!(original, "[]", "fixture must exercise {table}");
+        assert_eq!(original, copy, "backup retains every field in {table}");
+    }
+    restored.close().await;
 }

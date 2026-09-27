@@ -34,6 +34,7 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 use url::Url;
 
 mod ai;
+mod glossary;
 mod migration;
 
 #[derive(Parser)]
@@ -48,6 +49,15 @@ enum Command {
     Serve,
     CheckConfig,
     PrepareSchema,
+    ReindexTelegramGlossary {
+        owner: uuid::Uuid,
+        workspace: uuid::Uuid,
+    },
+    ImportTelegramArchive {
+        archive: PathBuf,
+        owner: uuid::Uuid,
+        workspace: uuid::Uuid,
+    },
     PrioritizeJobs,
     BenchmarkLibrary {
         workspace_id: uuid::Uuid,
@@ -131,6 +141,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = postgres_pool(&config).await?;
     match cli.command {
         Command::CheckConfig | Command::Seed { apply: false, .. } => unreachable!(),
+        Command::ReindexTelegramGlossary { owner, workspace } => {
+            let policy = reader_glossary::GlossaryPolicy::new(
+                config
+                    .glossary
+                    .clone()
+                    .ok_or("glossary configuration required")?,
+            )?;
+            let count = reader_storage_postgres::PostgresGlossaryStore::new(pool)
+                .reindex(owner, workspace, policy.config().batch_size)
+                .await?;
+            println!("Reindexed {count} retained current posts; failed non-conflicting events queued for replay.");
+        }
+        Command::ImportTelegramArchive {
+            archive,
+            owner,
+            workspace,
+        } => {
+            prepare_schema(&pool).await?;
+            glossary::import(&config, pool, archive, owner, workspace).await?;
+        }
         Command::Health => {
             sqlx::query("SELECT 1").execute(&pool).await?;
             println!("PostgreSQL connection is healthy");
@@ -490,6 +520,7 @@ async fn serve(
     )?);
     repository.readiness().await?;
     let ai_service = ai::compose(config, pool.clone(), repository.clone())?;
+    let glossary_service = glossary::compose(config, pool.clone())?;
     // The transport exposes decoded response bytes, so both the wire/body
     // budget and decompressed budget constrain the same pre-parser boundary.
     let limits = OutboundLimits::try_from(RawOutboundLimits {
@@ -580,6 +611,10 @@ async fn serve(
     if let Some(ai) = ai_service {
         ai.spawn_workers();
         server_state = server_state.with_ai(ai);
+    }
+    if let Some(glossary) = glossary_service {
+        glossary.spawn_workers();
+        server_state = server_state.with_glossary(glossary);
     }
     let app = reader_server::router(server_state)
         .fallback(serve_ui)

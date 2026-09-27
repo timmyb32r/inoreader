@@ -30,6 +30,9 @@ fn usage() -> Usage {
 }
 #[async_trait]
 impl AiProvider for Scripted {
+    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<DefinitionReply, AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn translate(
         &self,
         _: &str,

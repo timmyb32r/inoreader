@@ -7,6 +7,7 @@ use thiserror::Error;
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub ai: Option<reader_ai::AiConfig>,
+    pub glossary: Option<reader_glossary::GlossaryConfig>,
 
     pub server: Server,
     pub database: Database,
@@ -175,6 +176,15 @@ impl Config {
         Ok(value)
     }
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if let Some(glossary) = &self.glossary {
+            reader_glossary::GlossaryPolicy::new(glossary.clone())
+                .map_err(|_| ConfigError::Invalid("glossary"))?;
+            if self.ai.is_none() {
+                return Err(ConfigError::Invalid(
+                    "glossary requires ai credential encryption",
+                ));
+            }
+        }
         if let Some(ai) = &self.ai {
             ai.validate().map_err(|_| ConfigError::Invalid("ai"))?;
         }

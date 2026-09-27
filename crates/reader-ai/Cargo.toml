@@ -10,6 +10,7 @@ chrono.workspace = true
 http.workspace = true
 log.workspace = true
 reader-web-runtime = { path = "../reader-web-runtime" }
+reader-glossary = { path = "../reader-glossary" }
 ring = "0.17"
 scraper = "0.24"
 serde.workspace = true

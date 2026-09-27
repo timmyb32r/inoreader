@@ -15,6 +15,7 @@ pub struct OutboundPolicy {
     allow_plain_http: bool,
     allowed_plain_http_hosts: HashSet<String>,
     limits: OutboundLimits,
+    allowed_origin: Option<(String, Option<String>, Option<u16>)>,
 }
 
 impl OutboundPolicy {
@@ -23,6 +24,7 @@ impl OutboundPolicy {
             allow_plain_http,
             allowed_plain_http_hosts: HashSet::new(),
             limits,
+            allowed_origin: None,
         }
     }
 
@@ -34,6 +36,7 @@ impl OutboundPolicy {
             allow_plain_http: false,
             allowed_plain_http_hosts: hosts.into_iter().collect(),
             limits,
+            allowed_origin: None,
         }
     }
 
@@ -41,7 +44,23 @@ impl OutboundPolicy {
         &self.limits
     }
 
+    /// Narrow a client to one origin, including every redirect hop. Required
+    /// when a provider places a credential in the URL path (Telegram Bot API).
+    /// Only the scheme/host/port are retained; no secret path enters this policy.
+    pub fn restricted_to_origin(mut self, url: &Url) -> Result<Self, OutboundError> {
+        self.validate_url(url)?;
+        self.allowed_origin = Some(origin(url));
+        Ok(self)
+    }
+
     pub fn validate_url(&self, url: &Url) -> Result<(), OutboundError> {
+        if self
+            .allowed_origin
+            .as_ref()
+            .is_some_and(|allowed| *allowed != origin(url))
+        {
+            return Err(OutboundError::OriginNotAllowed);
+        }
         match url.scheme() {
             "https" => {}
             "http"
@@ -314,6 +333,8 @@ impl BoundedBody {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum OutboundError {
+    #[error("destination origin is not allowed for this client")]
+    OriginNotAllowed,
     #[error("unsupported URL scheme: {0}")]
     UnsupportedScheme(String),
     #[error("plain HTTP requires explicit operator policy")]

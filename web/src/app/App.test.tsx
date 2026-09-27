@@ -298,12 +298,12 @@ describe("reader application", () => {
     renderApp();
     const reader=await screen.findByRole("article",{name:"Article reader"});
     const actions=[...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip")];
-    expect(actions).toHaveLength(4);
+    expect(actions).toHaveLength(5);
     for(const action of actions){
       expect(action.dataset.tooltip).toBeTruthy();
       expect(action.getAttribute("aria-label")).toBeTruthy();
     }
-    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Open original"]);
+    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Термины","Open original"]);
     expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toBeDisabled();
     expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toHaveAttribute("data-tooltip","Configure DeepSeek in Settings");
   });

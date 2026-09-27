@@ -11,6 +11,8 @@ use std::sync::{
 };
 use uuid::Uuid;
 
+#[path = "ai_definitions.rs"]
+mod definitions;
 #[path = "ai_translation.rs"]
 mod translation;
 #[path = "ai_two_stage.rs"]
@@ -23,6 +25,9 @@ struct Provider {
 }
 #[async_trait]
 impl AiProvider for Provider {
+    async fn definitions(&self, _: &str, _: DefinitionsInput) -> Result<DefinitionReply, AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn translate(
         &self,
         _: &str,
@@ -566,6 +571,7 @@ pub async fn verify(pool: &PgPool) {
         .await
         .unwrap();
     translation::verify(pool, store.clone(), owner, other, ws, a).await;
+    definitions::verify(pool, store.clone(), owner, other, ws, a).await;
     let thinking = changed_service
         .start(owner, ws, a, Uuid::new_v4(), true)
         .await

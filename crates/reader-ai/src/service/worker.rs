@@ -8,6 +8,9 @@ impl AiService {
             let service = self.clone();
             tokio::spawn(async move {
                 loop {
+                    if let Err(error) = service.define_once().await {
+                        log::error!("ai_definitions_worker outcome=failed classification={error}");
+                    }
                     if let Err(error) = service.translate_once().await {
                         log::error!("ai_translation_worker outcome=failed classification={error}");
                     }

@@ -394,3 +394,81 @@ async fn connection_retries_each_authorized_dns_address_within_the_deadline() {
         vec![first, second]
     );
 }
+
+#[tokio::test]
+async fn credential_in_path_origin_restriction_checks_every_redirect_before_transport() {
+    let public: IpAddr = "93.184.216.34".parse().unwrap();
+    for (location, addresses, success, calls) in [
+        (
+            "https://api.telegram.org/next",
+            vec![vec![public], vec![public]],
+            true,
+            2,
+        ),
+        (
+            "https://attacker.test/bot123:private/getUpdates",
+            vec![vec![public]],
+            false,
+            1,
+        ),
+        (
+            "https://api.telegram.org/next",
+            vec![vec![public], vec!["127.0.0.1".parse().unwrap()]],
+            false,
+            1,
+        ),
+        (
+            "https://api.telegram.org/bot123:private/getUpdates",
+            vec![vec![public]],
+            false,
+            1,
+        ),
+    ] {
+        let observer = Arc::new(Observer::default());
+        let client = OutboundHttpClient::new(
+            OutboundPolicy::new(
+                false,
+                OutboundLimits {
+                    connect_timeout: Duration::from_secs(1),
+                    request_deadline: Duration::from_secs(2),
+                    max_redirect_hops: 1,
+                    max_response_body_bytes: 100,
+                },
+            ),
+            Resolver {
+                answers: Mutex::new(addresses.into()),
+            },
+            Transport {
+                responses: Mutex::new(VecDeque::from([
+                    response(StatusCode::TEMPORARY_REDIRECT, Some(location), b""),
+                    response(StatusCode::OK, None, b"ok"),
+                ])),
+                requests: Mutex::new(vec![]),
+            },
+            observer.clone(),
+        )
+        .restricted_to_origin(&Url::parse("https://api.telegram.org").unwrap())
+        .unwrap();
+        let result = client
+            .execute_stream(
+                PreparedRequest {
+                    method: Method::POST,
+                    url: Url::parse("https://api.telegram.org/bot123:private/getUpdates").unwrap(),
+                    headers: HeaderMap::new(),
+                    body: Some(b"private parameters".to_vec()),
+                },
+                "telegram",
+                "getUpdates",
+            )
+            .await;
+        assert_eq!(result.is_ok(), success);
+        if let Ok(mut stream) = result {
+            while stream.next_chunk().await.unwrap().is_some() {}
+        }
+        assert_eq!(client.transport.requests.lock().unwrap().len(), calls);
+        let observed = observer.0.lock().unwrap();
+        assert_eq!(observed.len(), 1);
+        assert_eq!(observed[0].system, "telegram");
+        assert_eq!(observed[0].operation, "getUpdates");
+    }
+}

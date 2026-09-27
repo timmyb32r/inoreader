@@ -25,6 +25,7 @@ const ARTICLE_PAGE_SIZE: usize = 50;
 
 mod ai;
 mod api_observability;
+mod glossary;
 mod opml;
 
 #[async_trait::async_trait]
@@ -52,6 +53,7 @@ pub trait FeedDiscovery: Send + Sync {
 
 pub struct AppState<R> {
     ai: Option<Arc<reader_ai::AiService>>,
+    glossary: Option<Arc<reader_glossary::GlossaryService>>,
     repository: Arc<R>,
     discovery: Arc<dyn FeedDiscovery>,
     reason_policy: ReasonPolicy,
@@ -64,6 +66,7 @@ impl<R> Clone for AppState<R> {
     fn clone(&self) -> Self {
         Self {
             ai: self.ai.clone(),
+            glossary: self.glossary.clone(),
             repository: self.repository.clone(),
             discovery: self.discovery.clone(),
             reason_policy: self.reason_policy,
@@ -86,6 +89,7 @@ impl<R> AppState<R> {
     ) -> Self {
         Self {
             ai: None,
+            glossary: None,
             repository,
             discovery,
             reason_policy,
@@ -96,6 +100,10 @@ impl<R> AppState<R> {
         }
     }
 
+    pub fn with_glossary(mut self, glossary: Arc<reader_glossary::GlossaryService>) -> Self {
+        self.glossary = Some(glossary);
+        self
+    }
     pub fn with_ai(mut self, ai: Arc<reader_ai::AiService>) -> Self {
         self.ai = Some(ai);
         self
@@ -201,6 +209,7 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         .route("/api/opml/import", post(import_opml::<R>))
         .route("/api/opml/export", get(export_opml::<R>))
         .merge(ai::routes::<R>())
+        .merge(glossary::routes::<R>())
         .with_state(state)
         .layer(middleware::from_fn(api_observability::observe))
 }
@@ -1696,6 +1705,7 @@ fn html_text_paragraphs(value: &str) -> Vec<String> {
 #[derive(Debug)]
 enum ApiFailure {
     Ai(reader_ai::AiError),
+    Glossary(reader_glossary::GlossaryError),
     Command(CommandError),
     Auth(AuthError),
     Repository(RepositoryError),
@@ -1739,6 +1749,21 @@ impl From<opml::Error> for ApiFailure {
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Glossary(error) => {
+                use reader_glossary::GlossaryError;
+                let status = match error {
+                    GlossaryError::NotFound => StatusCode::NOT_FOUND,
+                    GlossaryError::Storage | GlossaryError::Configuration => {
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    }
+                    GlossaryError::Transport | GlossaryError::Protocol => StatusCode::BAD_GATEWAY,
+                    GlossaryError::Conflict
+                    | GlossaryError::ReceiverConflict
+                    | GlossaryError::NotConnected => StatusCode::CONFLICT,
+                    _ => StatusCode::UNPROCESSABLE_ENTITY,
+                };
+                (status, "glossary_error", error.to_string())
+            }
             Self::Ai(error) => {
                 use reader_ai::AiError;
                 let (status, code) = match &error {

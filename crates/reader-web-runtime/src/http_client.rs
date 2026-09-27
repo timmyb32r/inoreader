@@ -112,6 +112,11 @@ where
         Ok(self)
     }
 
+    pub fn restricted_to_origin(mut self, url: &Url) -> Result<Self, OutboundError> {
+        self.policy = self.policy.restricted_to_origin(url)?;
+        Ok(self)
+    }
+
     pub async fn execute(
         &self,
         request: PreparedRequest,
