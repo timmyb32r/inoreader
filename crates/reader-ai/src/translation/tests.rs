@@ -125,3 +125,13 @@ fn persisted_literals_cannot_hide_missing_words() {
         assert!(ParagraphTranslation::from_response("遗漏", response).is_err());
     }
 }
+#[test]
+fn orphan_text_membership_is_exact_and_does_not_accept_partial_blocks_or_code() {
+    let html = "\n  页面标题\n<a href='/x'></a><div><p>完整<strong>段落</strong></p>尾文<pre>代码</pre><code>code</code></div>";
+    for source in ["\n  页面标题\n", "尾文", "完整段落"] {
+        assert!(contains_paragraph(html, source), "{source}");
+    }
+    for source in ["页面标题", "完整", "段落", "代码", "code", "\n", "invented"] {
+        assert!(!contains_paragraph(html, source), "{source}");
+    }
+}

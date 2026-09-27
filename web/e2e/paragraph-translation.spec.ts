@@ -48,9 +48,9 @@ test("paragraph translation preserves article geometry and links, deduplicates c
  await button.click();await expect(content.locator('[data-translation-word]')).toHaveCount(0);expect(await following.boundingBox()).toEqual(before);
 });
 
-for(const target of ['h1','.reader-deck','.article-content h2'])test(`translates ${target} above body paragraphs without moving controls`,async({page})=>{
+for(const target of ['h1','.reader-deck','.article-content h2','.article-content [data-translation-fragment]'])test(`translates ${target} above body paragraphs without moving controls`,async({page})=>{
  const source='磁盘', result={source,translation:'Диск',segments:[{kind:'word',source,pinyin:'cípán',translation:'диск'}]};
- const article={id:'a',title:target==='h1'?source:'Title',excerpt:target==='.reader-deck'?source:'Introduction',source:'Example',url:'https://example.test/a',body:[],bodyHtml:`<h2>${target==='.article-content h2'?source:'Heading'}</h2><p>Body paragraph stays here.</p>`,fullText:'ready',age:'2026-09-27',read:false,later:false};
+ const article={id:'a',title:target==='h1'?source:'Title',excerpt:target==='.reader-deck'?source:'Introduction',source:'Example',url:'https://example.test/a',body:[],bodyHtml:`${target.includes('fragment')?source:''}<h2>${target==='.article-content h2'?source:'Heading'}</h2><p>Body paragraph stays here.</p>`,fullText:'ready',age:'2026-09-27',read:false,later:false};
  let posts=0;
  await page.route('**/api/**',route=>{
   const path=new URL(route.request().url()).pathname;

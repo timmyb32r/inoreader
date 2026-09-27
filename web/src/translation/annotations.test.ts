@@ -22,3 +22,12 @@ it("selects the title, introduction and body headings as independent complete bl
  expect(paragraphs(root).map(p=>p.textContent)).toEqual(["标题","导语","技术细节","正文","嵌套标题","嵌套正文"]);
  annotate(root,new Map());expect(root.querySelectorAll("[data-translatable]")).toHaveLength(6);
 });
+it("wraps orphan article text without changing text or HTML and excludes code",()=>{
+ const root=document.createElement('div');root.innerHTML='\n  页面标题\n<a href="/x"></a><div><p>正文</p>尾文<pre>代码</pre></div>';
+ const original=root.innerHTML,source=root.textContent;
+ annotate(root,new Map());
+ expect(paragraphs(root).map(p=>p.textContent)).toEqual(['\n  页面标题\n','正文','尾文']);
+ expect(root.textContent).toBe(source);
+ annotate(root,new Map());expect(root.querySelectorAll('[data-translation-fragment]')).toHaveLength(2);
+ clearAnnotations(root);expect(root.innerHTML).toBe(original);
+});

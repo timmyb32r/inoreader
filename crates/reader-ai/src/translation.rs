@@ -237,7 +237,28 @@ pub fn contains_paragraph(html: &str, source: &str) -> bool {
     let Ok(nested) = scraper::Selector::parse("p, li, h1, h2, h3, h4, h5, h6, pre") else {
         return false;
     };
-    document.select(&selector).any(|node| {
-        node.select(&nested).next().is_none() && node.text().collect::<String>() == source
+    let blocks: Vec<_> = document
+        .select(&selector)
+        .filter(|node| node.select(&nested).next().is_none())
+        .collect();
+    if blocks
+        .iter()
+        .any(|node| node.text().collect::<String>() == source)
+    {
+        return true;
+    }
+    // Mirrors the frontend's inline wrappers for uncovered, nonblank text
+    // nodes. Match the entire node verbatim, including surrounding whitespace.
+    document.tree.nodes().any(|node| {
+        node.value().as_text().is_some_and(|text| {
+            !text.trim().is_empty()
+                && text.text.as_ref() == source
+                && !node.ancestors().any(|ancestor| {
+                    blocks.iter().any(|block| block.id() == ancestor.id())
+                        || scraper::ElementRef::wrap(ancestor).is_some_and(|element| {
+                            matches!(element.value().name(), "pre" | "code" | "script" | "style")
+                        })
+                })
+        })
     })
 }

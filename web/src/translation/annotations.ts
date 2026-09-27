@@ -2,17 +2,28 @@ import type { ParagraphTranslation, TranslationSegment } from "../api/ai";
 
 export const paragraphSelector = "p, li, h1, h2, h3, h4, h5, h6";
 export function paragraphs(root:HTMLElement):HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(paragraphSelector)].filter(p => !p.querySelector(`${paragraphSelector}, pre`) && !!p.textContent?.trim());
+  return [...root.querySelectorAll<HTMLElement>(`${paragraphSelector}, [data-translation-fragment]`)].filter(p => !p.querySelector(`${paragraphSelector}, pre`) && !!p.textContent?.trim());
 }
 export function clearAnnotations(root:HTMLElement) {
   root.querySelectorAll("[data-translation-word]").forEach(span => span.replaceWith(...span.childNodes));
   root.querySelectorAll("[data-translatable]").forEach(p => {p.removeAttribute("data-translatable");p.classList.remove("paragraph-selected");});
+  root.querySelectorAll("[data-translation-fragment]").forEach(span=>span.replaceWith(...span.childNodes));
   root.normalize();
 }
 /** Wrap existing text nodes only. No HTML replacement, trimming, inserted spaces,
  * or changes to links/emphasis. A word crossing inline elements shares one ID. */
 export function annotate(root:HTMLElement, results:Map<string,ParagraphTranslation>):Map<string,Extract<TranslationSegment,{kind:"word"}>> {
   clearAnnotations(root);
+  // Orphan text (e.g. a sanitized page title outside any paragraph) is still
+  // article content. Inline wrappers preserve every character and line box.
+  const scope=root.querySelector<HTMLElement>(".article-content")??root;
+  paragraphs(root).forEach(p=>{p.dataset.translatable="true";});
+  const walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT),orphans:Text[]=[];
+  while(walker.nextNode()){
+    const node=walker.currentNode as Text;
+    if(node.data.trim()&&!node.parentElement?.closest("pre, code, script, style, [data-translatable]"))orphans.push(node);
+  }
+  for(const node of orphans){const span=document.createElement("span");span.dataset.translationFragment="true";node.replaceWith(span);span.append(node);}
   const glossary=new Map<string,Extract<TranslationSegment,{kind:"word"}>>();
   let ordinal=0;
   for(const paragraph of paragraphs(root)) {

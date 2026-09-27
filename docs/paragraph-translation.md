@@ -15,7 +15,11 @@ network completion nor annotations move subsequent paragraphs. Word wrappers
 preserve the source text and HTML, including emphasis and hyperlinks. Paragraphs,
 headings (h1–h6), the displayed article title and RSS introduction,
 and leaf list items are eligible; nested list containers and preformatted code
-blocks are not. Inline code retains its original formatting.
+blocks are not. Nonblank text nodes outside those blocks also become selectable
+through temporary inline spans, including bare text at the HTML fragment root.
+Their complete DOM text (including surrounding whitespace) is submitted unchanged;
+the server checks exact node membership and excludes code/script/style ancestors.
+Disabling translation unwraps these spans. Inline code retains its original formatting.
 
 ## Contracts and ownership
 

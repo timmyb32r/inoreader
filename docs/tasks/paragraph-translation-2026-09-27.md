@@ -122,3 +122,27 @@ and 35 browser scenarios passed. Deployed `inoreader-app:translation-word-click-
 (`sha256:e9a777128dfabbfc9a65c3acb85cb60be87083624bb174d564dcab9d5482fe42`)
 to `158.160.186.87`; readiness returned 204. No provider call or data migration
 was needed for this UI fix.
+
+## Follow-up: unwrapped article title text
+
+Inspected the exact article HTML through the owned article API. The secondary
+cnblogs title is a nonblank text node at the fragment root, not a paragraph or
+heading. Translation now wraps uncovered article text nodes in temporary inline
+spans without changing their characters, whitespace, font or layout. Backend
+membership accepts the same exact full text nodes, excluding covered paragraph
+nodes and code/script/style ancestors. Wrappers are removed on mode exit and
+before reannotation; no stored article HTML is rewritten.
+
+Regression coverage checks orphan-text hover/click, completed word cards, stable
+following-paragraph/toolbar coordinates, exact whitespace, repeated annotation,
+HTML restoration and rejection of partial paragraphs/code/arbitrary source.
+
+Affected checks and full release gate passed: 133 frontend tests and 36 browser
+scenarios, plus real PostgreSQL/YDB/Chromium and backup/restore acceptance.
+Deployed `inoreader-app:translation-orphan-20260927`, image
+`sha256:dd86ef145ae4501f216b6c72e0176da4e29f58fc369fbbdce624b917e227f20c`;
+readiness returned 204. Live smoke on the exact marked text node (248 characters
+including surrounding whitespace) completed in 3.48 seconds: 18 dictionary entries,
+source preserved exactly, pinyin present, cached reopen successful. Estimated
+provider cost $0.000589836; temporary session cleanup verified. Evidence is in
+ignored `.inoreader-state/deployments/translation-orphan-20260927/smoke-report.json`.
