@@ -46,5 +46,9 @@ file was split or a mock-only test passed.
   previous standing authorization. Explicit fresh confirmation was requested;
   do not bypass the restriction or claim deployment until it is lifted.
 - Final code review completed; `git diff --check` passed.
-- Still required: confirmed source transfer, container build/rollout, production
-  smoke, and commits. Deployment remains blocked on approval, not on local tests.
+- Implementation committed as `32ead27`; final affected check passed in 5.784s.
+- Production backup restored successfully into a separate temporary database:
+  9,794 articles and 211 subscriptions; the verification database was then removed.
+  The backup and production database are retained.
+- Still required: confirmed source transfer, container build/rollout and production
+  smoke. Deployment remains blocked on approval, not on local tests.
