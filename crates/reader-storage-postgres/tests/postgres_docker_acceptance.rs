@@ -192,7 +192,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 37); // AI call accounting is atomic in the chat document.
+    assert_eq!(table_count, 38); // Includes durable paragraph translation jobs.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",

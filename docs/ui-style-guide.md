@@ -32,3 +32,11 @@ send use icon buttons; request accounting and version selection are not part of
 the reading surface. A complete first-pass summary can be shown as unchecked
 while fact-checking runs. Replacement preserves scroll position and waits for
 active presses, text selections and scrolling to finish.
+
+Paragraph translation is an explicit `文` mode next to Summarize. A paragraph
+click creates one cached account-owned translation. Inline word wrappers keep
+source text, fonts, spacing, links and emphasis unchanged. The chosen dictionary
+card shows the exact word, Mandarin pinyin and Russian meaning on hover/focus.
+The whole-paragraph translation uses a fixed overlay with reserved header,
+content and footer dimensions; network completion never pushes the article.
+Annotation waits until text selection, pointer presses and active scrolling end.

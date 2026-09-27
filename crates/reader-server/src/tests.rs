@@ -53,6 +53,23 @@ async fn ai_routes_require_reader_auth_and_exact_origin() {
         app.clone().oneshot(wrong_origin).await.unwrap().status(),
         StatusCode::FORBIDDEN
     );
+    let article = Uuid::new_v4();
+    let workspace = Uuid::new_v4();
+    let request = axum::http::Request::builder()
+        .uri(format!(
+            "/api/articles/{article}/translations?workspace_id={workspace}"
+        ))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let request = axum::http::Request::builder().method("POST").uri(format!("/api/articles/{article}/translations")).header(header::COOKIE,"reader_session=route-token").header(header::ORIGIN,"https://attacker.test").header(header::CONTENT_TYPE,"application/json").body(axum::body::Body::from(serde_json::json!({"workspaceId":workspace,"operationId":Uuid::new_v4(),"source":"private paragraph"}).to_string())).unwrap();
+    assert_eq!(
+        app.clone().oneshot(request).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
     let profile = axum::http::Request::builder()
         .uri("/api/ai/profile")
         .header(header::COOKIE, "reader_session=route-token")

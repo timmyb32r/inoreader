@@ -30,6 +30,13 @@ fn usage() -> Usage {
 }
 #[async_trait]
 impl AiProvider for Scripted {
+    async fn translate(
+        &self,
+        _: &str,
+        _: TranslationInput,
+    ) -> Result<(ParagraphTranslation, Usage), AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn balance(&self, _: &str) -> Result<Balance, AiError> {
         unreachable!()
     }

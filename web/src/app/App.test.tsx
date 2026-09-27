@@ -298,11 +298,14 @@ describe("reader application", () => {
     renderApp();
     const reader=await screen.findByRole("article",{name:"Article reader"});
     const actions=[...reader.querySelectorAll<HTMLElement>(".toolbar-tooltip")];
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(4);
     for(const action of actions){
-      expect(action.dataset.tooltip).toBe(action.getAttribute("aria-label"));
+      expect(action.dataset.tooltip).toBeTruthy();
+      expect(action.getAttribute("aria-label")).toBeTruthy();
     }
-    expect(actions.map(action=>action.dataset.tooltip)).toEqual(["Mark read","Read later","Open original"]);
+    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Open original"]);
+    expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toBeDisabled();
+    expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toHaveAttribute("data-tooltip","Configure DeepSeek in Settings");
   });
 
   it("preserves the discovered source title when adding a subscription", async () => {

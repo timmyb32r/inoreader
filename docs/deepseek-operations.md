@@ -85,7 +85,7 @@ decrypted without the original key. Account UUID is authenticated encryption
 data, preventing ciphertext reuse under another account.
 
 Back up this master key securely and separately from the database. A complete
-PostgreSQL `pg_dump` includes `ai_profiles`, `ai_chats` and `ai_operations`;
+PostgreSQL `pg_dump` includes `ai_profiles`, `ai_chats`, `ai_operations` and `ai_translations`;
 selective table backups must explicitly include all three. Restore
 both the database and its matching encryption key before enabling the service.
 Deleting an account's provider key cancels its pending generation and preserves

@@ -9,6 +9,7 @@ mod pricing;
 mod provider;
 mod service;
 mod stream;
+mod translation;
 
 pub use config::*;
 pub use crypto::*;
@@ -17,6 +18,7 @@ pub use model::*;
 pub use pricing::*;
 pub use provider::*;
 pub use service::*;
+pub use translation::*;
 
 #[cfg(test)]
 mod tests;

@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::*;
 
+mod translation;
 mod worker;
 
 pub struct AiService {

@@ -615,3 +615,117 @@ async fn provider_rejects_bad_key_and_absent_usage_without_retry() {
         Err(AiError::Protocol)
     ));
 }
+
+fn translation_config() -> AiConfig {
+    AiConfig {
+        prompt_approved: true,
+        prompt_path: "test".into(),
+        prompt_version: "test".into(),
+        review: ReviewConfig {
+            prompt_path: "review".into(),
+            prompt_version: "review".into(),
+            model: "deepseek-pro".into(),
+            generation_mode: GenerationMode::standard(0.0).unwrap(),
+            max_output_tokens: 100,
+            input_usd_per_million_tokens: "1".into(),
+            cached_input_usd_per_million_tokens: "1".into(),
+            output_usd_per_million_tokens: "1".into(),
+        },
+        enabled_accounts: vec![],
+        encryption_key_file_env: "TEST".into(),
+        model: "deepseek-flash".into(),
+        generation_mode: GenerationMode::standard(0.3).unwrap(),
+        context_tokens: 10000,
+        framing_tokens_per_message: 64,
+        framing_tokens_base: 128,
+        max_output_tokens: 1000,
+        max_input_bytes: 8000,
+        max_message_bytes: 4000,
+        max_response_bytes: 10000,
+        request_timeout_seconds: 10,
+        connect_timeout_seconds: 1,
+        workers: 1,
+        poll_milliseconds: 10,
+        lease_seconds: 30,
+        input_usd_per_million_tokens: "1".into(),
+        cached_input_usd_per_million_tokens: "1".into(),
+        output_usd_per_million_tokens: "1".into(),
+    }
+}
+#[tokio::test]
+async fn paragraph_translation_uses_shared_transport_json_flash_and_exact_source() {
+    let config = translation_config();
+    let payload = serde_json::json!({"translation":"Диск.","segments":[{"kind":"word","source":"磁盘","pinyin":"cípán","translation":"диск"},{"kind":"literal","source":"。"}]});
+    let response = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":payload.to_string()}}],"usage":{"prompt_tokens":10,"completion_tokens":20,"prompt_cache_hit_tokens":2,"prompt_cache_miss_tokens":8}});
+    let (adapter, requests) = provider(response.to_string(), StatusCode::OK);
+    let (result, usage) = adapter
+        .translate(
+            "test-key",
+            TranslationInput::new(&config, "磁盘。").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.source(), "磁盘。");
+    assert_eq!(usage.completion_tokens, 20);
+    {
+        let req = requests.lock().unwrap();
+        assert_eq!(req.len(), 1);
+        assert_eq!(req[0].url.host_str(), Some("api.deepseek.com"));
+        let body: serde_json::Value =
+            serde_json::from_slice(req[0].body.as_ref().unwrap()).unwrap();
+        assert_eq!(body["model"], "deepseek-flash");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["thinking"]["type"], "disabled");
+        let source: serde_json::Value =
+            serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+        assert_eq!(source["paragraph"], "磁盘。");
+    }
+    let (adapter, _) = provider(response.to_string(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(matches!(
+        adapter
+            .translate(
+                "test-key",
+                TranslationInput::new(&config, "磁盘。").unwrap()
+            )
+            .await,
+        Err(AiError::RateLimit)
+    ));
+    let (adapter, _) = provider(response.to_string(), StatusCode::OK);
+    assert!(matches!(
+        adapter
+            .translate(
+                "test-key",
+                TranslationInput::new(&config, "另一个段落").unwrap()
+            )
+            .await,
+        Err(AiError::Protocol)
+    ));
+    let mut truncated = response.clone();
+    truncated["choices"][0]["finish_reason"] = serde_json::json!("length");
+    let (adapter, _) = provider(truncated.to_string(), StatusCode::OK);
+    assert!(matches!(
+        adapter
+            .translate(
+                "test-key",
+                TranslationInput::new(&config, "磁盘。").unwrap()
+            )
+            .await,
+        Err(AiError::Context)
+    ));
+}
+#[test]
+fn paragraph_input_limits_fail_before_provider_without_truncation() {
+    let mut c = translation_config();
+    assert!(TranslationInput::new(&c, "").is_err());
+    c.max_message_bytes = 3;
+    assert!(TranslationInput::new(&c, "磁盘").is_err());
+    c.max_message_bytes = 4000;
+    c.max_input_bytes = 10;
+    assert!(TranslationInput::new(&c, "磁盘").is_err());
+    c.max_input_bytes = 8000;
+    c.context_tokens = 1100;
+    assert!(TranslationInput::new(&c, "磁盘").is_err());
+    c.context_tokens = 10000;
+    c.model = "".into();
+    assert!(TranslationInput::new(&c, "磁盘").is_err());
+}

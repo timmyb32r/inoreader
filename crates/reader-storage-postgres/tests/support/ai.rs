@@ -11,6 +11,8 @@ use std::sync::{
 };
 use uuid::Uuid;
 
+#[path = "ai_translation.rs"]
+mod translation;
 #[path = "ai_two_stage.rs"]
 mod two_stage;
 
@@ -21,6 +23,13 @@ struct Provider {
 }
 #[async_trait]
 impl AiProvider for Provider {
+    async fn translate(
+        &self,
+        _: &str,
+        _: TranslationInput,
+    ) -> Result<(ParagraphTranslation, Usage), AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn balance(&self, key: &str) -> Result<Balance, AiError> {
         if key == "bad" {
             return Err(AiError::InvalidKey);
@@ -556,6 +565,7 @@ pub async fn verify(pool: &PgPool) {
         .execute(pool)
         .await
         .unwrap();
+    translation::verify(pool, store.clone(), owner, other, ws, a).await;
     let thinking = changed_service
         .start(owner, ws, a, Uuid::new_v4(), true)
         .await

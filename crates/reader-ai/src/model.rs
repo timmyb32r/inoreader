@@ -341,6 +341,27 @@ pub struct Usage {
 
 #[async_trait]
 pub trait AiStore: Send + Sync {
+    async fn translations(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Vec<crate::ParagraphJob>, AiError>;
+    async fn create_translation(
+        &self,
+        record: crate::TranslationRecord,
+    ) -> Result<crate::ParagraphJob, AiError>;
+    async fn claim_translation(
+        &self,
+        lease_seconds: u64,
+    ) -> Result<Option<crate::ClaimedTranslation>, AiError>;
+    async fn finish_translation(
+        &self,
+        claim: &crate::ClaimedTranslation,
+        state: crate::TranslationState,
+        usage: Option<Usage>,
+    ) -> Result<(), AiError>;
+
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError>;
     async fn profile(
         &self,
@@ -415,6 +436,12 @@ pub trait AiStore: Send + Sync {
 
 #[async_trait]
 pub trait AiProvider: Send + Sync {
+    async fn translate(
+        &self,
+        key: &str,
+        input: crate::TranslationInput,
+    ) -> Result<(crate::ParagraphTranslation, Usage), AiError>;
+
     async fn balance(&self, key: &str) -> Result<Balance, AiError>;
     async fn generate(
         &self,

@@ -18,7 +18,7 @@ pub const TRANSPORT_INSTRUCTION: &str =
     include_str!("../../../prompts/reading-data-news/transport.md");
 
 pub struct DeepSeekProvider<R, T, O> {
-    http: OutboundHttpClient<R, T, O>,
+    pub(crate) http: OutboundHttpClient<R, T, O>,
     cancellation_poll: Duration,
 }
 impl<R, T, O> DeepSeekProvider<R, T, O> {
@@ -36,7 +36,11 @@ impl<R, T, O> DeepSeekProvider<R, T, O> {
     }
 }
 
-fn request(path: &str, key: &str, body: Option<Value>) -> Result<PreparedRequest, AiError> {
+pub(crate) fn request(
+    path: &str,
+    key: &str,
+    body: Option<Value>,
+) -> Result<PreparedRequest, AiError> {
     if key.is_empty() {
         return Err(AiError::InvalidKey);
     }
@@ -69,7 +73,7 @@ fn request(path: &str, key: &str, body: Option<Value>) -> Result<PreparedRequest
     })
 }
 
-fn check_status(status: StatusCode) -> Result<(), AiError> {
+pub(crate) fn check_status(status: StatusCode) -> Result<(), AiError> {
     if status.is_success() {
         return Ok(());
     }
@@ -90,6 +94,14 @@ where
     T: OutboundTransport + 'static,
     O: ExternalRequestObserver + 'static,
 {
+    async fn translate(
+        &self,
+        key: &str,
+        input: crate::TranslationInput,
+    ) -> Result<(crate::ParagraphTranslation, Usage), AiError> {
+        self.translate_paragraph(key, input).await
+    }
+
     async fn balance(&self, key: &str) -> Result<Balance, AiError> {
         let mut response = self
             .http

@@ -12,8 +12,16 @@ use uuid::Uuid;
 use crate::PostgresRepository;
 
 mod calls;
+mod translations;
 
 pub const SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS ai_translations (
+    id UUID PRIMARY KEY, owner UUID NOT NULL, workspace UUID NOT NULL, article UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL, document TEXT NOT NULL,
+    lease UUID, lease_until TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ai_translations_article ON ai_translations(owner,workspace,article,created_at DESC);
+CREATE INDEX IF NOT EXISTS ai_translations_pending ON ai_translations(status,created_at);
 CREATE TABLE IF NOT EXISTS ai_profiles (
     owner UUID PRIMARY KEY,
     encrypted_key BYTEA NOT NULL,
@@ -178,6 +186,32 @@ fn set_attempt(record: &mut ChatRecord, state: MessageStatus) -> Result<(), AiEr
 
 #[async_trait]
 impl AiStore for PostgresAiStore {
+    async fn translations(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+    ) -> Result<Vec<ParagraphJob>, AiError> {
+        self.list_translations(owner, workspace, article).await
+    }
+    async fn create_translation(&self, record: TranslationRecord) -> Result<ParagraphJob, AiError> {
+        self.insert_translation(record).await
+    }
+    async fn claim_translation(
+        &self,
+        lease_seconds: u64,
+    ) -> Result<Option<ClaimedTranslation>, AiError> {
+        self.lease_translation(lease_seconds).await
+    }
+    async fn finish_translation(
+        &self,
+        claim: &ClaimedTranslation,
+        state: TranslationState,
+        usage: Option<Usage>,
+    ) -> Result<(), AiError> {
+        self.complete_translation(claim, state, usage).await
+    }
+
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError> {
         sqlx::query_scalar("SELECT encrypted_key FROM ai_profiles WHERE owner=$1")
             .bind(owner)

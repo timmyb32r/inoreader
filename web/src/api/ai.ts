@@ -53,6 +53,8 @@ export function isChatActive(chat: ArticleChat | null): boolean {
 /** Keys are sent only in an explicit mutation body, never URLs or browser storage. */
 export class AiClient {
   constructor(private readonly transport: Transport) {}
+  translations = (workspaceId:string, articleId:string) => this.transport<ParagraphJob[]>(`/api/articles/${encodeURIComponent(articleId)}/translations?workspace_id=${encodeURIComponent(workspaceId)}`);
+  translate = (workspaceId:string, articleId:string, operationId:string, source:string) => this.transport<ParagraphJob>(`/api/articles/${encodeURIComponent(articleId)}/translations`,json("POST",{workspaceId,operationId,source}));
   profile = () => this.transport<AiProfile>("/api/ai/profile");
   saveKey = (apiKey: string) => this.transport<AiProfile>("/api/ai/profile", json("PUT", { apiKey }));
   removeKey = () => this.transport<AiProfile>("/api/ai/profile", { method: "DELETE" });
@@ -66,3 +68,7 @@ export class AiClient {
 }
 
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+export type TranslationSegment = { kind:"word"; source:string; pinyin:string|null; translation:string } | { kind:"literal"; source:string };
+export type ParagraphTranslation = {source:string; translation:string; segments:TranslationSegment[]};
+export type ParagraphJob = {id:string;workspaceId:string;articleId:string;source:string;model:string} & ({status:"queued"|"generating"}|{status:"completed";result:ParagraphTranslation}|{status:"failed";error:string});

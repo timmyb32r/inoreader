@@ -9,6 +9,10 @@ pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
             get(profile::<R>).put(save_key::<R>).delete(delete_key::<R>),
         )
         .route("/api/ai/balance", post(balance::<R>))
+        .route(
+            "/api/articles/{id}/translations",
+            get(translations::<R>).post(translate::<R>),
+        )
         .route("/api/articles/{id}/chat", post(start::<R>))
         .route("/api/articles/{id}/chats", get(versions::<R>))
         .route("/api/ai/chats/{id}", get(chat::<R>))
@@ -165,4 +169,39 @@ async fn stop<R: ReaderRepository + 'static>(
     csrf(&s, &headers)?;
     let owner = auth(&s, &headers).await?.account.id.as_uuid();
     Ok(Json(service(&s)?.stop(owner, id).await?))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TranslationRequest {
+    workspace_id: Uuid,
+    operation_id: Uuid,
+    source: String,
+}
+async fn translate<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Json(body): Json<TranslationRequest>,
+) -> Result<Json<reader_ai::ParagraphJob>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let owner = auth(&s, &headers).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .translate(owner, body.workspace_id, id, body.operation_id, body.source)
+            .await?,
+    ))
+}
+async fn translations<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<WorkspaceQuery>,
+) -> Result<Json<Vec<reader_ai::ParagraphJob>>, ApiFailure> {
+    let owner = auth(&s, &headers).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .translations(owner, query.workspace_id, id)
+            .await?,
+    ))
 }
