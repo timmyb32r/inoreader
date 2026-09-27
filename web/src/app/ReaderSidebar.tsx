@@ -130,9 +130,15 @@ export function ReaderSidebar({
       <div class="sidebar__section-title">
         <button
           class="sidebar__section-link"
+          aria-label={`Subscriptions ${subscriptions.length}`}
+          title={
+            sidebarCollapsed
+              ? `Subscriptions (${subscriptions.length})`
+              : undefined
+          }
           onClick={() => navigate("/subscriptions")}
         >
-          Subscriptions <em>{subscriptions.length}</em>
+          <span>Subscriptions</span> <em>{subscriptions.length}</em>
         </button>
         <button
           class="icon-button icon-button--small"

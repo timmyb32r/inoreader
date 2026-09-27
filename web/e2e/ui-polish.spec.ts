@@ -114,6 +114,59 @@ test("sidebar collapse spans its width and Settings keeps its target stable on h
   expect(await settings.boundingBox()).toEqual(settingsBefore);
 });
 
+test("collapsed subscription count opens the catalog and returns to the same reader", async ({
+  page,
+}) => {
+  await page.goto("/reader");
+  const subscriptions = page.getByRole("button", {
+    name: "Subscriptions 2",
+    exact: true,
+  });
+  await expect(subscriptions).toContainText("Subscriptions");
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(subscriptions).toBeVisible();
+  await expect(subscriptions.locator("span")).toBeHidden();
+  await expect(subscriptions.locator("em")).toHaveText("2");
+  await expect(subscriptions).toHaveCSS("border-radius", "50%");
+  const before = await subscriptions.boundingBox();
+  expect(before!.width).toBe(before!.height);
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  const settingsBefore = await settings.boundingBox();
+  for (const theme of ["light", "dark"]) {
+    if (theme === "dark")
+      await page.getByRole("button", { name: "Use dark theme" }).click();
+    await page.mouse.move(0, 0);
+    const idle = await subscriptions.evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    await subscriptions.hover();
+    await expect(subscriptions).not.toHaveCSS("background-color", idle);
+    const hover = await subscriptions.evaluate(
+      (el) => getComputedStyle(el).backgroundColor,
+    );
+    await page.mouse.down();
+    await expect(subscriptions).not.toHaveCSS("background-color", hover);
+    expect(await subscriptions.boundingBox()).toEqual(before);
+    expect(await settings.boundingBox()).toEqual(settingsBefore);
+    await page.mouse.up();
+    await expect(
+      page.getByRole("dialog", { name: "Subscriptions", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Close subscriptions" }).click();
+    await expect(page).toHaveURL("/reader");
+    await expect(subscriptions).toBeFocused();
+    expect(await subscriptions.boundingBox()).toEqual(before);
+    expect(await settings.boundingBox()).toEqual(settingsBefore);
+  }
+  await subscriptions.press("Enter");
+  await expect(
+    page.getByRole("dialog", { name: "Subscriptions", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Expand sidebar" }).click();
+  await expect(subscriptions.locator("span")).toBeVisible();
+});
+
 test("favicon is a real multi-resolution ICO served from the public path", async ({
   page,
   request,
