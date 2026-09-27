@@ -15,7 +15,13 @@ impl reader_server::FeedDiscovery for NoDiscovery {
     async fn preview_web_feed(
         &self,
         _: &reader_server_contracts::WebFeedRecipeDraft,
-    ) -> Result<reader_server_contracts::FeedPreviewResponse, String> {
+    ) -> Result<
+        (
+            reader_server_contracts::FeedPreviewResponse,
+            reader_core::PreparedWebFeed,
+        ),
+        String,
+    > {
         Err("No network in acceptance fixture".into())
     }
 }

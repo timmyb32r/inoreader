@@ -57,6 +57,7 @@ struct StoreStub {
     record: Option<SourceRecord>,
     targets: Vec<DeliveryTarget>,
     polls: Mutex<Vec<PollCommit>>,
+    pending: Mutex<Option<PollCommit>>,
     deliveries: Mutex<Vec<DeliveryCommit>>,
     manifests: Mutex<Vec<ContentRevision>>,
     refresh_failures: Mutex<Vec<SourceRecordId>>,
@@ -99,6 +100,9 @@ impl IngestStore for StoreStub {
     }
     async fn source_validators(&self, _: SourceId) -> Result<CacheValidators, StoreError> {
         Ok(self.validators.clone())
+    }
+    async fn pending_poll(&self, _: SourceId, _: usize) -> Result<Option<PollCommit>, StoreError> {
+        Ok(self.pending.lock().unwrap().take())
     }
     async fn active_delivery_count(&self, _: SourceId) -> Result<u64, StoreError> {
         Ok(self.active)
@@ -226,6 +230,7 @@ fn store(source: SourceDefinition) -> StoreStub {
         record: None,
         targets: vec![],
         polls: Mutex::new(vec![]),
+        pending: Mutex::new(None),
         deliveries: Mutex::new(vec![]),
         manifests: Mutex::new(vec![]),
         refresh_failures: Mutex::new(vec![]),
@@ -272,9 +277,35 @@ async fn initial_poll_persists_only_the_configured_visible_depth() {
         .handle(&lease(WorkItem::PollSource { source_id }), now())
         .await
         .unwrap();
-    let polls = store.polls.lock().unwrap();
-    assert_eq!(polls[0].records.len(), 1);
-    assert_eq!(polls[0].records[0].record.key().title, "A");
+    let mut pending = {
+        let polls = store.polls.lock().unwrap();
+        assert_eq!(polls[0].records.len(), 1);
+        assert_eq!(polls[0].records[0].record.key().title, "A");
+        assert_eq!(polls[0].remainder.len(), 1);
+        assert_eq!(polls[0].remainder[0].record.key().title, "B");
+        polls[0].clone()
+    };
+    pending.records = std::mem::take(&mut pending.remainder);
+    pending.incomplete = false;
+    *store.pending.lock().unwrap() = Some(pending);
+    let conditional = fetch(Ok(FetchedPage {
+        final_url: Url::parse("https://example.test/feed").unwrap(),
+        content_type: None,
+        body: vec![],
+        validators: Default::default(),
+        not_modified: true,
+    }));
+    worker(
+        store.clone(),
+        conditional.clone(),
+        BrowserCapability::Degraded,
+        1,
+    )
+    .handle(&lease(WorkItem::PollSource { source_id }), now())
+    .await
+    .unwrap();
+    assert_eq!(conditional.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(store.polls.lock().unwrap()[1].records[0].key().title, "B");
 }
 
 #[tokio::test]
@@ -327,6 +358,7 @@ async fn fanout_preserves_the_exact_url_title_description_key() {
     let source = source();
     let source_id = source.id();
     let parsed = reader_collectors::ParsedRecord {
+        description_media_type: Some("text/plain".into()),
         upstream_id: "one".into(),
         original_url: "/same".into(),
         absolute_url: Some(Url::parse("https://example.test/same").unwrap()),
@@ -482,6 +514,7 @@ async fn web_feed_initial_depth_is_marked_incomplete_and_refresh_uses_browser_pa
                 SourceRecordId::new(),
                 source_id,
                 reader_collectors::ParsedRecord {
+                    description_media_type: Some("text/plain".into()),
                     upstream_id: format!("item-{index}"),
                     original_url: format!("/item-{index}"),
                     absolute_url: Some(

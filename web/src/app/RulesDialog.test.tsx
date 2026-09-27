@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { render, screen, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { ApiClient, type Transport } from "../api/client";
@@ -13,23 +14,31 @@ function setup(options: SetupOptions = {}) {
   const statusPromise = new Promise((resolve) => {
     resolveStatus = resolve;
   });
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     const body = init?.body
       ? (JSON.parse(String(init.body)) as Record<string, unknown>)
       : undefined;
     calls.push({ path, body });
-    if (path.startsWith("/api/rules?") && !init?.method) return [] as T;
+    if (path.startsWith("/api/rules?") && !init?.method)
+      return [] as unknown as ResponseValue<C>;
     if (path.startsWith("/api/rules/preview"))
       return {
         matchedArticles: 7,
         sharedArticles: 3,
         totalSubscriptionArticles: 12,
         sampleArticleIds: ["article-a", "article-b"],
-      } as T;
+      } as unknown as ResponseValue<C>;
     if (path.startsWith("/api/rules/") && path.includes("/apply"))
-      return { operationId: "operation", status: "queued" } as T;
+      return {
+        operationId: "operation",
+        status: "queued",
+      } as unknown as ResponseValue<C>;
     if (path.startsWith("/api/rule-applications/")) {
-      if (options.holdStatus) return (await statusPromise) as T;
+      if (options.holdStatus)
+        return (await statusPromise) as unknown as ResponseValue<C>;
       return {
         operationId: "operation",
         status: options.finalStatus ?? "completed",
@@ -38,11 +47,11 @@ function setup(options: SetupOptions = {}) {
           options.finalStatus === "cancelled"
             ? "rule version changed"
             : undefined,
-      } as T;
+      } as unknown as ResponseValue<C>;
     }
     if (path.startsWith("/api/rules") && init?.method === "POST")
-      return { ...body, id: "rule" } as T;
-    return undefined as T;
+      return { ...body, id: "rule" } as unknown as ResponseValue<C>;
+    return undefined as unknown as ResponseValue<C>;
   };
   const client = new ApiClient(transport);
   const view = render(

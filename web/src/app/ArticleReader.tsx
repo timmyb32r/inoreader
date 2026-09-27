@@ -2,6 +2,7 @@ import { useState } from "preact/hooks";
 import "../ai/deepseek.css";
 import type { AiClient } from "../api/ai";
 import { ParagraphReader } from "../translation/ParagraphReader";
+import { AsyncButton } from "../ui/AsyncButton";
 import { Icon, type IconName } from "../ui/Icon";
 import { formatArticleDate } from "../ui/formatArticleDate";
 import type { Article } from "./data";
@@ -37,7 +38,6 @@ export function ArticleReader({
   workspaceId: string;
   translationEnabled: boolean;
 }) {
-  const [refreshing, setRefreshing] = useState(false);
   const [translating, setTranslating] = useState(false);
   return (
     <article class={`article-reader ${className}`} aria-label="Article reader">
@@ -172,19 +172,12 @@ export function ArticleReader({
               <span>!</span> Full text was unavailable
               {article.fullTextReason ? ` (${article.fullTextReason})` : ""}.
               The source excerpt is preserved.{" "}
-              <button
-                disabled={refreshing}
-                onClick={() => {
-                  if (refreshing) return;
-                  setRefreshing(true);
-                  onRefresh()
-                    .then(() => onNotice("Full-text refresh queued"))
-                    .catch((error: Error) => onNotice(error.message))
-                    .finally(() => setRefreshing(false));
-                }}
+              <AsyncButton
+                onPress={onRefresh}
+                onError={(error) => onNotice((error as Error).message)}
               >
-                {refreshing ? "Queuing…" : "Try again"}
-              </button>
+                Try again
+              </AsyncButton>
             </div>
           )}
           {article.fullText === "pending" && (

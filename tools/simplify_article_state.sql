@@ -22,16 +22,6 @@ UPDATE articles SET
     revision = revision+1
 WHERE (document::jsonb->'state') ?| ARRAY['saved','trashed','protect_restored'];
 
-UPDATE library_dedup SET
-    document = jsonb_set(jsonb_set(document::jsonb, '{state}',
-        ((document::jsonb->'state') - 'saved' - 'trashed' - 'protect_restored') ||
-        jsonb_build_object(
-            'read', (document::jsonb #>> '{state,read}')::boolean OR COALESCE((document::jsonb #>> '{state,trashed}')::boolean,false),
-            'later', (document::jsonb #>> '{state,later}')::boolean OR COALESCE((document::jsonb #>> '{state,saved}')::boolean,false)
-        )), '{revision}', to_jsonb(revision+1))::text,
-    revision = revision+1
-WHERE (document::jsonb->'state') ?| ARRAY['saved','trashed','protect_restored'];
-
 DO $$ BEGIN
     IF (SELECT articles FROM article_inventory) <> (SELECT COUNT(*) FROM articles)
        OR (SELECT dedup FROM article_inventory) <> (SELECT COUNT(*) FROM library_dedup) THEN

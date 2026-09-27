@@ -2,6 +2,7 @@ use super::*;
 
 fn parsed(id: &str, title: &str, description: Option<&str>, html: Option<&str>) -> ParsedRecord {
     ParsedRecord {
+        description_media_type: Some("text/plain".into()),
         upstream_id: id.into(),
         original_url: "https://example.test/a".into(),
         absolute_url: Some(Url::parse("https://example.test/a").unwrap()),
@@ -113,16 +114,16 @@ fn revision_cannot_silently_replace_upstream_identity() {
 fn selector_language_and_loading_are_validated_before_execution() {
     assert_eq!(
         WebSelector::new(SelectorLanguage::Css, "[".into()).unwrap_err(),
-        ModelError::InvalidSelector
+        reader_core::WebFeedError::InvalidSelector
     );
     assert_eq!(
         WebSelector::new(SelectorLanguage::XPath, "article".into()).unwrap_err(),
-        ModelError::InvalidSelector
+        reader_core::WebFeedError::InvalidSelector
     );
     let xpath = WebSelector::new(SelectorLanguage::XPath, "//article".into()).unwrap();
     assert_eq!(
         WebFeedRecipe::advanced(xpath, WebLoading::Static, WebFeedActions::default()).unwrap_err(),
-        ModelError::XPathRequiresBrowser
+        reader_core::WebFeedError::XPathRequiresBrowser
     )
 }
 
@@ -142,11 +143,11 @@ fn action_and_page_limits_reject_oversized_recipe() {
             3
         )
         .unwrap_err(),
-        ModelError::LimitExceeded("start_pages")
+        reader_core::WebFeedError::LimitExceeded("start_pages")
     );
     assert_eq!(
         WebFeedActions::new(WebViewport::Desktop, vec![], vec![], None, None, 2, 2, 2, 3)
             .unwrap_err(),
-        ModelError::LimitExceeded("actions")
+        reader_core::WebFeedError::LimitExceeded("actions")
     )
 }

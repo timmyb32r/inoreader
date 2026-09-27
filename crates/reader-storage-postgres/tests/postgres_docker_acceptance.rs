@@ -19,11 +19,18 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/schema_upgrade.rs"]
+mod schema_upgrade;
+
 #[path = "support/ai.rs"]
 mod ai_tests;
 #[path = "support/glossary.rs"]
 mod glossary_tests;
 
+#[path = "support/admission.rs"]
+mod admission;
+#[path = "support/article_delivery.rs"]
+mod article_delivery;
 #[path = "support/browser.rs"]
 mod browser_tests;
 #[path = "support/bulk_read.rs"]
@@ -130,6 +137,16 @@ impl Drop for PostgresContainer {
 
 #[tokio::test]
 async fn real_postgres_creates_the_complete_idempotent_schema() {
+    if let Ok(connection) = std::env::var("READER_SHUTDOWN_FIXTURE_DATABASE") {
+        ai_tests::shutdown::child(
+            &connection,
+            std::env::var_os("READER_SHUTDOWN_FIXTURE_MARKER")
+                .unwrap()
+                .into(),
+        )
+        .await;
+        return;
+    }
     let container = PostgresContainer::start();
     let connection = container.connection_string();
     let pool = connect_when_ready(&connection)
@@ -141,24 +158,6 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
             )
         });
 
-    sqlx::query(
-        "CREATE TABLE library_dedup (\
-            workspace_id TEXT NOT NULL, dedup_key TEXT NOT NULL, article_id TEXT NOT NULL,\
-            revision BIGINT NOT NULL, document TEXT NOT NULL,\
-            PRIMARY KEY (workspace_id, dedup_key))",
-    )
-    .execute(&pool)
-    .await
-    .expect("create legacy dedup table");
-    sqlx::query(
-        "INSERT INTO library_dedup \
-         (workspace_id, dedup_key, article_id, revision, document) \
-         VALUES ('legacy-workspace', 'legacy-key', 'legacy-article', 0, '{}')",
-    )
-    .execute(&pool)
-    .await
-    .expect("insert legacy dedup row");
-
     prepare_schema(&pool)
         .await
         .expect("prepare PostgreSQL schema");
@@ -167,21 +166,13 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
         .expect("prepare PostgreSQL schema a second time");
 
     read_projection::verify(&pool).await;
-
-    let migrated_key: String = sqlx::query_scalar(
-        "SELECT dedup_key FROM library_dedup \
-         WHERE workspace_id = 'legacy-workspace' AND dedup_hash IS NOT NULL",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("read migrated dedup row");
-    assert_eq!(migrated_key, "legacy-key");
+    schema_upgrade::verify(&pool).await;
 
     let oversized_key = "x".repeat(20_000);
     sqlx::query(
         "INSERT INTO library_dedup \
-         (workspace_id, dedup_hash, dedup_key, article_id, revision, document) \
-         VALUES ($1, $2, $3, $4, 0, '{}')",
+         (workspace_id, dedup_hash, dedup_key, article_id) \
+         VALUES ($1, $2, $3, $4)",
     )
     .bind("large-workspace")
     .bind("00000000000000000000000000000000")
@@ -208,7 +199,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 45); // Includes channel raw events and glossary projections.
+    assert_eq!(table_count, 47); // Includes channel raw events and glossary projections.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -273,8 +264,11 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
     ai_tests::verify(&pool).await;
+    ai_tests::shutdown::parent(&connection);
     glossary_tests::verify(&pool).await;
     bulk_read::verify(&pool).await;
+    article_delivery::verify(&pool).await;
+    admission::verify(&pool).await;
     browser_tests::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
 }
@@ -303,8 +297,6 @@ async fn verify_article_state_conversion(pool: &PgPool) {
         .execute(pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO library_dedup(workspace_id,dedup_hash,dedup_key,article_id,revision,document) VALUES($1,'state-conversion','key',$2,0,$3)")
-        .bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).bind(document.to_string()).execute(pool).await.unwrap();
     sqlx::raw_sql(include_str!("../../../tools/simplify_article_state.sql"))
         .execute(pool)
         .await
@@ -315,13 +307,6 @@ async fn verify_article_state_conversion(pool: &PgPool) {
     assert!(converted.state.read && converted.state.later);
     assert_eq!(converted.key, article.key);
     assert_eq!(converted.first_arrived_at, article.first_arrived_at);
-    let copy: String =
-        sqlx::query_scalar("SELECT document FROM library_dedup WHERE workspace_id=$1")
-            .bind(workspace.as_uuid().to_string())
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(serde_json::from_str::<Article>(&copy).unwrap(), converted);
     let request = |view: &str| {
         reader_application::ArticlePageRequest::new(
             reader_application::ArticleScope::from_wire(view, None).unwrap(),

@@ -298,7 +298,7 @@ impl crate::SubscriptionRepository for Repository {
     async fn save_web_feed_subscription(
         &self,
         _: Subscription,
-        _: String,
+        _: reader_core::PreparedWebFeed,
     ) -> Result<(), RepositoryError> {
         unused()
     }
@@ -309,7 +309,7 @@ impl crate::SubscriptionRepository for Repository {
         &self,
         _: SubscriptionId,
         _: u64,
-        _: String,
+        _: reader_core::PreparedWebFeed,
     ) -> Result<u64, RepositoryError> {
         unused()
     }

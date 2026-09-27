@@ -111,7 +111,8 @@ fn spa_auth_links_resolve_to_embedded_index_without_masking_api_or_assets() {
 #[test]
 fn web_feed_draft_preserves_extraction_and_validated_page_depth() {
     let draft:WebFeedRecipeDraft=serde_json::from_value(serde_json::json!({"workspaceId":uuid::Uuid::new_v4(),"url":"https://example.test/news","selector":"a.story","loading":"browser","preview":true,"selectorLanguage":"css","viewport":"desktop","listingUrl":"https://example.test/archive","cardSelector":"article.card","titleSelector":"h2","dateSelector":"time","contentSelector":".body","waitSelector":"main","urlPattern":"/story/","maxPages":3,"nextPage":{"language":"css","expression":"a.next"}})).unwrap();
-    let recipe = recipe_from_draft(&draft, 5, 20).unwrap();
+    let prepared = reader_core::PreparedWebFeed::new(draft.clone(), 5, 20).unwrap();
+    let recipe = prepared.recipe();
     assert_eq!(recipe.max_pages(), 3);
     assert_eq!(
         recipe.extraction().card_selector().unwrap().expression(),
@@ -125,5 +126,5 @@ fn web_feed_draft_preserves_extraction_and_validated_page_depth() {
         recipe.extraction().listing_url().unwrap().as_str(),
         "https://example.test/archive"
     );
-    assert!(recipe_from_draft(&draft, 2, 20).is_err());
+    assert!(reader_core::PreparedWebFeed::new(draft, 2, 20).is_err());
 }

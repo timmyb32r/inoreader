@@ -49,3 +49,22 @@ it("rejects wrong no-content and scalar responses", () => {
   expect(decodeResponse("empty", undefined)).toBeUndefined();
   expect(decodeResponse("string", "exact document")).toBe("exact document");
 });
+
+it("derives response types from the selected runtime contract", () => {
+  const value = decodeResponse("string", "exact");
+  expectTypeOf(value).toEqualTypeOf<string>();
+  expectTypeOf(decodeResponse("empty", undefined)).toEqualTypeOf<void>();
+  const check = (transport: import("./client").Transport) => {
+    const result = transport("/test", undefined, "ArticleView");
+    expectTypeOf(result).toEqualTypeOf<
+      Promise<import("./generated").ArticleView>
+    >();
+    // @ts-expect-error A caller cannot select an unrelated return type.
+    transport<import("./generated").AiProfile>(
+      "/test",
+      undefined,
+      "ArticleView",
+    );
+  };
+  expect(typeof check).toBe("function");
+});

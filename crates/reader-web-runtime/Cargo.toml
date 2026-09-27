@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+scraper = "0.24"
 ammonia = "4"
 async-trait = "0.1"
 bytes = "1"

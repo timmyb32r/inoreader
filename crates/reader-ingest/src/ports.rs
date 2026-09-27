@@ -112,6 +112,13 @@ pub trait IngestStore: Send + Sync {
     async fn source(&self, id: SourceId) -> Result<SourceDefinition, StoreError>;
     async fn has_committed_poll(&self, source: SourceId) -> Result<bool, StoreError>;
     async fn source_validators(&self, source: SourceId) -> Result<CacheValidators, StoreError>;
+    /// Read a bounded continuation before contacting the source. Returned rows
+    /// are acknowledged only by the fenced commit_poll transaction.
+    async fn pending_poll(
+        &self,
+        source: SourceId,
+        limit: usize,
+    ) -> Result<Option<PollCommit>, StoreError>;
     async fn active_delivery_count(&self, source: SourceId) -> Result<u64, StoreError>;
     async fn commit_poll(&self, lease: &LeasedWork, commit: PollCommit) -> Result<(), StoreError>;
     async fn record_source_success(

@@ -2721,6 +2721,9 @@ name = "reader-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
+ "schemars 1.2.2",
+ "scraper",
  "serde",
  "serde_json",
  "thiserror",
@@ -2812,6 +2815,7 @@ name = "reader-server-contracts"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "reader-core",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -2864,6 +2868,7 @@ dependencies = [
  "futures-util",
  "http",
  "reqwest 0.12.28",
+ "scraper",
  "thiserror",
  "tokio",
  "url",

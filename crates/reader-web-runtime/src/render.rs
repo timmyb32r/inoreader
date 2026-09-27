@@ -188,3 +188,44 @@ impl SandboxContract {
 
 #[cfg(test)]
 mod tests;
+
+/// Explicit display projection of sanitized markup. Source bytes stay in storage;
+/// block boundaries become spaces and HTML entities are decoded by the parser.
+pub fn plain_text(html: &str) -> String {
+    fn visit(element: scraper::ElementRef<'_>, output: &mut String) {
+        for node in element.children() {
+            if let Some(text) = node.value().as_text() {
+                output.push_str(text);
+            } else if let Some(child) = scraper::ElementRef::wrap(node) {
+                let block = matches!(
+                    child.value().name(),
+                    "p" | "div"
+                        | "br"
+                        | "li"
+                        | "h1"
+                        | "h2"
+                        | "h3"
+                        | "h4"
+                        | "h5"
+                        | "h6"
+                        | "tr"
+                        | "td"
+                        | "section"
+                        | "article"
+                        | "blockquote"
+                );
+                if block {
+                    output.push(' ');
+                }
+                visit(child, output);
+                if block {
+                    output.push(' ');
+                }
+            }
+        }
+    }
+    let parsed = scraper::Html::parse_fragment(html);
+    let mut output = String::new();
+    visit(parsed.root_element(), &mut output);
+    output.split_whitespace().collect::<Vec<_>>().join(" ")
+}

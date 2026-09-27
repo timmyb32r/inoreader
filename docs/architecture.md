@@ -104,3 +104,7 @@ key is backed up separately and must never be regenerated over an existing key.
 Restore targets a separate database and preserves primary rows exactly. Derived
 counters may be rebuilt only after primary verification. The application never
 falls back to files or memory when its database is unavailable.
+
+The [third audit implementation](architecture/consistency-2026-09-27.md) records
+current article identity/history, durable backfill, atomic content snapshots,
+typed recipe/transport boundaries, graceful AI drain and bounded maintenance work.

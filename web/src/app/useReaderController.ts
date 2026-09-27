@@ -31,6 +31,7 @@ export function useReaderController(
     [],
   );
   const [pageGeneration, setPageGeneration] = useState(0);
+  const [contentGeneration, setContentGeneration] = useState(0);
   const [view, setView] = useState<View>(initialPagePosition.view);
   const [articles, setArticles] = useState<Article[]>(
     bootstrap.articlePage.articles,
@@ -48,10 +49,10 @@ export function useReaderController(
     bootstrap.articlePage.unreadTotal,
   );
   const [newerCursor, setNewerCursor] = useState<string | undefined>(
-    bootstrap.articlePage.newerCursor,
+    bootstrap.articlePage.newerCursor ?? undefined,
   );
   const [olderCursor, setOlderCursor] = useState<string | undefined>(
-    bootstrap.articlePage.olderCursor,
+    bootstrap.articlePage.olderCursor ?? undefined,
   );
   const [pageNumber, setPageNumber] = useState(initialPagePosition.batch);
   const [paging, setPaging] = useState(false);
@@ -127,7 +128,40 @@ export function useReaderController(
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [client, workspaceId, selected?.id, pageGeneration]);
+  }, [client, workspaceId, selected?.id, pageGeneration, contentGeneration]);
+
+  const refreshFullText = (id: string): Promise<void> => {
+    const key = `${workspaceId}/${id}:fulltext`;
+    const existing = mutationQueue.current.get(key);
+    if (existing) return existing;
+    const scope = epoch.current;
+    writeVersion.current++;
+    mutationGeneration.current.set(
+      id,
+      (mutationGeneration.current.get(id) ?? 0) + 1,
+    );
+    pending.current.add(`${id}:fulltext`);
+    setPendingArticleMutations(new Set(pending.current));
+    const request = client
+      .refreshFullText(workspaceId, id)
+      .then(() => {
+        if (scope === epoch.current) setContentGeneration((value) => value + 1);
+      })
+      .finally(() => {
+        mutationQueue.current.delete(key);
+        if (scope === epoch.current) {
+          pending.current.delete(`${id}:fulltext`);
+          setPendingArticleMutations(new Set(pending.current));
+        }
+      });
+    mutationQueue.current.set(key, request);
+    const tracked = request.catch(() => {});
+    inFlightWrites.current.add(tracked);
+    void request
+      .finally(() => inFlightWrites.current.delete(tracked))
+      .catch(() => {});
+    return request;
+  };
 
   const update = (
     id: string,
@@ -168,7 +202,7 @@ export function useReaderController(
                     ...Object.fromEntries(
                       Object.keys(patch).map((key) => [
                         key,
-                        saved[key as keyof Article],
+                        saved[key as keyof typeof patch],
                       ]),
                     ),
                   }
@@ -231,8 +265,8 @@ export function useReaderController(
     setSelectedId(page.articles[0]?.id ?? "");
     setPageTotal(page.total);
     setUnreadTotal(page.unreadTotal);
-    setNewerCursor(page.newerCursor);
-    setOlderCursor(page.olderCursor);
+    setNewerCursor(page.newerCursor ?? undefined);
+    setOlderCursor(page.olderCursor ?? undefined);
     setPageNumber(batch);
   };
   const loadPage = async (
@@ -382,5 +416,6 @@ export function useReaderController(
     markAllRead,
     replaceWorkspace,
     waitForWrites,
+    refreshFullText,
   };
 }

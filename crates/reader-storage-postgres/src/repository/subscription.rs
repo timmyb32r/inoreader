@@ -338,10 +338,12 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
     async fn save_web_feed_subscription(
         &self,
         value: Subscription,
-        recipe_json: String,
+        prepared: reader_core::PreparedWebFeed,
     ) -> Result<(), RepositoryError> {
         value.validate(self.reason_policy).map_err(storage)?;
-        let (raw, recipe) = stored_web_recipe(&recipe_json)?;
+        let raw = prepared.draft();
+        let recipe_json = serde_json::to_string(raw).map_err(storage)?;
+        let recipe = prepared.recipe().clone();
         if raw.workspace_id != value.workspace_id().as_uuid()
             || raw.url != value.source_url().as_str()
         {
@@ -387,10 +389,12 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
         &self,
         subscription: SubscriptionId,
         expected: u64,
-        recipe_json: String,
+        prepared: reader_core::PreparedWebFeed,
     ) -> Result<u64, RepositoryError> {
         let value = self.subscription(subscription).await?;
-        let (raw, recipe) = stored_web_recipe(&recipe_json)?;
+        let raw = prepared.draft();
+        let recipe_json = serde_json::to_string(raw).map_err(storage)?;
+        let recipe = prepared.recipe().clone();
         if raw.workspace_id != value.workspace_id().as_uuid()
             || raw.url != value.source_url().as_str()
         {

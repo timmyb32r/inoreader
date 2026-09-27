@@ -1,10 +1,14 @@
+import type { ResponseContract, ResponseValue } from "./decode";
 import { ApiClient, type Transport } from "./client";
 
 it("uses the reserved server routes and exact request shapes", async () => {
   const calls: { path: string; init?: RequestInit }[] = [];
-  const transport: Transport = async <T>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({ path, init });
-    return { id: "created" } as T;
+    return { id: "created" } as unknown as ResponseValue<C>;
   };
   const client = new ApiClient(transport);
   await client.signIn("reader", "secret");
@@ -51,9 +55,12 @@ it("uses the reserved server routes and exact request shapes", async () => {
 
 it("exposes every account password flow with closed payloads", async () => {
   const calls: { path: string; body: unknown }[] = [];
-  const transport: Transport = async <T>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({ path, body: JSON.parse(String(init?.body ?? "null")) });
-    return undefined as T;
+    return undefined as unknown as ResponseValue<C>;
   };
   const client = new ApiClient(transport);
   await client.acceptInvite("token", "reader", "secret");
@@ -77,13 +84,16 @@ it("exposes every account password flow with closed payloads", async () => {
 
 it("uses explicit reversible subscription lifecycle routes", async () => {
   const calls: { path: string; method?: string; body: unknown }[] = [];
-  const transport: Transport = async <T>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({
       path,
       method: init?.method,
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     });
-    return { id: "sub" } as T;
+    return { id: "sub" } as unknown as ResponseValue<C>;
   };
   const client = new ApiClient(transport);
   await client.renameSubscription("sub", "\u6211\u7684\u8ba2\u9605");
@@ -103,13 +113,13 @@ it("uses explicit reversible subscription lifecycle routes", async () => {
 it("requires the article response contract for state mutations", async () => {
   const contracts: unknown[] = [];
   const client = new ApiClient(
-    async <T>(
+    async <C extends ResponseContract>(
       path: string,
       init: RequestInit | undefined,
       contract: import("./decode").ResponseContract,
     ) => {
       contracts.push(contract);
-      return undefined as T;
+      return undefined as unknown as ResponseValue<C>;
     },
   );
   await client.updateArticle("workspace", "article", { read: true });

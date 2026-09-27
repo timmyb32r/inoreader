@@ -225,3 +225,40 @@ it("restarts full-text polling when a refreshed page keeps the same selected art
   });
   expect(result.current.selected?.title).toBe("Fresh full text");
 });
+
+it("fulltext retry deduplicates writes and restarts a stopped content observer", async () => {
+  const client = mockClient(),
+    bootstrap = await client.bootstrap();
+  bootstrap.articlePage.articles = [{ ...articles[0], fullText: "failed" }];
+  const request = deferred<void>();
+  const refresh = vi
+    .spyOn(client, "refreshFullText")
+    .mockReturnValue(request.promise);
+  const get = vi
+    .spyOn(client, "getArticle")
+    .mockResolvedValue(bootstrap.articlePage.articles[0]);
+  const { result } = renderHook(() =>
+    useReaderController(client, bootstrap, [], vi.fn(), vi.fn()),
+  );
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  let accepted!: Promise<void>;
+  act(() => {
+    accepted = result.current.refreshFullText("1");
+    expect(result.current.refreshFullText("1")).toBe(accepted);
+  });
+  expect(result.current.pendingArticleMutations.has("1:fulltext")).toBe(true);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  get.mockResolvedValue({
+    ...articles[0],
+    fullText: "ready",
+    body: ["Fetched again"],
+  });
+  await act(async () => {
+    request.resolve();
+    await accepted;
+  });
+  await waitFor(() =>
+    expect(result.current.selected?.body).toEqual(["Fetched again"]),
+  );
+  expect(result.current.pendingArticleMutations.size).toBe(0);
+});

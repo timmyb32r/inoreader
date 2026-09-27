@@ -14,6 +14,7 @@ it("shows pending synchronously, preserves label footprint, deduplicates and rep
   fireEvent.click(button);
   fireEvent.click(button);
   expect(button).toHaveAttribute("aria-busy", "true");
+  expect(button).toHaveAccessibleName("Run");
   expect(button).toBeDisabled();
   expect(button).toHaveTextContent("Run");
   await waitFor(() => expect(press).toHaveBeenCalledTimes(1));

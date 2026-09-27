@@ -62,6 +62,7 @@ pub struct ArticlePresentation {
     pub subscription_ids: Vec<SubscriptionId>,
     pub subscription_titles: Vec<String>,
     pub safe_html: Option<String>,
+    pub description_media_type: Option<String>,
     pub full_text_status: ContentStatus,
     pub failure_reason: Option<String>,
 }
@@ -461,7 +462,7 @@ pub trait SubscriptionRepository: WorkspaceRepository {
     async fn save_web_feed_subscription(
         &self,
         value: Subscription,
-        recipe_json: String,
+        recipe: reader_core::PreparedWebFeed,
     ) -> Result<(), RepositoryError>;
     async fn web_feed_recipe(
         &self,
@@ -471,7 +472,7 @@ pub trait SubscriptionRepository: WorkspaceRepository {
         &self,
         subscription: SubscriptionId,
         expected_version: u64,
-        recipe_json: String,
+        recipe: reader_core::PreparedWebFeed,
     ) -> Result<u64, RepositoryError>;
     async fn import_subscriptions_atomic(
         &self,

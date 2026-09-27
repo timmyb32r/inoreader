@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { act, render, screen, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { ApiClient, type Bootstrap, type Transport } from "../api/client";
@@ -28,9 +29,13 @@ function recordingClient() {
       unreadTotal: articles.filter((a) => !a.read).length,
     },
   };
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({ path, init });
-    if (path.startsWith("/api/bootstrap")) return bootstrap as T;
+    if (path.startsWith("/api/bootstrap"))
+      return bootstrap as unknown as ResponseValue<C>;
     if (path.startsWith("/api/articles?"))
       return {
         articles: [
@@ -38,33 +43,40 @@ function recordingClient() {
         ],
         total: 1,
         unreadTotal: 1,
-      } as T;
-    if (path.startsWith("/api/subscriptions?")) return [] as T;
-    if (path.startsWith("/api/rules?")) return [] as T;
+      } as unknown as ResponseValue<C>;
+    if (path.startsWith("/api/subscriptions?"))
+      return [] as unknown as ResponseValue<C>;
+    if (path.startsWith("/api/rules?"))
+      return [] as unknown as ResponseValue<C>;
     if (path === "/api/opml/import")
-      return { preview_id: "preview", subscriptions: 2, warnings: [] } as T;
+      return {
+        preview_id: "preview",
+        subscriptions: 2,
+        warnings: [],
+      } as unknown as ResponseValue<C>;
     if (path === "/api/web-feeds/recipes") {
       const request = JSON.parse(String(init?.body));
-      return (
-        request.preview
-          ? {
-              title: "Preview",
-              kind: "rss",
-              url: "https://test",
-              articles: [{ title: "Actual selection" }],
-            }
-          : {
-              id: "web",
-              name: "Web",
-              count: 0,
-              status: "active",
-              lastUpdate: "now",
-            }
-      ) as T;
+      return (request.preview
+        ? {
+            title: "Preview",
+            kind: "rss",
+            url: "https://test",
+            articles: [{ title: "Actual selection" }],
+          }
+        : {
+            id: "web",
+            name: "Web",
+            count: 0,
+            status: "active",
+            lastUpdate: "now",
+          }) as unknown as ResponseValue<C>;
     }
     if (path.includes("/state"))
-      return { ...articles[0], ...JSON.parse(String(init?.body)) } as T;
-    return undefined as T;
+      return {
+        ...articles[0],
+        ...JSON.parse(String(init?.body)),
+      } as unknown as ResponseValue<C>;
+    return undefined as unknown as ResponseValue<C>;
   };
   return { client: new ApiClient(transport), calls };
 }
@@ -167,14 +179,16 @@ describe("workspace and subscription isolation", () => {
         unreadTotal: 1,
       },
     };
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
       calls.push({ path, init });
-      if (path.startsWith("/api/bootstrap")) return bootstrap as T;
-      if (path.startsWith("/api/articles?")) return bootstrap.articlePage as T;
-      return undefined as T;
+      if (path.startsWith("/api/bootstrap"))
+        return bootstrap as unknown as ResponseValue<C>;
+      if (path.startsWith("/api/articles?"))
+        return bootstrap.articlePage as unknown as ResponseValue<C>;
+      return undefined as unknown as ResponseValue<C>;
     };
     const user = userEvent.setup();
     render(<App client={new ApiClient(transport)} />);
@@ -222,14 +236,16 @@ describe("workspace and subscription isolation", () => {
         unreadTotal: 2,
       },
     };
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
       calls.push({ path, init });
-      if (path.startsWith("/api/bootstrap")) return bootstrap as T;
-      if (path.startsWith("/api/articles?")) return bootstrap.articlePage as T;
-      return undefined as T;
+      if (path.startsWith("/api/bootstrap"))
+        return bootstrap as unknown as ResponseValue<C>;
+      if (path.startsWith("/api/articles?"))
+        return bootstrap.articlePage as unknown as ResponseValue<C>;
+      return undefined as unknown as ResponseValue<C>;
     };
     const user = userEvent.setup();
     render(<App client={new ApiClient(transport)} />);
@@ -274,12 +290,14 @@ describe("subscription lifecycle", () => {
       ],
       articlePage: { articles: [], total: 0, unreadTotal: 0 },
     };
-    const transport: Transport = async <T,>(path: string) =>
+    const transport: Transport = async <C extends ResponseContract>(
+      path: string,
+    ) =>
       path.startsWith("/api/bootstrap")
-        ? (bootstrap as T)
+        ? (bootstrap as unknown as ResponseValue<C>)
         : path.startsWith("/api/articles?")
-          ? (bootstrap.articlePage as T)
-          : (undefined as T);
+          ? (bootstrap.articlePage as unknown as ResponseValue<C>)
+          : (undefined as unknown as ResponseValue<C>);
     const user = userEvent.setup();
     render(<App client={new ApiClient(transport)} />);
     await screen.findByRole("heading", { name: /^Feed \(\d+\)$/ });
@@ -320,28 +338,33 @@ describe("subscription lifecycle", () => {
         unreadTotal: 1,
       },
     };
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
       calls.push({ path, init });
-      if (path.startsWith("/api/bootstrap")) return bootstrap as T;
-      if (path.startsWith("/api/articles?")) return bootstrap.articlePage as T;
+      if (path.startsWith("/api/bootstrap"))
+        return bootstrap as unknown as ResponseValue<C>;
+      if (path.startsWith("/api/articles?"))
+        return bootstrap.articlePage as unknown as ResponseValue<C>;
       if (path === "/api/subscriptions/sub" && init?.method === "PATCH")
-        return { ...bootstrap.subscriptions[0], name: "Renamed" } as T;
+        return {
+          ...bootstrap.subscriptions[0],
+          name: "Renamed",
+        } as unknown as ResponseValue<C>;
       if (path === "/api/subscriptions/sub" && init?.method === "DELETE")
         return {
           ...bootstrap.subscriptions[0],
           name: "Renamed",
           status: "archived",
-        } as T;
+        } as unknown as ResponseValue<C>;
       if (path === "/api/subscriptions/sub/restore")
         return {
           ...bootstrap.subscriptions[0],
           name: "Renamed",
           status: "active",
-        } as T;
-      return undefined as T;
+        } as unknown as ResponseValue<C>;
+      return undefined as unknown as ResponseValue<C>;
     };
     const user = userEvent.setup();
     render(<App client={new ApiClient(transport)} />);

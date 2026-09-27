@@ -279,53 +279,7 @@ pub struct OpmlPreviewResponse {
     pub duplicates: usize,
     pub errors: Vec<String>,
 }
-#[derive(schemars::JsonSchema, Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SelectorDraft {
-    pub language: String,
-    pub expression: String,
-}
-#[derive(schemars::JsonSchema, Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WebFeedRecipeDraft {
-    pub workspace_id: Uuid,
-    pub url: String,
-    pub selector: String,
-    pub loading: String,
-    pub preview: Option<bool>,
-    #[serde(default)]
-    pub selector_language: Option<String>,
-    #[serde(default)]
-    pub viewport: Option<String>,
-    #[serde(default)]
-    pub listing_url: Option<String>,
-    #[serde(default)]
-    pub card_selector: Option<String>,
-    #[serde(default)]
-    pub title_selector: Option<String>,
-    #[serde(default)]
-    pub date_selector: Option<String>,
-    #[serde(default)]
-    pub content_selector: Option<String>,
-    #[serde(default)]
-    pub wait_selector: Option<String>,
-    #[serde(default)]
-    pub url_pattern: Option<String>,
-    #[serde(default)]
-    pub max_pages: Option<usize>,
-    #[serde(default)]
-    pub hide_overlays: Vec<SelectorDraft>,
-    #[serde(default)]
-    pub start_pages: Vec<String>,
-    #[serde(default)]
-    pub next_page: Option<SelectorDraft>,
-    #[serde(default)]
-    pub load_more: Option<SelectorDraft>,
-    #[serde(default)]
-    pub load_more_clicks: usize,
-    #[serde(default)]
-    pub scrolls: usize,
-}
+pub use reader_core::{SelectorDraft, WebFeedRecipeDraft};
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebFeedRecipeView {

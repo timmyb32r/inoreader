@@ -34,7 +34,7 @@ impl PostgresAiStore {
         article: Uuid,
     ) -> Result<Vec<ParagraphJob>, AiError> {
         owned_workspace(&self.pool, owner, workspace).await?;
-        let rows:Vec<TranslationRow>=sqlx::query_as("SELECT t.id,t.owner,t.workspace,t.article,t.document FROM ai_translations t JOIN workspaces w ON w.id=t.workspace::text WHERE t.owner=$1 AND t.workspace=$2 AND t.article=$3 AND w.document::jsonb->>'owner'=$1::text ORDER BY t.created_at DESC,t.id DESC")
+        let rows:Vec<TranslationRow>=sqlx::query_as("SELECT t.id,t.owner,t.workspace,t.article,t.document FROM ai_translations t JOIN workspaces w ON w.id=t.workspace::text WHERE t.owner=$1 AND t.workspace=$2 AND (t.article=$3 OR t.article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) AND w.document::jsonb->>'owner'=$1::text ORDER BY t.created_at DESC,t.id DESC")
             .bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
         rows.into_iter()
             .map(|row| {

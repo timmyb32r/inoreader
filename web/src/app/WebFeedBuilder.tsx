@@ -14,7 +14,7 @@ import type { Subscription } from "./data";
 
 type Language = SelectorDraft["language"];
 type Loading = WebFeedDraft["loading"];
-type Viewport = WebFeedDraft["viewport"];
+type Viewport = NonNullable<WebFeedDraft["viewport"]>;
 type SelectorRow = SelectorDraft & { key: number };
 
 const emptySelector = (key: number): SelectorRow => ({

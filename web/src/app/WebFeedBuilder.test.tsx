@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { ApiClient, type Transport } from "../api/client";
@@ -9,29 +10,27 @@ function setup(deferred = false) {
   const hold = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const transport: Transport = async <T,>(
+  const transport: Transport = async <C extends ResponseContract>(
     _path: string,
     init?: RequestInit,
   ) => {
     requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     if (deferred) await hold;
     const request = requests.at(-1)!;
-    return (
-      request.preview
-        ? {
-            title: "Selected stories",
-            kind: "web_feed",
-            url: request.url,
-            articles: [{ title: "One" }],
-          }
-        : {
-            id: "web",
-            name: "Selected stories",
-            count: 0,
-            status: "active",
-            lastUpdate: "now",
-          }
-    ) as T;
+    return (request.preview
+      ? {
+          title: "Selected stories",
+          kind: "web_feed",
+          url: request.url,
+          articles: [{ title: "One" }],
+        }
+      : {
+          id: "web",
+          name: "Selected stories",
+          count: 0,
+          status: "active",
+          lastUpdate: "now",
+        }) as unknown as ResponseValue<C>;
   };
   render(
     <WebFeedBuilder
@@ -59,7 +58,7 @@ async function required(user: ReturnType<typeof userEvent.setup>) {
 describe("WebFeedBuilder", () => {
   it("prefills a versioned recipe and sends an optimistic update after preview", async () => {
     const calls: { path: string; body: Record<string, unknown> }[] = [];
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
@@ -71,8 +70,12 @@ describe("WebFeedBuilder", () => {
           kind: "web_feed",
           url: body.url,
           articles: [{ title: "One" }],
-        } as T;
-      return { subscriptionId: "sub", version: 5, draft: body.draft } as T;
+        } as unknown as ResponseValue<C>;
+      return {
+        subscriptionId: "sub",
+        version: 5,
+        draft: body.draft,
+      } as unknown as ResponseValue<C>;
     };
     const draft = {
       workspaceId: "workspace",
@@ -122,10 +125,10 @@ describe("WebFeedBuilder", () => {
   });
   it("uses an opaque visual snapshot to validate a detected repeated group", async () => {
     const requests: string[] = [];
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
-    ): Promise<T> => {
+    ): Promise<ResponseValue<C>> => {
       requests.push(path);
       const body = JSON.parse(String(init?.body));
       if (path.endsWith("visual-previews"))
@@ -143,7 +146,7 @@ describe("WebFeedBuilder", () => {
               boxes: [{ x: 10, y: 10, width: 20, height: 20 }],
             },
           ],
-        } as T;
+        } as unknown as ResponseValue<C>;
       if (path.endsWith("visual-selections")) {
         expect(body).toMatchObject({
           workspaceId: "workspace",
@@ -155,7 +158,7 @@ describe("WebFeedBuilder", () => {
           selector: { language: "css", expression: "article.card" },
           count: 4,
           similarItems: [],
-        } as T;
+        } as unknown as ResponseValue<C>;
       }
       throw new Error("unexpected request");
     };

@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import {
   act,
   fireEvent,
@@ -46,15 +47,15 @@ it.each([false, true])(
   "publishes saved credentials after the pane closes only for its original account (switch=%s)",
   async (switchAccount) => {
     let finish!: (profile: AiProfile) => void;
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       _path: string,
       init?: RequestInit,
     ) => {
       if (init?.method === "PUT")
         return (await new Promise<AiProfile>((resolve) => {
           finish = resolve;
-        })) as T;
-      return disabled as T;
+        })) as unknown as ResponseValue<C>;
+      return disabled as unknown as ResponseValue<C>;
     };
     const client = new AiClient(transport),
       view = render(<Harness client={client} />);
@@ -86,10 +87,10 @@ it.each([false, true])(
 
 it("does not let an older initial profile read overwrite a completed mutation", async () => {
   let finish!: (profile: AiProfile) => void;
-  const transport: Transport = async <T,>() =>
+  const transport: Transport = async <C extends ResponseContract>() =>
     (await new Promise<AiProfile>((resolve) => {
       finish = resolve;
-    })) as T;
+    })) as unknown as ResponseValue<C>;
   render(<Harness client={new AiClient(transport)} visible={false} />);
   await waitFor(() => expect(finish).toBeDefined());
   fireEvent.click(screen.getByRole("button", { name: "Apply mutation" }));

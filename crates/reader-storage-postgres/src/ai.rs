@@ -12,7 +12,9 @@ use uuid::Uuid;
 use crate::PostgresRepository;
 
 mod calls;
+mod chat_document;
 mod definitions;
+mod quarantine;
 mod translations;
 
 pub const SCHEMA: &str = r#"
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS ai_chats (
     scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     status TEXT NOT NULL,
     document TEXT NOT NULL,
+    inputs TEXT NOT NULL,
     lease UUID,
     lease_until TIMESTAMPTZ
 );
@@ -118,9 +121,9 @@ async fn locked(
     owner: Uuid,
     id: Uuid,
 ) -> Result<ChatRecord, AiError> {
-    let document: Option<String> = sqlx::query_scalar("SELECT c.document FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text FOR UPDATE OF c")
+    let document: Option<String> = sqlx::query_scalar("SELECT json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text FOR UPDATE OF c")
         .bind(id).bind(owner).fetch_optional(&mut **tx).await.map_err(storage)?;
-    let record: ChatRecord = decode(&document.ok_or(AiError::NotFound)?)?;
+    let record: ChatRecord = chat_document::decode(&document.ok_or(AiError::NotFound)?)?;
     if record.owner != owner || record.view.id != id {
         return Err(AiError::Storage);
     }
@@ -130,14 +133,15 @@ async fn write_record(
     tx: &mut Transaction<'_, Postgres>,
     record: &ChatRecord,
 ) -> Result<(), AiError> {
-    sqlx::query("UPDATE ai_chats SET document=$3,status=$4 WHERE id=$1 AND owner=$2")
-        .bind(record.view.id)
-        .bind(record.owner)
-        .bind(encode(record)?)
-        .bind(status(record.view.status))
-        .execute(&mut **tx)
-        .await
-        .map_err(storage)?;
+    let (document, inputs) = chat_document::encode(record)?;
+    let changed = sqlx::query("UPDATE ai_chats SET document=$3,status=$4,inputs=CASE WHEN inputs::jsonb=$5::jsonb THEN inputs ELSE $5 END WHERE id=$1 AND owner=$2 AND (inputs::jsonb=$5::jsonb OR (inputs::jsonb->'snapshot'='null'::jsonb AND inputs::jsonb-'snapshot'=$5::jsonb-'snapshot'))")
+        .bind(record.view.id).bind(record.owner).bind(document)
+        .bind(status(record.view.status)).bind(inputs)
+        .execute(&mut **tx).await.map_err(storage)?.rows_affected();
+    if changed != 1 {
+        return Err(AiError::Conflict);
+    }
+
     Ok(())
 }
 async fn prior_operation(
@@ -329,9 +333,9 @@ impl AiStore for PostgresAiStore {
             .execute(&mut *tx)
             .await
             .map_err(storage)?;
-        let documents: Vec<String> = sqlx::query_scalar("SELECT document FROM ai_chats WHERE owner=$1 AND status IN ('waiting_content','queued','generating','verifying') FOR UPDATE").bind(owner).fetch_all(&mut *tx).await.map_err(storage)?;
+        let documents: Vec<String> = sqlx::query_scalar("SELECT json_build_array(document,inputs)::text FROM ai_chats WHERE owner=$1 AND status IN ('waiting_content','queued','generating','verifying') FOR UPDATE").bind(owner).fetch_all(&mut *tx).await.map_err(storage)?;
         for document in documents {
-            let mut record: ChatRecord = decode(&document)?;
+            let mut record: ChatRecord = chat_document::decode(&document)?;
             record.view.status = ChatStatus::Cancelled;
             record.view.error = Some(AiError::MissingKey.to_string());
             calls::interrupt(&mut record);
@@ -402,11 +406,10 @@ impl AiStore for PostgresAiStore {
             })?;
         let title = value.key.title.clone();
         let source_url = value.key.location.exact_url().unwrap_or("").to_owned();
-        // One PostgreSQL statement pins the manifest and its chunks in one MVCC
-        // snapshot; concurrent extraction/cleanup cannot mix content revisions.
-        let row:Option<(String,String,Option<String>)> = sqlx::query_as("SELECT m.id,m.document,(SELECT json_agg(c.bytes ORDER BY c.ordinal)::text FROM staged_content_chunks c WHERE c.record_id=m.id AND c.refresh_id=m.document::jsonb->>'refresh_id' AND c.representation='safe') FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id JOIN content_manifests m ON m.id=o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2 AND s.document::jsonb->>'workspace_id'=$1 ORDER BY (m.document::jsonb->>'fetched_at')::timestamptz DESC,m.id DESC LIMIT 1")
-            .bind(workspace.to_string()).bind(article.to_string()).fetch_optional(&self.pool).await.map_err(storage)?;
-        let Some((record, manifest, chunks)) = row else {
+        let content = crate::content_snapshot::read(&self.pool, workspace, article)
+            .await
+            .map_err(storage)?;
+        let Some(content) = content else {
             let failed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM library_origins o JOIN content_refresh_state f ON f.id='failure/'||o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2)").bind(workspace.to_string()).bind(article.to_string()).fetch_one(&self.pool).await.map_err(storage)?;
             return Ok(if failed {
                 ArticleInput::Failed
@@ -414,20 +417,11 @@ impl AiStore for PostgresAiStore {
                 ArticleInput::Waiting { title, source_url }
             });
         };
-        let pointer: reader_ingest::ContentManifestPointer = decode(&manifest)?;
-        let chunks: Vec<String> = decode(&chunks.ok_or(AiError::FullText)?)?;
-        if chunks.len() != pointer.safe_html_chunks as usize {
-            return Err(AiError::Storage);
-        }
-        let mut bytes = Vec::new();
-        for chunk in chunks {
-            bytes.extend(decode::<Vec<u8>>(&chunk)?);
-        }
-        let html = String::from_utf8(bytes).map_err(storage)?;
         let source_revision = format!(
-            "{record}/{}/{}",
-            pointer.source_revision, pointer.refresh_id
+            "{}/{}/{}",
+            content.record, content.pointer.source_revision, content.pointer.refresh_id
         );
+        let html = content.html;
         // Text-node boundaries are explicit newline separators in the AI input.
         // Preserve the original safe HTML separately; citations target this exact
         // documented text snapshot, not whitespace guessed by the browser.
@@ -477,17 +471,18 @@ impl AiStore for PostgresAiStore {
             return Ok(prior);
         }
         if !regenerate {
-            let existing: Option<String> = sqlx::query_scalar("SELECT document FROM ai_chats WHERE owner=$1 AND workspace=$2 AND article=$3 ORDER BY created_at DESC,id DESC LIMIT 1")
+            let existing: Option<String> = sqlx::query_scalar("SELECT json_build_array(document,inputs)::text FROM ai_chats WHERE owner=$1 AND workspace=$2 AND article=$3 ORDER BY created_at DESC,id DESC LIMIT 1")
                 .bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).fetch_optional(&mut *tx).await.map_err(storage)?;
             if let Some(document) = existing {
-                let prior: ChatRecord = decode(&document)?;
+                let prior: ChatRecord = chat_document::decode(&document)?;
                 save_operation(&mut tx, owner, prior.view.id, operation, &kind).await?;
                 tx.commit().await.map_err(storage)?;
                 return Ok(prior);
             }
         }
-        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document) VALUES($1,$2,$3,$4,$5,$6,$7)")
-            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(encode(&record)?).execute(&mut *tx).await.map_err(storage)?;
+        let (document, inputs) = chat_document::encode(&record)?;
+        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document,inputs) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
+            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(document).bind(inputs).execute(&mut *tx).await.map_err(storage)?;
         save_operation(&mut tx, owner, record.view.id, operation, &kind).await?;
         tx.commit().await.map_err(storage)?;
         Ok(record)
@@ -508,12 +503,12 @@ impl AiStore for PostgresAiStore {
             )
             .await
             .map_err(|_| AiError::NotFound)?;
-        let rows: Vec<String> = sqlx::query_scalar("SELECT document FROM ai_chats WHERE owner=$1 AND workspace=$2 AND article=$3 ORDER BY created_at DESC,id DESC").bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
-        rows.iter().map(|v| decode(v)).collect()
+        let rows: Vec<String> = sqlx::query_scalar("SELECT json_build_array(document,inputs)::text FROM ai_chats WHERE owner=$1 AND workspace=$2 AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC").bind(owner).bind(workspace).bind(article).fetch_all(&self.pool).await.map_err(storage)?;
+        rows.iter().map(|v| chat_document::decode(v)).collect()
     }
     async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ChatRecord, AiError> {
-        let document: Option<String> = sqlx::query_scalar("SELECT c.document FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text").bind(id).bind(owner).fetch_optional(&self.pool).await.map_err(storage)?;
-        let record: ChatRecord = decode(&document.ok_or(AiError::NotFound)?)?;
+        let document: Option<String> = sqlx::query_scalar("SELECT json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.id=$1 AND c.owner=$2 AND w.document::jsonb->>'owner'=$2::text").bind(id).bind(owner).fetch_optional(&self.pool).await.map_err(storage)?;
+        let record: ChatRecord = chat_document::decode(&document.ok_or(AiError::NotFound)?)?;
         if record.owner != owner || record.view.id != id {
             return Err(AiError::Storage);
         }
@@ -623,24 +618,35 @@ impl AiStore for PostgresAiStore {
         let mut tx = self.pool.begin().await.map_err(storage)?;
         // A previous process may have submitted a billable request. Expiry is an
         // interruption, not permission to repeat it automatically.
-        let expired: Vec<String> = sqlx::query_scalar("SELECT document FROM ai_chats WHERE lease_until<now() AND status IN ('generating','verifying','queued','waiting_content') FOR UPDATE SKIP LOCKED").fetch_all(&mut *tx).await.map_err(storage)?;
-        for document in expired {
-            let mut record: ChatRecord = decode(&document)?;
-            record.view.status = ChatStatus::Interrupted;
-            record.view.error = Some(
-                "The worker was interrupted; provider billing may be unknown. Retry explicitly."
-                    .into(),
-            );
-            calls::interrupt(&mut record);
-            set_attempt(&mut record, MessageStatus::Interrupted)?;
-            write_record(&mut tx, &record).await?;
+        let expired: Vec<quarantine::ChatRow> = sqlx::query_as("SELECT id,owner,workspace,article,json_build_array(document,inputs)::text FROM ai_chats WHERE lease_until<now() AND status IN ('generating','verifying','queued','waiting_content') FOR UPDATE SKIP LOCKED").fetch_all(&mut *tx).await.map_err(storage)?;
+        for row in expired {
+            let id = row.0;
+            let recovered = quarantine::checked_chat(row).and_then(|mut record| {
+                record.view.status = ChatStatus::Interrupted;
+                record.view.error = Some("The worker was interrupted; provider billing may be unknown. Retry explicitly.".into());
+                calls::interrupt(&mut record);
+                set_attempt(&mut record, MessageStatus::Interrupted)?;
+                Ok(record)
+            });
+            match recovered {
+                Ok(record) => write_record(&mut tx, &record).await?,
+                Err(_) => quarantine::chat(&mut tx, id).await?,
+            }
         }
-        let row: Option<String> = sqlx::query_scalar("SELECT c.document FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND w.document::jsonb->>'owner'=c.owner::text ORDER BY CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
-        let Some(document) = row else {
+        let row: Option<quarantine::ChatRow> = sqlx::query_as("SELECT c.id,c.owner,c.workspace,c.article,json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND w.document::jsonb->>'owner'=c.owner::text ORDER BY CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
+        let Some(row) = row else {
             tx.commit().await.map_err(storage)?;
             return Ok(None);
         };
-        let record: ChatRecord = decode(&document)?;
+        let id = row.0;
+        let record = match quarantine::checked_chat(row) {
+            Ok(record) => record,
+            Err(_) => {
+                quarantine::chat(&mut tx, id).await?;
+                tx.commit().await.map_err(storage)?;
+                return Ok(None);
+            }
+        };
         let lease = Uuid::new_v4();
         let queue_wait_us: i64 = sqlx::query_scalar(
             "UPDATE ai_chats SET lease=$2,lease_until=now()+$3*interval '1 second' WHERE id=$1 RETURNING (extract(epoch FROM now()-scheduled_at)*1000000)::bigint",

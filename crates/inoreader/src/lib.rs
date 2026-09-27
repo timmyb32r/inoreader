@@ -163,6 +163,14 @@ impl Config {
         Self::validate(&value)?;
         Ok(value)
     }
+    pub fn validate_container_stop_budget(&self, seconds: u64) -> Result<(), ConfigError> {
+        if seconds <= self.server.graceful_shutdown_seconds {
+            return Err(ConfigError::Invalid(
+                "CONTAINER_STOP_GRACE_SECONDS must exceed server.graceful_shutdown_seconds",
+            ));
+        }
+        Ok(())
+    }
     pub fn validate(&self) -> Result<(), ConfigError> {
         if let Some(glossary) = &self.glossary {
             reader_glossary::GlossaryPolicy::new(glossary.clone())
@@ -175,6 +183,25 @@ impl Config {
         }
         if let Some(ai) = &self.ai {
             ai.validate().map_err(|_| ConfigError::Invalid("ai"))?;
+        }
+        // No accepted paid call is abandoned by the normal process stop budget.
+        // AI leases cover generation + verification and their persistence margin.
+        let admitted = [
+            self.server.request_timeout_seconds,
+            self.http.request_timeout_seconds,
+            self.browser.preview_timeout_seconds,
+            self.ai.as_ref().map_or(0, |ai| ai.lease_seconds),
+            self.glossary
+                .as_ref()
+                .map_or(0, |glossary| glossary.lease_seconds),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+        if self.server.graceful_shutdown_seconds <= admitted {
+            return Err(ConfigError::Invalid(
+                "server.graceful_shutdown_seconds must exceed admitted request/AI lease budgets",
+            ));
         }
         let strings = [
             ("server.bind", self.server.bind.as_str()),

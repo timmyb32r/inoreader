@@ -193,9 +193,17 @@ CREATE TABLE IF NOT EXISTS library_dedup (
     dedup_hash TEXT NOT NULL,
     dedup_key TEXT NOT NULL,
     article_id TEXT NOT NULL,
-    revision BIGINT NOT NULL CHECK (revision >= 0),
-    document TEXT NOT NULL,
     PRIMARY KEY (workspace_id, dedup_hash)
+);
+CREATE TABLE IF NOT EXISTS poll_backlog (
+    source_id TEXT NOT NULL,
+    record_id TEXT NOT NULL,
+    ordinal BIGINT NOT NULL CHECK (ordinal >= 0),
+    document TEXT NOT NULL,
+    action TEXT NOT NULL,
+    context TEXT NOT NULL,
+    PRIMARY KEY (source_id, record_id),
+    UNIQUE (source_id, ordinal)
 );
 
 CREATE TABLE IF NOT EXISTS library_origins (
@@ -204,6 +212,14 @@ CREATE TABLE IF NOT EXISTS library_origins (
     subscription_id TEXT NOT NULL,
     source_record_id TEXT NOT NULL,
     PRIMARY KEY (workspace_id, article_id, subscription_id, source_record_id)
+);
+-- Associations with immutable AI history survive genuine article regrouping.
+-- An ancestor may remain a live sibling after a split; no cross-workspace edges.
+CREATE TABLE IF NOT EXISTS article_history_links (
+    workspace_id TEXT NOT NULL,
+    article_id TEXT NOT NULL,
+    history_article_id TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, article_id, history_article_id)
 );
 CREATE INDEX IF NOT EXISTS by_subscription
     ON library_origins (subscription_id, workspace_id);
@@ -301,69 +317,5 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)
         .execute(&mut **transaction)
         .await?;
-    migrate_library_dedup_index(transaction).await?;
-    Ok(())
-}
-
-/// Moves the deduplication index away from the unbounded serialized key. The
-/// complete key remains authoritative data and every lookup compares it after
-/// using the compact fingerprint; a fingerprint collision therefore fails
-/// closed instead of merging unrelated articles.
-async fn migrate_library_dedup_index(
-    transaction: &mut Transaction<'_, Postgres>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query("ALTER TABLE library_dedup ADD COLUMN IF NOT EXISTS dedup_hash TEXT")
-        .execute(&mut **transaction)
-        .await?;
-
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT workspace_id, dedup_key FROM library_dedup WHERE dedup_hash IS NULL",
-    )
-    .fetch_all(&mut **transaction)
-    .await?;
-    for (workspace_id, dedup_key) in rows {
-        sqlx::query(
-            "UPDATE library_dedup SET dedup_hash = $1 \
-             WHERE workspace_id = $2 AND dedup_key = $3 AND dedup_hash IS NULL",
-        )
-        .bind(crate::ingest_store::dedup_fingerprint(&dedup_key))
-        .bind(workspace_id)
-        .bind(dedup_key)
-        .execute(&mut **transaction)
-        .await?;
-    }
-
-    let collision: Option<(String, String)> = sqlx::query_as(
-        "SELECT workspace_id, dedup_hash FROM library_dedup \
-         GROUP BY workspace_id, dedup_hash HAVING count(DISTINCT dedup_key) > 1 LIMIT 1",
-    )
-    .fetch_optional(&mut **transaction)
-    .await?;
-    if let Some((workspace_id, dedup_hash)) = collision {
-        return Err(sqlx::Error::Protocol(format!(
-            "dedup fingerprint collision in workspace {workspace_id} for {dedup_hash}"
-        )));
-    }
-
-    sqlx::query("ALTER TABLE library_dedup ALTER COLUMN dedup_hash SET NOT NULL")
-        .execute(&mut **transaction)
-        .await?;
-    let primary_key: Option<String> = sqlx::query_scalar(
-        "SELECT pg_get_constraintdef(oid) FROM pg_constraint \
-         WHERE conrelid = 'library_dedup'::regclass AND contype = 'p'",
-    )
-    .fetch_optional(&mut **transaction)
-    .await?;
-    if primary_key.as_deref() != Some("PRIMARY KEY (workspace_id, dedup_hash)") {
-        sqlx::query("ALTER TABLE library_dedup DROP CONSTRAINT IF EXISTS library_dedup_pkey")
-            .execute(&mut **transaction)
-            .await?;
-        sqlx::query(
-            "ALTER TABLE library_dedup ADD CONSTRAINT library_dedup_pkey \
-             PRIMARY KEY (workspace_id, dedup_hash)",
-        )
-        .execute(&mut **transaction)
-        .await?;
-    }
     Ok(())
 }

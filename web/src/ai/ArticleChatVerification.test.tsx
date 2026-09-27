@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import {
   act,
   fireEvent,
@@ -34,24 +35,23 @@ it("shows the first complete summary while checking and replaces it with the che
   vi.useFakeTimers();
   try {
     let reads = 0;
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
       expect(init).toBeUndefined();
-      if (path.includes("/articles/")) return [pending("generating")] as T;
+      if (path.includes("/articles/"))
+        return [pending("generating")] as unknown as ResponseValue<C>;
       reads++;
-      return (
-        reads === 1
-          ? pending("verifying")
-          : {
-              ...saved(),
-              providerCalls: [
-                call("generating", "completed"),
-                call("verifying", "completed"),
-              ],
-            }
-      ) as T;
+      return (reads === 1
+        ? pending("verifying")
+        : {
+            ...saved(),
+            providerCalls: [
+              call("generating", "completed"),
+              call("verifying", "completed"),
+            ],
+          }) as unknown as ResponseValue<C>;
     };
     render(<Harness client={new AiClient(transport)} />);
     await act(async () => {
@@ -99,13 +99,16 @@ it("explains verification failure and retries it once while retaining drafts and
   };
   let resolve!: (chat: ArticleChat) => void;
   const retries: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
-    if (!init) return [failed] as T;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
+    if (!init) return [failed] as unknown as ResponseValue<C>;
     expect(path).toBe("/api/ai/chats/chat1/retry");
     retries.push(JSON.parse(String(init.body)).operationId);
     return (await new Promise<ArticleChat>((done) => {
       resolve = done;
-    })) as T;
+    })) as unknown as ResponseValue<C>;
   };
   render(<Harness client={new AiClient(transport)} />);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
@@ -158,13 +161,16 @@ it("explains verification failure and retries it once while retaining drafts and
 it("cancels verification with immediate feedback and keeps the early summary", async () => {
   let resolve!: (chat: ArticleChat) => void;
   let stops = 0;
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
-    if (!init) return [pending("verifying")] as T;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
+    if (!init) return [pending("verifying")] as unknown as ResponseValue<C>;
     expect(path).toBe("/api/ai/chats/chat1/stop");
     stops++;
     return (await new Promise<ArticleChat>((done) => {
       resolve = done;
-    })) as T;
+    })) as unknown as ResponseValue<C>;
   };
   render(<Harness client={new AiClient(transport)} />);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
@@ -213,7 +219,8 @@ it("continues to show follow-up streaming while retaining the previous verified 
       },
     ],
   };
-  const transport: Transport = async <T,>() => [chat] as T;
+  const transport: Transport = async <C extends ResponseContract>() =>
+    [chat] as unknown as ResponseValue<C>;
   render(<Harness client={new AiClient(transport)} />);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
   await screen.findByText("Here is the explanation");

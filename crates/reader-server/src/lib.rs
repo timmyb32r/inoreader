@@ -54,7 +54,7 @@ pub trait FeedDiscovery: Send + Sync {
     async fn preview_web_feed(
         &self,
         draft: &WebFeedRecipeDraft,
-    ) -> Result<FeedPreviewResponse, String>;
+    ) -> Result<(FeedPreviewResponse, reader_core::PreparedWebFeed), String>;
     async fn visual_preview(
         &self,
         _session_id: Uuid,

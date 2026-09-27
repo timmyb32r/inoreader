@@ -13,6 +13,10 @@ export function useGlossary(
   const [busy, setBusy] = useState(false),
     [error, setError] = useState("");
   const [pollTick, setPollTick] = useState(0);
+  // An uncertain POST remains the same paid intent across close/reopen/retry.
+  const intents = useRef(
+    new Map<string, { operation: string; regenerate: boolean }>(),
+  );
   const revision = useRef(0),
     locked = useRef(false),
     origin = useRef<HTMLElement | null>(null);
@@ -33,6 +37,7 @@ export function useGlossary(
   }, [scope, workspace]);
   const load = async (id: string, title: string, retry = false) => {
     if (locked.current) return;
+    const intentKey = JSON.stringify([scope, workspace, id]);
     const token = ++revision.current;
     locked.current = true;
     origin.current = document.activeElement as HTMLElement;
@@ -45,16 +50,22 @@ export function useGlossary(
       if (token !== revision.current) return;
       setView(value);
       if (
-        (!value.job || retry) &&
+        (!value.job || retry || intents.current.has(intentKey)) &&
         value.channel.indexReady &&
         value.channel.generationAllowed
       ) {
+        const intent = intents.current.get(intentKey) ?? {
+          operation: crypto.randomUUID(),
+          regenerate: retry,
+        };
+        intents.current.set(intentKey, intent);
         value = await client.generate(
           workspace,
           id,
-          crypto.randomUUID(),
-          retry,
+          intent.operation,
+          intent.regenerate,
         );
+        intents.current.delete(intentKey);
         if (token !== revision.current) return;
         setView(value);
       }

@@ -21,7 +21,7 @@ impl PostgresAiStore {
         article: Uuid,
     ) -> Result<Option<DefinitionsJob>, AiError> {
         owned_workspace(&self.pool, owner, workspace).await?;
-        let row:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND article=$3 ORDER BY created_at DESC,id DESC LIMIT 1")
+        let row:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(owner).bind(workspace).bind(article).fetch_optional(&self.pool).await.map_err(storage)?;
         row.map(|r| Ok(checked(r)?.job().clone())).transpose()
     }
@@ -90,16 +90,45 @@ impl PostgresAiStore {
             return Err(AiError::Configuration);
         }
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        sqlx::query("UPDATE ai_definitions SET status='failed',lease=NULL,lease_until=NULL,document=jsonb_set(document::jsonb,'{job}',document::jsonb->'job' || jsonb_build_object('status','failed','error','Запрос прерван; повторите явно. Провайдер мог списать оплату.'))::text WHERE status='generating' AND lease_until<now()")
-            .execute(&mut *tx).await.map_err(storage)?;
+        let expired: Vec<Row> = sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE status='generating' AND lease_until<now() FOR UPDATE SKIP LOCKED")
+            .fetch_all(&mut *tx).await.map_err(storage)?;
+        for row in expired {
+            let id = row.0;
+            match checked(row).and_then(|mut record| {
+                record.finish(
+                    DefinitionState::Failed {
+                        error: "Запрос прерван; повторите явно. Провайдер мог списать оплату."
+                            .into(),
+                    },
+                    None,
+                )?;
+                Ok(record)
+            }) {
+                Ok(record) => {
+                    sqlx::query("UPDATE ai_definitions SET status='failed',lease=NULL,lease_until=NULL,document=$2 WHERE id=$1")
+                        .bind(id).bind(encode(&record)?).execute(&mut *tx).await.map_err(storage)?;
+                }
+                Err(_) => quarantine::definitions(&mut tx, id).await?,
+            }
+        }
         let row:Option<Row>=sqlx::query_as("SELECT d.id,d.owner,d.workspace,d.article,d.document FROM ai_definitions d JOIN workspaces w ON w.id=d.workspace::text WHERE d.status='queued' AND w.document::jsonb->>'owner'=d.owner::text ORDER BY d.created_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED")
             .fetch_optional(&mut *tx).await.map_err(storage)?;
         let Some(row) = row else {
             tx.commit().await.map_err(storage)?;
             return Ok(None);
         };
-        let mut record = checked(row)?;
-        record.mark_running()?;
+        let id = row.0;
+        let record = match checked(row).and_then(|mut record| {
+            record.mark_running()?;
+            Ok(record)
+        }) {
+            Ok(record) => record,
+            Err(_) => {
+                quarantine::definitions(&mut tx, id).await?;
+                tx.commit().await.map_err(storage)?;
+                return Ok(None);
+            }
+        };
         let lease = Uuid::new_v4();
         let queue_wait_us: i64 = sqlx::query_scalar("UPDATE ai_definitions SET status='generating',document=$2,lease=$3,lease_until=now()+$4::bigint*interval '1 second' WHERE id=$1 RETURNING (extract(epoch FROM now()-created_at)*1000000)::bigint")
             .bind(record.job().id).bind(encode(&record)?).bind(lease).bind(seconds).fetch_one(&mut *tx).await.map_err(storage)?;

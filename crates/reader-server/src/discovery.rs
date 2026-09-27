@@ -24,7 +24,7 @@ pub(super) async fn web_feed_recipe<R: ReaderRepository + 'static>(
     let actor = auth(&s, &headers).await?;
     let workspace = WorkspaceId::from_uuid(body.workspace_id);
     owned_workspace(&s, workspace, actor.account.id).await?;
-    let preview = s
+    let (preview, prepared) = s
         .discovery
         .preview_web_feed(&body)
         .await
@@ -41,10 +41,8 @@ pub(super) async fn web_feed_recipe<R: ReaderRepository + 'static>(
         preview.title,
     )
     .map_err(|_| ApiFailure::Validation("web feed URL does not match parsed URL"))?;
-    let recipe_json = serde_json::to_string(&body)
-        .map_err(|_| ApiFailure::Validation("invalid web feed recipe"))?;
     s.repository
-        .save_web_feed_subscription(value.clone(), recipe_json)
+        .save_web_feed_subscription(value.clone(), prepared)
         .await?;
     let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
     Ok(Json(subscription_view(&value, &stats)).into_response())
@@ -82,15 +80,14 @@ pub(super) async fn update_web_feed_recipe<R: ReaderRepository + 'static>(
             "web feed recipe scope or URL does not match subscription",
         ));
     }
-    s.discovery
+    let (_, prepared) = s
+        .discovery
         .preview_web_feed(&body.draft)
         .await
         .map_err(ApiFailure::Discovery)?;
-    let document = serde_json::to_string(&body.draft)
-        .map_err(|_| ApiFailure::Validation("invalid web feed recipe"))?;
     let version = s
         .repository
-        .update_web_feed_recipe(subscription.id(), body.expected_version, document)
+        .update_web_feed_recipe(subscription.id(), body.expected_version, prepared)
         .await?;
     Ok(Json(WebFeedRecipeView {
         subscription_id: id,

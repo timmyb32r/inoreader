@@ -11,8 +11,14 @@ use std::sync::{
 };
 use uuid::Uuid;
 
+#[path = "content_snapshot.rs"]
+mod content_snapshot;
 #[path = "ai_definitions.rs"]
 mod definitions;
+#[path = "ai_shutdown.rs"]
+pub(super) mod shutdown;
+#[path = "ai_storage.rs"]
+mod storage_tests;
 #[path = "ai_translation.rs"]
 mod translation;
 #[path = "ai_two_stage.rs"]
@@ -125,7 +131,7 @@ pub(super) fn policy(owner: Uuid) -> AiPolicy {
     )
     .unwrap()
 }
-fn record(owner: Uuid, workspace: Uuid, article: Uuid, operation: Uuid) -> ChatRecord {
+pub(super) fn record(owner: Uuid, workspace: Uuid, article: Uuid, operation: Uuid) -> ChatRecord {
     let now = Utc::now();
     let assistant = Uuid::new_v4();
     ChatRecord {
@@ -523,6 +529,15 @@ pub async fn verify(pool: &PgPool) {
     assert_eq!(snapshot.text, "Exact source 12.5%.");
     assert_eq!(snapshot.safe_html, html);
     assert_eq!(
+        reader
+            .article_presentation(workspace.id(), ArticleId::from_uuid(a))
+            .await
+            .unwrap()
+            .safe_html
+            .as_deref(),
+        Some(html)
+    );
+    assert_eq!(
         snapshot.source_revision,
         format!("{}/7/{refresh}", source_record.as_uuid())
     );
@@ -534,6 +549,40 @@ pub async fn verify(pool: &PgPool) {
         ),
         "incomplete chunks fail closed"
     );
+    assert!(
+        reader
+            .article_presentation(workspace.id(), ArticleId::from_uuid(a))
+            .await
+            .is_err(),
+        "reader must reject missing chunks rather than report ready"
+    );
+    sqlx::query("UPDATE content_manifests SET document=$2 WHERE id=$1")
+        .bind(source_record.as_uuid().to_string())
+        .bind(serde_json::to_string(&pointer).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE staged_content_chunks SET ordinal=1 WHERE record_id=$1")
+        .bind(source_record.as_uuid().to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(
+        reader
+            .article_presentation(workspace.id(), ArticleId::from_uuid(a))
+            .await
+            .is_err(),
+        "reader must reject a non-contiguous generation even when its chunk count matches"
+    );
+    assert!(matches!(
+        store.article_input(owner, ws, a).await,
+        Err(AiError::Storage)
+    ));
+    sqlx::query("UPDATE staged_content_chunks SET ordinal=0 WHERE record_id=$1")
+        .bind(source_record.as_uuid().to_string())
+        .execute(pool)
+        .await
+        .unwrap();
     assert_eq!(
         store
             .chat(owner, id)
@@ -566,6 +615,7 @@ pub async fn verify(pool: &PgPool) {
         .execute(pool)
         .await
         .unwrap();
+    content_snapshot::verify(pool, store.clone(), owner, ws, a, &pointer).await;
     translation::verify(pool, store.clone(), owner, other, ws, a).await;
     definitions::verify(pool, store.clone(), owner, other, ws, a).await;
     let thinking = changed_service
@@ -689,4 +739,5 @@ pub async fn verify(pool: &PgPool) {
         "neither API entry points nor queued jobs call the provider for an unapproved prompt"
     );
     two_stage::verify(pool, store.clone(), owner, ws, a).await;
+    storage_tests::verify(pool, store.clone(), owner, ws, a).await;
 }

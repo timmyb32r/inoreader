@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import {
   act,
   fireEvent,
@@ -12,9 +13,12 @@ import { Harness, saved } from "./tests/chatTestSupport";
 
 it("never generates on mount or when reopening an existing saved conversation", async () => {
   const calls: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push(`${init?.method ?? "GET"} ${path}`);
-    return [saved()] as T;
+    return [saved()] as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
@@ -34,14 +38,17 @@ it("never generates on mount or when reopening an existing saved conversation", 
 it("shows pending immediately, blocks duplicate paid requests and retries an uncertain request with the same operation ID", async () => {
   let reject!: (error: Error) => void;
   const operations: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
-    if (!init) return [] as T;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
+    if (!init) return [] as unknown as ResponseValue<C>;
     operations.push(JSON.parse(String(init.body)).operationId);
     if (operations.length === 1)
       return (await new Promise<ArticleChat>((_, fail) => {
         reject = fail;
-      })) as T;
-    return saved() as T;
+      })) as unknown as ResponseValue<C>;
+    return saved() as unknown as ResponseValue<C>;
   };
   render(<Harness client={new AiClient(transport)} />);
   const button = screen.getByRole("button", { name: "Summarize A" });
@@ -61,9 +68,14 @@ it("shows pending immediately, blocks duplicate paid requests and retries an unc
 
 it("gates generation without credentials but retains access to saved chats", async () => {
   const mutations: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     if (init) mutations.push(path);
-    return (path.includes("/a/") ? [] : [saved("b-chat", "b")]) as T;
+    return (path.includes("/a/")
+      ? []
+      : [saved("b-chat", "b")]) as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(
@@ -84,8 +96,12 @@ it("gates generation without credentials but retains access to saved chats", asy
 });
 
 it("keeps a separate draft per conversation across article switches and collapse/close", async () => {
-  const transport: Transport = async <T,>(path: string) =>
-    [path.includes("/a/") ? saved() : saved("chat2", "b")] as T;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+  ) =>
+    [
+      path.includes("/a/") ? saved() : saved("chat2", "b"),
+    ] as unknown as ResponseValue<C>;
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
   await user.click(screen.getByRole("button", { name: "Summarize A" }));
@@ -109,7 +125,7 @@ it("keeps a separate draft per conversation across article switches and collapse
 it("deduplicates sending and clears the submitted draft only after durable acceptance", async () => {
   let resolveSend!: (value: ArticleChat) => void;
   let sends = 0;
-  const transport: Transport = async <T,>(
+  const transport: Transport = async <C extends ResponseContract>(
     _path: string,
     init?: RequestInit,
   ) => {
@@ -117,9 +133,9 @@ it("deduplicates sending and clears the submitted draft only after durable accep
       sends += 1;
       return (await new Promise<ArticleChat>((resolve) => {
         resolveSend = resolve;
-      })) as T;
+      })) as unknown as ResponseValue<C>;
     }
-    return [saved()] as T;
+    return [saved()] as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
@@ -159,17 +175,23 @@ it("preserves an uncertain accepted message operation across reconnect and artic
       },
     ],
   };
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     if (init) {
       operations.push(JSON.parse(String(init.body)));
       if (operations.length === 1)
         throw new Error("Response lost after the server committed");
-      return committed as T;
+      return committed as unknown as ResponseValue<C>;
     }
-    if (path.includes("/b/")) return [saved("chat2", "b")] as T;
+    if (path.includes("/b/"))
+      return [saved("chat2", "b")] as unknown as ResponseValue<C>;
     if (path.includes("/articles/"))
-      return [operations.length ? committed : saved()] as T;
-    return committed as T;
+      return [
+        operations.length ? committed : saved(),
+      ] as unknown as ResponseValue<C>;
+    return committed as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
@@ -223,15 +245,15 @@ it("preserves an uncertain accepted message operation across reconnect and artic
 
 it("allows correcting a definitively rejected message without losing its draft", async () => {
   const operations: { operationId: string; content: string }[] = [];
-  const transport: Transport = async <T,>(
+  const transport: Transport = async <C extends ResponseContract>(
     _path: string,
     init?: RequestInit,
   ) => {
-    if (!init) return [saved()] as T;
+    if (!init) return [saved()] as unknown as ResponseValue<C>;
     operations.push(JSON.parse(String(init.body)));
     if (operations.length === 1)
       throw new ApiError(422, "Message exceeds the configured input limit");
-    return saved() as T;
+    return saved() as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
@@ -257,12 +279,15 @@ it("allows correcting a definitively rejected message without losing its draft",
 
 it("never turns Reconnect into a paid initial summary after key setup", async () => {
   const mutations: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     if (init) {
       mutations.push(path);
-      return saved() as T;
+      return saved() as unknown as ResponseValue<C>;
     }
-    return [] as T;
+    return [] as unknown as ResponseValue<C>;
   };
   const client = new AiClient(transport),
     user = userEvent.setup();
@@ -286,7 +311,8 @@ it("never turns Reconnect into a paid initial summary after key setup", async ()
 });
 
 it("clears conversation state when account ownership changes", async () => {
-  const transport: Transport = async <T,>() => [saved()] as T;
+  const transport: Transport = async <C extends ResponseContract>() =>
+    [saved()] as unknown as ResponseValue<C>;
   const client = new AiClient(transport),
     user = userEvent.setup();
   const view = render(<Harness client={client} />);
@@ -307,18 +333,20 @@ it("polls only an active visible conversation and reconnects without a paid requ
   vi.useFakeTimers();
   try {
     let reads = 0;
-    const transport: Transport = async <T,>(
+    const transport: Transport = async <C extends ResponseContract>(
       path: string,
       init?: RequestInit,
     ) => {
       expect(init).toBeUndefined();
       if (path.includes("/articles/"))
-        return [{ ...saved(), status: "generating" }] as T;
+        return [
+          { ...saved(), status: "generating" },
+        ] as unknown as ResponseValue<C>;
       reads += 1;
       return {
         ...saved(),
         status: reads > 1 ? "completed" : "generating",
-      } as T;
+      } as unknown as ResponseValue<C>;
     };
     render(<Harness client={new AiClient(transport)} />);
     await act(async () => {
@@ -361,15 +389,15 @@ it("opens latest saved summary without a version picker and regenerates only exp
       messages: [{ ...saved().messages[0], content: "New summary text" }],
     };
   const mutations: unknown[] = [];
-  const transport: Transport = async <T,>(
+  const transport: Transport = async <C extends ResponseContract>(
     _path: string,
     init?: RequestInit,
   ) => {
     if (init) {
       mutations.push(JSON.parse(String(init.body)));
-      return newest as T;
+      return newest as unknown as ResponseValue<C>;
     }
-    return [old, newest] as T;
+    return [old, newest] as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)} />);
@@ -397,7 +425,8 @@ it.each(["failed", "interrupted", "cancelled"] as const)(
         },
       ],
     };
-    const transport: Transport = async <T,>() => [terminal] as T;
+    const transport: Transport = async <C extends ResponseContract>() =>
+      [terminal] as unknown as ResponseValue<C>;
     render(<Harness client={new AiClient(transport)} />);
     fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
     await screen.findByText("No summary is available for this attempt.");

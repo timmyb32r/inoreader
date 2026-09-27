@@ -40,3 +40,8 @@
     flex-direction: column;
   }
 }
+
+.recent-articles-content {
+  height: 260px;
+  overflow: auto;
+}

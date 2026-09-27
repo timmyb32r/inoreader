@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import { AiClient, type AiProfile } from "../api/ai";
@@ -24,13 +25,16 @@ const configured: AiProfile = {
 it("validates/saves once, clears the key input and preserves exact balance strings", async () => {
   let resolveSave!: (value: AiProfile) => void;
   const calls: { path: string; init?: RequestInit }[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({ path, init });
     if (init?.method === "PUT")
       return (await new Promise<AiProfile>((resolve) => {
         resolveSave = resolve;
-      })) as T;
-    return { configured: false, enabled: false } as T;
+      })) as unknown as ResponseValue<C>;
+    return { configured: false, enabled: false } as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup(),
     onProfile = vi.fn();
@@ -65,10 +69,12 @@ it("validates/saves once, clears the key input and preserves exact balance strin
 });
 
 it("retains the key and last successful balance when a provider refresh fails", async () => {
-  const transport: Transport = async <T,>(path: string) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+  ) => {
     if (path.endsWith("balance"))
       throw new Error("Provider temporarily unavailable");
-    return configured as T;
+    return configured as unknown as ResponseValue<C>;
   };
   render(
     <DeepSeekProfile
@@ -85,13 +91,14 @@ it("retains the key and last successful balance when a provider refresh fails", 
 
 it("requires explicit removal confirmation and keeps chat data outside credential mutation", async () => {
   const calls: string[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push(`${init?.method ?? "GET"} ${path}`);
-    return (
-      init?.method === "DELETE"
-        ? { configured: false, enabled: false }
-        : configured
-    ) as T;
+    return (init?.method === "DELETE"
+      ? { configured: false, enabled: false }
+      : configured) as unknown as ResponseValue<C>;
   };
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   const user = userEvent.setup();
@@ -117,9 +124,11 @@ it("requires explicit removal confirmation and keeps chat data outside credentia
 
 it("refreshes balance when a generation finishes while the profile is open", async () => {
   let balances = 0;
-  const transport: Transport = async <T,>(path: string) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+  ) => {
     if (path.endsWith("balance")) balances += 1;
-    return configured as T;
+    return configured as unknown as ResponseValue<C>;
   };
   const client = new AiClient(transport),
     onProfile = vi.fn();

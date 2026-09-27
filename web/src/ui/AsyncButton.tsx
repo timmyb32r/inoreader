@@ -37,9 +37,7 @@ export function AsyncButton({
           });
       }}
     >
-      <span style={{ visibility: busy ? "hidden" : undefined }}>
-        {children}
-      </span>
+      <span style={{ opacity: busy ? 0 : undefined }}>{children}</span>
       {busy && (
         <span class="async-button__pending" aria-hidden="true">
           <span class="spinner" />

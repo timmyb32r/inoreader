@@ -605,9 +605,7 @@ export function ReaderApplication({
                   className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`}
                   onBack={() => setMobilePanel("list")}
                   onUpdate={(patch) => update(selected.id, patch)}
-                  onRefresh={() =>
-                    client.refreshFullText(workspaceId, selected.id)
-                  }
+                  onRefresh={() => reader.refreshFullText(selected.id)}
                   onNotice={announce}
                   summaryPending={!!chat.busy}
                   onSummarize={() =>
@@ -634,7 +632,6 @@ export function ReaderApplication({
           workspaceId={workspaceId}
           workspaceName={workspace}
           subscriptions={subscriptions}
-          articles={articles}
           subscriptionId={
             subscriptionRoute[1]
               ? decodeURIComponent(subscriptionRoute[1])

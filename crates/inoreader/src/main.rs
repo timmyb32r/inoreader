@@ -18,8 +18,7 @@ use reader_ingest::{
 use reader_ingest::{
     BrowserCapability, BrowserCollector, BrowserHttpClient, BuiltInAdapterCollector,
     CacheValidators, CdpBrowserCollector, FeedFetcher, FetchError, SelectorLanguage,
-    SourceDefinition, SourceKind, SourceRecord, WebFeedActions, WebFeedRecipe, WebLoading,
-    WebSelector, WebViewport,
+    SourceDefinition, SourceKind, SourceRecord, WebLoading, WebSelector,
 };
 use reader_server::FeedDiscovery;
 use reader_server_contracts::{
@@ -38,6 +37,7 @@ use url::Url;
 
 mod ai;
 mod glossary;
+mod icons;
 
 #[derive(Parser)]
 struct Cli {
@@ -124,6 +124,13 @@ type PreparedSeed = (String, Subscription, SeedSource, serde_json::Value);
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let config = Config::load(&cli.config)?;
+    if let Ok(value) = std::env::var("CONTAINER_STOP_GRACE_SECONDS") {
+        config.validate_container_stop_budget(
+            value
+                .parse()
+                .map_err(|_| "invalid CONTAINER_STOP_GRACE_SECONDS")?,
+        )?;
+    }
     init_logging(config.observability.log_format);
     if matches!(cli.command, Command::CheckConfig) {
         require_database_credentials(&config)?;
@@ -515,6 +522,7 @@ async fn serve(
     let icon_fetcher = fetcher.clone();
     let icon_refresh_interval = Duration::from_secs(config.scheduler.polling_interval_seconds);
     let icon_workers = config.scheduler.workers;
+    let icon_batch = config.ingest.batch_items;
     let browser_http: Arc<dyn BrowserHttpClient> = Arc::new(
         OutboundHttpClient::new(
             outbound_policy,
@@ -603,10 +611,11 @@ async fn serve(
     let mut supervisor = reader_runtime::TaskSupervisor::new();
     supervisor.spawn("subscription_icons", move |mut stop| async move {
         while !stop.requested() {
-            if let Err(error) = refresh_missing_subscription_icons(
+            if let Err(error) = icons::refresh(
                 icon_pool.clone(),
                 icon_fetcher.clone(),
                 icon_workers,
+                icon_batch,
                 &mut stop,
             )
             .await
@@ -637,7 +646,7 @@ async fn serve(
             .map_err(|error| error.to_string())
     });
     let failure = tokio::select! {
-        signal = termination_signal() => { signal?; None },
+        signal = reader_runtime::termination_signal() => { signal?; None },
         error = supervisor.unexpected_exit() => Some(error),
     };
     supervisor.request_shutdown();
@@ -654,86 +663,6 @@ async fn serve(
     })??;
     if let Some(error) = failure {
         return Err(error.into());
-    }
-    Ok(())
-}
-
-async fn termination_signal() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        tokio::select! { result = tokio::signal::ctrl_c() => result, _ = terminate.recv() => Ok(()) }
-    }
-    #[cfg(not(unix))]
-    {
-        tokio::signal::ctrl_c().await
-    }
-}
-
-async fn refresh_missing_subscription_icons(
-    pool: sqlx::PgPool,
-    fetcher: Arc<SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>>,
-    concurrency: usize,
-    stop: &mut reader_runtime::Shutdown,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT mapping.subscription_id,source.document FROM subscription_sources mapping JOIN sources source ON source.id=mapping.source_id LEFT JOIN subscription_icons icon ON icon.subscription_id=mapping.subscription_id WHERE icon.subscription_id IS NULL",
-    )
-    .fetch_all(&pool)
-    .await?;
-    let mut grouped = HashMap::<String, Vec<String>>::new();
-    for (subscription_id, document) in rows {
-        let source: SourceDefinition = serde_json::from_str(&document)?;
-        let mut favicon = source.url().clone();
-        favicon.set_path("/favicon.ico");
-        favicon.set_query(None);
-        favicon.set_fragment(None);
-        grouped
-            .entry(favicon.to_string())
-            .or_default()
-            .push(subscription_id);
-    }
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency.max(1)));
-    let mut tasks = tokio::task::JoinSet::new();
-    for (favicon, subscription_ids) in grouped {
-        let permit = tokio::select! { _ = stop.wait() => break, permit = semaphore.clone().acquire_owned() => permit? };
-        if stop.requested() {
-            break;
-        }
-        let fetcher = fetcher.clone();
-        tasks.spawn(async move {
-            let _permit = permit;
-            let url = Url::parse(&favicon).map_err(|error| error.to_string())?;
-            let page = fetcher
-                .fetch(&url, &CacheValidators::default())
-                .await
-                .map_err(|error| error.to_string())?;
-            let content_type = page
-                .content_type
-                .as_deref()
-                .and_then(|value| value.split(';').next())
-                .filter(|value| value.starts_with("image/"))
-                .ok_or_else(|| "favicon response is not an image".to_owned())?;
-            let data_url = format!("data:{content_type};base64,{}", BASE64.encode(page.body));
-            Ok::<_, String>((subscription_ids, data_url))
-        });
-    }
-    while let Some(result) = tasks.join_next().await {
-        match result {
-            Ok(Ok((subscription_ids, data_url))) => {
-                sqlx::query(
-                    "INSERT INTO subscription_icons(subscription_id,data_url,fetched_at_ms) SELECT id,$2,$3 FROM unnest($1::text[]) AS id ON CONFLICT(subscription_id) DO UPDATE SET data_url=EXCLUDED.data_url,fetched_at_ms=EXCLUDED.fetched_at_ms",
-                )
-                .bind(subscription_ids)
-                .bind(data_url)
-                .bind(chrono::Utc::now().timestamp_millis())
-                .execute(&pool)
-                .await?;
-            }
-            Ok(Err(error)) => log::debug!("subscription icon unavailable: {error}"),
-            Err(_) => return Err("subscription icon task panicked".into()),
-        }
     }
     Ok(())
 }
@@ -844,10 +773,14 @@ impl FeedDiscovery for ProductionDiscovery {
     async fn preview_web_feed(
         &self,
         draft: &WebFeedRecipeDraft,
-    ) -> Result<FeedPreviewResponse, String> {
+    ) -> Result<(FeedPreviewResponse, reader_core::PreparedWebFeed), String> {
+        let prepared = reader_core::PreparedWebFeed::new(
+            draft.clone(),
+            self.web_feeds.max_pages,
+            self.web_feeds.max_actions,
+        )?;
         let url = Url::parse(&draft.url).map_err(|_| "invalid web feed URL".to_owned())?;
-        let recipe =
-            recipe_from_draft(draft, self.web_feeds.max_pages, self.web_feeds.max_actions)?;
+        let recipe = prepared.recipe().clone();
         let source = SourceDefinition::new(
             reader_core::SourceId::new(),
             url.clone(),
@@ -861,22 +794,25 @@ impl FeedDiscovery for ProductionDiscovery {
         let title = url.host_str().unwrap_or("Web feed").to_owned();
         let available_items = records.len();
         let initial_items = available_items.min(self.initial_items);
-        Ok(FeedPreviewResponse {
-            title,
-            kind: "web_feed".to_owned(),
-            url: url.to_string(),
-            available_items,
-            initial_items,
-            incomplete: available_items > initial_items,
-            articles: records
-                .into_iter()
-                .take(initial_items)
-                .map(|v| FeedPreviewArticle {
-                    title: v.key().title.clone(),
-                    published_at: v.published_at().map(|d| d.to_rfc3339()),
-                })
-                .collect(),
-        })
+        Ok((
+            FeedPreviewResponse {
+                title,
+                kind: "web_feed".to_owned(),
+                url: url.to_string(),
+                available_items,
+                initial_items,
+                incomplete: available_items > initial_items,
+                articles: records
+                    .into_iter()
+                    .take(initial_items)
+                    .map(|v| FeedPreviewArticle {
+                        title: v.key().title.clone(),
+                        published_at: v.published_at().map(|d| d.to_rfc3339()),
+                    })
+                    .collect(),
+            },
+            prepared,
+        ))
     }
     async fn visual_preview(
         &self,
@@ -1022,84 +958,6 @@ fn select_visual_group(
             })
             .collect(),
     })
-}
-
-fn recipe_from_draft(
-    draft: &WebFeedRecipeDraft,
-    max_pages: usize,
-    max_actions: usize,
-) -> Result<WebFeedRecipe, String> {
-    let loading = match draft.loading.as_str() {
-        "automatic" => WebLoading::Automatic,
-        "static" => WebLoading::Static,
-        "browser" => WebLoading::Browser,
-        _ => return Err("invalid web feed loading mode".into()),
-    };
-    let language = match draft.selector_language.as_deref().unwrap_or("css") {
-        "css" => SelectorLanguage::Css,
-        "xpath" => SelectorLanguage::XPath,
-        _ => return Err("invalid selector language".into()),
-    };
-    let primary = WebSelector::new(language, draft.selector.clone()).map_err(|e| e.to_string())?;
-    let viewport = match draft.viewport.as_deref().unwrap_or("desktop") {
-        "desktop" => WebViewport::Desktop,
-        "mobile" => WebViewport::Mobile,
-        _ => return Err("invalid viewport".into()),
-    };
-    let parse = |value: &reader_server_contracts::SelectorDraft| {
-        let language = match value.language.as_str() {
-            "css" => SelectorLanguage::Css,
-            "xpath" => SelectorLanguage::XPath,
-            _ => return Err("invalid selector language".to_owned()),
-        };
-        WebSelector::new(language, value.expression.clone()).map_err(|e| e.to_string())
-    };
-    let overlays = draft
-        .hide_overlays
-        .iter()
-        .map(&parse)
-        .collect::<Result<Vec<_>, _>>()?;
-    let pages = draft
-        .start_pages
-        .iter()
-        .map(|value| Url::parse(value).map_err(|_| "invalid start page URL".to_owned()))
-        .collect::<Result<Vec<_>, _>>()?;
-    let next = draft.next_page.as_ref().map(&parse).transpose()?;
-    let load_more = draft.load_more.as_ref().map(&parse).transpose()?;
-    let requested_pages = draft.max_pages.unwrap_or(1);
-    if requested_pages == 0 || requested_pages > max_pages {
-        return Err("web feed maxPages exceeds configured limit".into());
-    }
-    let actions = WebFeedActions::new(
-        viewport,
-        overlays,
-        pages,
-        next,
-        load_more,
-        draft.load_more_clicks,
-        draft.scrolls,
-        max_pages,
-        max_actions,
-    )
-    .map_err(|e| e.to_string())?;
-    let listing = draft
-        .listing_url
-        .as_deref()
-        .map(Url::parse)
-        .transpose()
-        .map_err(|_| "invalid listing URL".to_owned())?;
-    let extraction = reader_ingest::WebExtraction::new(
-        listing,
-        draft.card_selector.clone(),
-        draft.title_selector.clone(),
-        draft.date_selector.clone(),
-        draft.content_selector.clone(),
-        draft.wait_selector.clone(),
-        draft.url_pattern.clone(),
-    )
-    .map_err(|e| e.to_string())?;
-    WebFeedRecipe::legacy(primary, loading, actions, extraction, requested_pages)
-        .map_err(|e| e.to_string())
 }
 
 fn auth_policy(config: &Config) -> Result<AuthPolicy, reader_application::AuthError> {

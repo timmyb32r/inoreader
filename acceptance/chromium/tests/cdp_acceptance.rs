@@ -96,7 +96,7 @@ fn recipe() -> WebFeedRecipe {
         None,
     )
     .unwrap();
-    WebFeedRecipe::legacy(selector, WebLoading::Browser, actions, extraction, 1).unwrap()
+    WebFeedRecipe::configured(selector, WebLoading::Browser, actions, extraction, 1).unwrap()
 }
 
 fn source(url: &str) -> SourceDefinition {

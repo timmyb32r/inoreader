@@ -18,11 +18,19 @@ use sqlx::{postgres::PgConnectOptions, PgPool, Postgres, Transaction};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-type PresentationRow = (String, String, String, Option<String>, Option<String>);
+type PresentationRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 type PresentationOrigin = (
     String,
     Subscription,
     Option<reader_ingest::ContentManifestPointer>,
+    Option<String>,
     Option<String>,
 );
 
@@ -129,135 +137,6 @@ struct SourceHealth {
     last_error_ms: Option<i64>,
     #[serde(default)]
     consecutive_failures: u32,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StoredSelector {
-    language: String,
-    expression: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StoredWebRecipe {
-    workspace_id: Uuid,
-    url: String,
-    selector: String,
-    loading: String,
-    #[serde(rename = "preview")]
-    _preview: Option<bool>,
-    #[serde(default)]
-    selector_language: Option<String>,
-    #[serde(default)]
-    viewport: Option<String>,
-    #[serde(default)]
-    listing_url: Option<String>,
-    #[serde(default)]
-    card_selector: Option<String>,
-    #[serde(default)]
-    title_selector: Option<String>,
-    #[serde(default)]
-    date_selector: Option<String>,
-    #[serde(default)]
-    content_selector: Option<String>,
-    #[serde(default)]
-    wait_selector: Option<String>,
-    #[serde(default)]
-    url_pattern: Option<String>,
-    #[serde(default)]
-    max_pages: Option<usize>,
-    #[serde(default)]
-    hide_overlays: Vec<StoredSelector>,
-    #[serde(default)]
-    start_pages: Vec<String>,
-    #[serde(default)]
-    next_page: Option<StoredSelector>,
-    #[serde(default)]
-    load_more: Option<StoredSelector>,
-    #[serde(default)]
-    load_more_clicks: usize,
-    #[serde(default)]
-    scrolls: usize,
-}
-
-fn selector(value: &StoredSelector) -> Result<WebSelector, RepositoryError> {
-    let language = match value.language.as_str() {
-        "css" => SelectorLanguage::Css,
-        "xpath" => SelectorLanguage::XPath,
-        _ => return Err(storage("invalid selector language")),
-    };
-    WebSelector::new(language, value.expression.clone()).map_err(storage)
-}
-
-fn stored_web_recipe(document: &str) -> Result<(StoredWebRecipe, WebFeedRecipe), RepositoryError> {
-    let raw: StoredWebRecipe = serde_json::from_str(document).map_err(storage)?;
-    let loading = match raw.loading.as_str() {
-        "automatic" => WebLoading::Automatic,
-        "static" => WebLoading::Static,
-        "browser" => WebLoading::Browser,
-        _ => return Err(storage("invalid web loading strategy")),
-    };
-    let language = match raw.selector_language.as_deref().unwrap_or("css") {
-        "css" => SelectorLanguage::Css,
-        "xpath" => SelectorLanguage::XPath,
-        _ => return Err(storage("invalid selector language")),
-    };
-    let primary = WebSelector::new(language, raw.selector.clone()).map_err(storage)?;
-    let viewport = match raw.viewport.as_deref().unwrap_or("desktop") {
-        "desktop" => WebViewport::Desktop,
-        "mobile" => WebViewport::Mobile,
-        _ => return Err(storage("invalid viewport")),
-    };
-    let overlays = raw
-        .hide_overlays
-        .iter()
-        .map(selector)
-        .collect::<Result<Vec<_>, _>>()?;
-    let pages = raw
-        .start_pages
-        .iter()
-        .map(|value| url::Url::parse(value).map_err(|_| storage("invalid start page URL")))
-        .collect::<Result<Vec<_>, _>>()?;
-    let next = raw.next_page.as_ref().map(selector).transpose()?;
-    let load_more = raw.load_more.as_ref().map(selector).transpose()?;
-    let actions = WebFeedActions::new(
-        viewport,
-        overlays,
-        pages,
-        next,
-        load_more,
-        raw.load_more_clicks,
-        raw.scrolls,
-        usize::MAX,
-        usize::MAX,
-    )
-    .map_err(storage)?;
-    let listing = raw
-        .listing_url
-        .as_deref()
-        .map(url::Url::parse)
-        .transpose()
-        .map_err(|_| storage("invalid listing URL"))?;
-    let extraction = WebExtraction::new(
-        listing,
-        raw.card_selector.clone(),
-        raw.title_selector.clone(),
-        raw.date_selector.clone(),
-        raw.content_selector.clone(),
-        raw.wait_selector.clone(),
-        raw.url_pattern.clone(),
-    )
-    .map_err(storage)?;
-    let recipe = WebFeedRecipe::legacy(
-        primary,
-        loading,
-        actions,
-        extraction,
-        raw.max_pages.unwrap_or(1),
-    )
-    .map_err(storage)?;
-    Ok((raw, recipe))
 }
 
 #[derive(Deserialize)]
@@ -396,7 +275,7 @@ fn imported_source_kind(configuration: &serde_json::Value) -> Result<SourceKind,
     )
     .map_err(storage)?;
     Ok(SourceKind::WebPage(
-        WebFeedRecipe::legacy(
+        WebFeedRecipe::configured(
             primary,
             loading,
             actions,

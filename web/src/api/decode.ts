@@ -1,4 +1,4 @@
-import { wireSchemas } from "./generated";
+import { wireSchemas, type WireTypes } from "./generated";
 type Schema = boolean | { [key: string]: any };
 /** Validate at the network boundary before an unchecked value becomes UI state.
  * Never coerce, truncate, drop unknown fields, or include payloads in diagnostics. */
@@ -80,10 +80,19 @@ export type ResponseContract =
   | `${keyof typeof wireSchemas}[]`
   | "empty"
   | "string";
-export function decodeResponse(
-  contract: ResponseContract,
+export type ResponseValue<C extends ResponseContract> = C extends "empty"
+  ? void
+  : C extends "string"
+    ? string
+    : C extends keyof WireTypes
+      ? WireTypes[C]
+      : C extends `${infer K extends keyof WireTypes}[]`
+        ? WireTypes[K][]
+        : never;
+export function decodeResponse<C extends ResponseContract>(
+  contract: C,
   value: unknown,
-): unknown {
+): ResponseValue<C> {
   if (contract === "empty") {
     if (value !== undefined) throw new Error("Invalid API response (empty)");
   } else if (contract === "string") {
@@ -96,5 +105,5 @@ export function decodeResponse(
       assertWire(contract.slice(0, -2) as keyof typeof wireSchemas, item),
     );
   } else assertWire(contract as keyof typeof wireSchemas, value);
-  return value;
+  return value as ResponseValue<C>;
 }

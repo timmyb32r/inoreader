@@ -20,8 +20,10 @@ services:
       - /tmp:size=32m,mode=1777
   app:
     build: .
+    stop_grace_period: ${CONTAINER_STOP_GRACE_SECONDS:-720}s
     command: ["--config", "/etc/inoreader/config.yaml", "serve"]
     environment:
+      CONTAINER_STOP_GRACE_SECONDS: ${CONTAINER_STOP_GRACE_SECONDS:-720}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
       AI_ENCRYPTION_KEY_FILE: /run/secrets/ai-encryption-key
     volumes:

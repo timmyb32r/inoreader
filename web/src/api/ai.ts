@@ -28,7 +28,7 @@ export function isChatActive(chat: ArticleChat | null): boolean {
 export class AiClient {
   constructor(private readonly transport: Transport) {}
   translations = (workspaceId: string, articleId: string) =>
-    this.transport<ParagraphJob[]>(
+    this.transport(
       `/api/articles/${encodeURIComponent(articleId)}/translations?workspace_id=${encodeURIComponent(workspaceId)}`,
       undefined,
       "ParagraphJob[]",
@@ -39,33 +39,20 @@ export class AiClient {
     operationId: string,
     source: string,
   ) =>
-    this.transport<ParagraphJob>(
+    this.transport(
       `/api/articles/${encodeURIComponent(articleId)}/translations`,
       json("POST", { workspaceId, operationId, source }),
       "ParagraphJob",
     );
-  profile = () =>
-    this.transport<AiProfile>("/api/ai/profile", undefined, "AiProfile");
+  profile = () => this.transport("/api/ai/profile", undefined, "AiProfile");
   saveKey = (apiKey: string) =>
-    this.transport<AiProfile>(
-      "/api/ai/profile",
-      json("PUT", { apiKey }),
-      "AiProfile",
-    );
+    this.transport("/api/ai/profile", json("PUT", { apiKey }), "AiProfile");
   removeKey = () =>
-    this.transport<AiProfile>(
-      "/api/ai/profile",
-      { method: "DELETE" },
-      "AiProfile",
-    );
+    this.transport("/api/ai/profile", { method: "DELETE" }, "AiProfile");
   balance = () =>
-    this.transport<AiProfile>(
-      "/api/ai/balance",
-      { method: "POST" },
-      "AiProfile",
-    );
+    this.transport("/api/ai/balance", { method: "POST" }, "AiProfile");
   versions = (workspaceId: string, articleId: string) =>
-    this.transport<ArticleChat[]>(
+    this.transport(
       `/api/articles/${encodeURIComponent(articleId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
       undefined,
       "ArticleChat[]",
@@ -76,31 +63,31 @@ export class AiClient {
     operationId: string,
     regenerate = false,
   ) =>
-    this.transport<ArticleChat>(
+    this.transport(
       `/api/articles/${encodeURIComponent(articleId)}/chat`,
       json("POST", { workspaceId, operationId, regenerate }),
       "ArticleChat",
     );
   get = (id: string) =>
-    this.transport<ArticleChat>(
+    this.transport(
       `/api/ai/chats/${encodeURIComponent(id)}`,
       undefined,
       "ArticleChat",
     );
   send = (id: string, operationId: string, content: string) =>
-    this.transport<ArticleChat>(
+    this.transport(
       `/api/ai/chats/${encodeURIComponent(id)}/messages`,
       json("POST", { operationId, content }),
       "ArticleChat",
     );
   stop = (id: string) =>
-    this.transport<ArticleChat>(
+    this.transport(
       `/api/ai/chats/${encodeURIComponent(id)}/stop`,
       { method: "POST" },
       "ArticleChat",
     );
   retry = (id: string, operationId: string) =>
-    this.transport<ArticleChat>(
+    this.transport(
       `/api/ai/chats/${encodeURIComponent(id)}/retry`,
       json("POST", { operationId }),
       "ArticleChat",

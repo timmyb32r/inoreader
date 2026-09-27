@@ -107,6 +107,7 @@ pub fn extract_selected_records(
                 .clone()
                 .unwrap_or_else(|| format!("selector:{}:{index}", recipe.selector()));
             let parsed = ParsedRecord {
+                description_media_type: Some("text/plain".into()),
                 upstream_id: upstream,
                 original_url: href.unwrap_or_default(),
                 absolute_url: absolute,

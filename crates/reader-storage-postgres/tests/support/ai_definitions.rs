@@ -166,4 +166,34 @@ pub async fn verify(
             .await
             .unwrap();
     assert_eq!(retained, b"partial raw");
+    for expired in [false, true] {
+        let bad = Uuid::new_v4();
+        sqlx::query("INSERT INTO ai_definitions(id,owner,workspace,article,status,document,input,created_at,lease,lease_until) VALUES($1,$2,$3,$4,$5,'broken original','exact input',now()-interval '1 day',$6,$7)")
+            .bind(bad).bind(owner).bind(workspace).bind(article).bind(if expired { "generating" } else { "queued" })
+            .bind(expired.then(Uuid::new_v4)).bind(expired.then(|| Utc::now()-chrono::Duration::minutes(1)))
+            .execute(pool).await.unwrap();
+        assert!(store.claim_definitions(60).await.unwrap().is_none());
+        let row: (String, String) =
+            sqlx::query_as("SELECT status,document FROM ai_definitions WHERE id=$1")
+                .bind(bad)
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(row, ("quarantined".into(), "broken original".into()));
+    }
+    let fresh = store
+        .create_definitions(make(), Uuid::new_v4(), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .claim_definitions(60)
+            .await
+            .unwrap()
+            .unwrap()
+            .record
+            .job()
+            .id,
+        fresh.id
+    );
 }

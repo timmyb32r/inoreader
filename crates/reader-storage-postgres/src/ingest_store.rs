@@ -4,6 +4,7 @@ use reader_core::*;
 use reader_ingest::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgConnectOptions, PgPool, Postgres, Row, Transaction};
+mod backlog;
 
 /// PostgreSQL-backed durable work queue and ingest state.
 ///
@@ -100,6 +101,7 @@ impl PostgresIngestStore {
                  attempt = CASE WHEN $1 = 'ready' THEN attempt + 1 ELSE attempt END,
                  revision = revision + 1
              WHERE id = $5 AND status = 'leased' AND lease_token = $6
+               AND lease_deadline_ms >= (extract(epoch FROM clock_timestamp()) * 1000)::bigint
              RETURNING item",
         )
         .bind(status)
@@ -524,10 +526,6 @@ pub(crate) fn cleanup_job(record: SourceRecordId, refresh: uuid::Uuid) -> JobId 
     durable_job_id(&format!("cleanup/{}/{refresh}", record.as_uuid()))
 }
 
-fn source_job(source: SourceId, tag: u8) -> JobId {
-    durable_job_id(&format!("source/{}/{tag}", source.as_uuid()))
-}
-
 fn rule_job(rule: RuleId, version: u64, cursor: ArticleId) -> JobId {
     durable_job_id(&format!(
         "rule/{}/{version}/{}",
@@ -562,21 +560,41 @@ impl IngestStore for PostgresIngestStore {
         let now_ms = millis(now);
         let oldest_ms = millis(now - self.max_retry_age);
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        let rows = sqlx::query(
-            "SELECT id, item, attempt, first_attempt_ms, origin_key
-             FROM ingest_jobs
-             WHERE (status = 'ready' AND run_at_ms <= $1)
-                OR (status = 'leased' AND lease_deadline_ms < $1)
-             ORDER BY CASE WHEN status = 'ready' THEN 0 ELSE 1 END, run_at_ms, id
-             LIMIT 128
-             FOR UPDATE SKIP LOCKED",
-        )
-        .bind(now_ms)
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(storage)?;
-
-        for row in rows {
+        // Origin reservations are transaction-scoped. A hash collision only
+        // serializes admission; hashes never stand in for source identity.
+        let mut excluded = Vec::<String>::new();
+        loop {
+            let row = sqlx::query(
+                "SELECT j.id,j.item,j.attempt,j.first_attempt_ms,j.origin_key
+                 FROM ingest_jobs j
+                 WHERE ((j.status='ready' AND j.run_at_ms <= $1)
+                    OR (j.status='leased' AND j.lease_deadline_ms < $1))
+                 AND NOT (j.origin_key = ANY($2))
+                 AND (SELECT count(*) FROM ingest_jobs a WHERE a.status='leased'
+                      AND a.origin_key=j.origin_key AND a.lease_deadline_ms >= $1) < $3
+                 AND NOT EXISTS (
+                    SELECT 1 FROM ingest_jobs a WHERE a.status='leased' AND a.lease_deadline_ms >= $1
+                    AND COALESCE(a.item::jsonb#>>'{PollSource,source_id}',a.item::jsonb#>>'{RefreshSource,source_id}',a.item::jsonb#>>'{CollectWebFeed,source_id}')
+                      = COALESCE(j.item::jsonb#>>'{PollSource,source_id}',j.item::jsonb#>>'{RefreshSource,source_id}',j.item::jsonb#>>'{CollectWebFeed,source_id}'))
+                 ORDER BY CASE WHEN j.status='ready' THEN 0 ELSE 1 END,j.run_at_ms,j.id
+                 LIMIT 1 FOR UPDATE OF j SKIP LOCKED",
+            ).bind(now_ms).bind(&excluded)
+             .bind(i64::try_from(self.per_origin_concurrency).map_err(storage)?)
+             .fetch_optional(&mut *tx).await.map_err(storage)?;
+            let Some(row) = row else {
+                break;
+            };
+            let origin: String = row.try_get("origin_key").map_err(storage)?;
+            let reserved: bool =
+                sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(1919246692,hashtext($1))")
+                    .bind(&origin)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(storage)?;
+            if !reserved {
+                excluded.push(origin);
+                continue;
+            }
             let id: String = row.try_get("id").map_err(storage)?;
             let first_attempt_ms: i64 = row.try_get("first_attempt_ms").map_err(storage)?;
             if retry_age_exceeded(first_attempt_ms, oldest_ms) {
@@ -597,12 +615,23 @@ impl IngestStore for PostgresIngestStore {
                 "SELECT count(*) FROM ingest_jobs
                  WHERE status = 'leased' AND origin_key = $1 AND lease_deadline_ms >= $2",
             )
-            .bind(origin)
+            .bind(&origin)
             .bind(now_ms)
             .fetch_one(&mut *tx)
             .await
             .map_err(storage)?;
             if !origin_has_capacity(active as usize, self.per_origin_concurrency) {
+                excluded.push(origin);
+                continue;
+            }
+            let source_busy: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM ingest_jobs a,ingest_jobs j WHERE j.id=$1
+                 AND a.status='leased' AND a.lease_deadline_ms >= $2
+                 AND COALESCE(a.item::jsonb#>>'{PollSource,source_id}',a.item::jsonb#>>'{RefreshSource,source_id}',a.item::jsonb#>>'{CollectWebFeed,source_id}')
+                   = COALESCE(j.item::jsonb#>>'{PollSource,source_id}',j.item::jsonb#>>'{RefreshSource,source_id}',j.item::jsonb#>>'{CollectWebFeed,source_id}'))")
+                .bind(&id).bind(now_ms).fetch_one(&mut *tx).await.map_err(storage)?;
+            if source_busy {
+                excluded.push(origin);
                 continue;
             }
             sqlx::query(
@@ -710,6 +739,13 @@ impl IngestStore for PostgresIngestStore {
             None => Ok(CacheValidators::default()),
         }
     }
+    async fn pending_poll(
+        &self,
+        source: SourceId,
+        limit: usize,
+    ) -> Result<Option<PollCommit>, StoreError> {
+        self.pending_poll_batch(source, limit).await
+    }
 
     async fn active_delivery_count(&self, source: SourceId) -> Result<u64, StoreError> {
         let documents = sqlx::query_scalar::<_, String>(
@@ -745,6 +781,7 @@ impl IngestStore for PostgresIngestStore {
     async fn commit_poll(&self, lease: &LeasedWork, commit: PollCommit) -> Result<(), StoreError> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
         assert_lease(&mut tx, lease).await?;
+        backlog::persist(&mut tx, &commit).await?;
         let observed_at_ms = commit.fetched_at.timestamp_millis();
         let discovered_items = commit.records.len();
         let now_ms = Utc::now().timestamp_millis();
@@ -874,7 +911,19 @@ impl IngestStore for PostgresIngestStore {
             };
             enqueue_work(
                 &mut tx,
-                source_job(commit.source_id, 9).as_uuid().to_string(),
+                record_job(
+                    "backfill",
+                    commit
+                        .records
+                        .last()
+                        .ok_or_else(|| {
+                            StoreError::Unavailable("incomplete poll has no progress".into())
+                        })?
+                        .id(),
+                    commit.source_revision,
+                )
+                .as_uuid()
+                .to_string(),
                 &item,
                 now_ms,
             )
@@ -1031,6 +1080,7 @@ impl IngestStore for PostgresIngestStore {
         let mut inherited = Vec::new();
         let mut moved_articles = Vec::new();
         let mut moved_subscriptions = Vec::new();
+        let mut retained_identity = None;
         for (old_id, subscriptions) in prior_by_article {
             let old_key = format!("{workspace}/{old_id}");
             let old_document: String =
@@ -1051,6 +1101,11 @@ impl IngestStore for PostgresIngestStore {
             moved_articles.push(old.id);
             inherited.push((old.state, old.first_arrived_at));
             old.detach_origin(record.id());
+            if old.origins.is_empty() && retained_identity.is_none() {
+                let mut retained = old.clone();
+                retained.key = record.key().clone();
+                retained_identity = Some(retained);
+            }
             sqlx::query(
                 "DELETE FROM library_origins
                  WHERE workspace_id = $1 AND article_id = $2 AND source_record_id = $3",
@@ -1091,7 +1146,7 @@ impl IngestStore for PostgresIngestStore {
         let dedup_key = encode(record.key())?;
         let dedup_hash = dedup_fingerprint(&dedup_key);
         let found = sqlx::query_as::<_, (String, String)>(
-            "SELECT dedup_key, document FROM library_dedup
+            "SELECT dedup_key, article_id FROM library_dedup
              WHERE workspace_id = $1 AND dedup_hash = $2 FOR UPDATE",
         )
         .bind(&workspace)
@@ -1105,7 +1160,28 @@ impl IngestStore for PostgresIngestStore {
                     "dedup fingerprint collision in workspace {workspace}"
                 )));
             }
-            Some((_, document)) => Some(decode::<Article>(&document)?),
+            Some((_, id)) => {
+                // The index identifies an article; it never owns mutable user
+                // state. Lock the authoritative row against concurrent commands.
+                let document: String =
+                    sqlx::query_scalar("SELECT document FROM articles WHERE id = $1 FOR UPDATE")
+                        .bind(format!("{workspace}/{id}"))
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .map_err(storage)?
+                        .ok_or_else(|| {
+                            StoreError::Unavailable(
+                                "dedup index references a missing article".into(),
+                            )
+                        })?;
+                let article: Article = decode(&document)?;
+                if article.id.as_uuid().to_string() != id || article.key != *record.key() {
+                    return Err(StoreError::Unavailable(
+                        "dedup index disagrees with article identity".into(),
+                    ));
+                }
+                Some(article)
+            }
             None => None,
         };
         let inherited_time = inherited.iter().map(|(_, time)| *time).min();
@@ -1119,14 +1195,19 @@ impl IngestStore for PostgresIngestStore {
                 Some(article)
             }
             (Some(article), None) => Some(article),
-            (None, Some(state)) => Some(Article {
-                id: commit.proposed_article_id,
-                key: record.key().clone(),
-                state,
-                first_arrived_at: inherited_time.unwrap_or(commit.delivered_at),
-                origins: vec![],
-                revision: 0,
-            }),
+            (None, Some(state)) => {
+                let mut article = retained_identity.unwrap_or(Article {
+                    id: commit.proposed_article_id,
+                    key: record.key().clone(),
+                    state,
+                    first_arrived_at: inherited_time.unwrap_or(commit.delivered_at),
+                    origins: vec![],
+                    revision: 0,
+                });
+                article.state = state;
+                article.first_arrived_at = inherited_time.unwrap_or(article.first_arrived_at);
+                Some(article)
+            }
             (None, None) => None,
         };
         let (mut article, result) = match found {
@@ -1169,6 +1250,26 @@ impl IngestStore for PostgresIngestStore {
         }
 
         migrate_rule_provenance(&mut tx, &workspace, article.id, &moved_articles).await?;
+        for old in &moved_articles {
+            if *old != article.id {
+                // History is immutable and can belong to both branches of a
+                // split. Record lineage instead of rewriting paid job inputs
+                // or racing their workers. Edges are workspace-scoped closure.
+                sqlx::query(
+                    "INSERT INTO article_history_links(workspace_id,article_id,history_article_id)
+                     SELECT $1,$2,$3 UNION
+                     SELECT workspace_id,$2,history_article_id FROM article_history_links
+                     WHERE workspace_id=$1 AND article_id=$3
+                     ON CONFLICT DO NOTHING",
+                )
+                .bind(&workspace)
+                .bind(article.id.as_uuid().to_string())
+                .bind(old.as_uuid().to_string())
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
+            }
+        }
         enqueue_article_rule_jobs(
             &mut tx,
             workspace_id,
@@ -1619,19 +1720,16 @@ async fn upsert_article(
     .map_err(storage)?;
     let result = sqlx::query(
         "INSERT INTO library_dedup
-         (workspace_id, dedup_hash, dedup_key, article_id, revision, document)
-         VALUES ($1, $2, $3, $4, $5, $6)
+         (workspace_id, dedup_hash, dedup_key, article_id)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (workspace_id, dedup_hash) DO UPDATE
-         SET article_id = EXCLUDED.article_id, revision = EXCLUDED.revision,
-             document = EXCLUDED.document
+         SET article_id = EXCLUDED.article_id
          WHERE library_dedup.dedup_key = EXCLUDED.dedup_key",
     )
     .bind(workspace)
     .bind(dedup_hash)
     .bind(dedup_key)
     .bind(article.id.as_uuid().to_string())
-    .bind(revision)
-    .bind(document)
     .execute(&mut **tx)
     .await
     .map_err(storage)?
@@ -1781,34 +1879,19 @@ async fn article_full_text(
     tx: &mut Transaction<'_, Postgres>,
     article: &Article,
 ) -> Result<(Option<String>, Vec<uuid::Uuid>), StoreError> {
-    let mut text = String::new();
-    let mut generations = Vec::new();
-    for origin in &article.origins {
-        let Some(document) =
-            sqlx::query_scalar::<_, String>("SELECT document FROM content_manifests WHERE id = $1")
-                .bind(origin.as_uuid().to_string())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(storage)?
-        else {
-            continue;
-        };
-        let manifest: ContentManifestPointer = decode(&document)?;
-        let chunks = sqlx::query_scalar::<_, String>(
-            "SELECT bytes FROM staged_content_chunks
-             WHERE record_id = $1 AND refresh_id = $2 AND representation = 'safe'
-             ORDER BY ordinal",
-        )
-        .bind(origin.as_uuid().to_string())
-        .bind(manifest.refresh_id.to_string())
-        .fetch_all(&mut **tx)
+    let records: Vec<String> = article
+        .origins
+        .iter()
+        .map(|id| id.as_uuid().to_string())
+        .collect();
+    let snapshots = crate::content_snapshot::read_origins(tx, &records)
         .await
         .map_err(storage)?;
-        for chunk in chunks {
-            let bytes: Vec<u8> = decode(&chunk)?;
-            text.push_str(std::str::from_utf8(&bytes).map_err(storage)?);
-        }
-        generations.push(manifest.refresh_id);
+    let mut text = String::new();
+    let mut generations = Vec::with_capacity(snapshots.len());
+    for snapshot in snapshots {
+        text.push_str(&snapshot.html);
+        generations.push(snapshot.pointer.refresh_id);
     }
     Ok(((!text.is_empty()).then_some(text), generations))
 }

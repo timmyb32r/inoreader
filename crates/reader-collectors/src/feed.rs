@@ -10,6 +10,8 @@ pub struct ParsedRecord {
     pub absolute_url: Option<Url>,
     pub title: String,
     pub description: Option<String>,
+    /// Declared source media type; None means unknown, never guessed from markup.
+    pub description_media_type: Option<String>,
     pub content_html: Option<String>,
     pub published_at: Option<DateTime<Utc>>,
 }
@@ -56,6 +58,10 @@ pub fn parse_xml(bytes: &[u8], feed_url: &Url) -> Result<Vec<ParsedRecord>, Feed
                 original_url: link,
                 absolute_url,
                 title: entry.title.map(|v| v.content).unwrap_or_default(),
+                description_media_type: entry
+                    .summary
+                    .as_ref()
+                    .map(|v| v.content_type.as_str().to_owned()),
                 description: entry.summary.map(|v| v.content),
                 content_html: entry.content.and_then(|v| v.body),
                 published_at: entry.published,
@@ -103,6 +109,7 @@ pub fn parse_json(bytes: &[u8], feed_url: &Url) -> Result<Vec<ParsedRecord>, Fee
                 original_url: link,
                 absolute_url,
                 title: item.title.unwrap_or_default(),
+                description_media_type: item.summary.as_ref().map(|_| "text/plain".into()),
                 description: item.summary,
                 content_html: item.content_html,
                 published_at: item.date_published,

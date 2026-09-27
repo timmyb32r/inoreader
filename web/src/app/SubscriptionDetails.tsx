@@ -13,7 +13,7 @@ import {
   AutofillResistantTextarea,
 } from "../ui/fields";
 import { ModalDialog } from "../ui/ModalDialog";
-import type { Article, Subscription } from "./data";
+import type { Subscription } from "./data";
 import { LatestArticles } from "./LatestArticles";
 import { PublicationHistory } from "./PublicationHistory";
 import { formatKind } from "./subscriptionCatalogModel";
@@ -23,7 +23,6 @@ export function SubscriptionDetails({
   workspaceId,
   workspaceName,
   subscriptions,
-  articles,
   subscriptionId,
   initialTab,
   onBack,
@@ -38,7 +37,6 @@ export function SubscriptionDetails({
   workspaceId: string;
   workspaceName: string;
   subscriptions: Subscription[];
-  articles: Article[];
   subscriptionId: string;
   initialTab?: DetailTab;
   onBack: () => void;
@@ -164,9 +162,6 @@ export function SubscriptionDetails({
         </div>
       </section>
     );
-  const latest = articles
-    .filter((a) => a.subscriptionIds?.includes(subscriptionId))
-    .slice(0, 5);
   const save = () => {
     if (saving) return;
     setSaving(true);
@@ -359,7 +354,8 @@ export function SubscriptionDetails({
           </section>
           <PublicationHistory client={client} subscriptionId={subscriptionId} />
           <LatestArticles
-            articles={latest}
+            client={client}
+            workspaceId={workspaceId}
             subscriptionId={detail.id}
             onOpenArticles={onOpenArticles}
           />

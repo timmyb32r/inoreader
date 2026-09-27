@@ -152,7 +152,7 @@ impl FeedDiscovery for NoDiscovery {
     async fn preview_web_feed(
         &self,
         _: &WebFeedRecipeDraft,
-    ) -> Result<FeedPreviewResponse, String> {
+    ) -> Result<(FeedPreviewResponse, reader_core::PreparedWebFeed), String> {
         unreachable!()
     }
 }
@@ -467,6 +467,7 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         revision: 0,
     };
     let presentation = reader_application::ArticlePresentation {
+        description_media_type: None,
         article,
         subscription_ids: vec![],
         subscription_titles: vec!["Feed A".into(), "Feed B".into()],
@@ -976,7 +977,7 @@ impl reader_application::SubscriptionRepository for RouteRepository {
     async fn save_web_feed_subscription(
         &self,
         _: Subscription,
-        _: String,
+        _: reader_core::PreparedWebFeed,
     ) -> Result<(), RepositoryError> {
         route_unused()
     }
@@ -987,7 +988,7 @@ impl reader_application::SubscriptionRepository for RouteRepository {
         &self,
         _: SubscriptionId,
         _: u64,
-        _: String,
+        _: reader_core::PreparedWebFeed,
     ) -> Result<u64, RepositoryError> {
         route_unused()
     }
@@ -1064,4 +1065,43 @@ async fn article_command_resolves_ownership_before_any_article_access() {
     )
     .await;
     assert!(matches!(result, Err(RepositoryError::NotFound)));
+}
+
+#[test]
+fn description_rendering_uses_declared_format_without_changing_source() {
+    let source = "<p>Rust &amp; <strong>SQL</strong></p><p>Next</p><script>bad()</script>";
+    let mut value = reader_application::ArticlePresentation {
+        article: reader_core::Article {
+            id: ArticleId::new(),
+            key: DedupKey {
+                location: ArticleLocation::from(Url::parse("https://example.com/post").unwrap()),
+                title: "Title".into(),
+                description: Some(source.into()),
+            },
+            state: ArticleState::default(),
+            first_arrived_at: Utc::now(),
+            origins: vec![],
+            revision: 0,
+        },
+        description_media_type: Some("text/html".into()),
+        subscription_ids: vec![],
+        subscription_titles: vec![],
+        safe_html: None,
+        full_text_status: reader_application::ContentStatus::Pending,
+        failure_reason: None,
+    };
+    for format in ["text/html", "application/xhtml+xml"] {
+        value.description_media_type = Some(format.into());
+        let view = article_view(&value);
+        assert_eq!(view.excerpt, "Rust & SQL Next");
+        assert!(view.body_html.unwrap().contains("<strong>SQL</strong>"));
+        assert_eq!(value.article.key.description.as_deref(), Some(source));
+    }
+    for format in [None, Some("text/plain".into())] {
+        value.description_media_type = format;
+        value.article.key.description = Some("Vec<T> x < 3 & literal <b>code</b>".into());
+        let view = article_view(&value);
+        assert_eq!(view.excerpt, "Vec<T> x < 3 & literal <b>code</b>");
+        assert!(view.body_html.is_none());
+    }
 }

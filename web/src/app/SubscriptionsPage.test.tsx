@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { render, screen, waitFor, within } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
 import {
@@ -49,7 +50,10 @@ const detail: SubscriptionDetail = {
 
 function client(detailValue: SubscriptionDetail = detail) {
   const calls: { path: string; init?: RequestInit }[] = [];
-  const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
     calls.push({ path, init });
     if (path === "/api/subscriptions/one/extraction")
       return {
@@ -57,7 +61,7 @@ function client(detailValue: SubscriptionDetail = detail) {
         feedUrls: ["https://canonical.test/rss"],
         recipeSummary: "Parsed feed entries",
         lastPreview: "2026-09-25T18:00:00Z",
-      } as T;
+      } as unknown as ResponseValue<C>;
     if (path === "/api/rules?workspace_id=ws")
       return [
         {
@@ -76,7 +80,7 @@ function client(detailValue: SubscriptionDetail = detail) {
           action: "mark_read",
           enabled: true,
         },
-      ] as T;
+      ] as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one/activity")
       return [
         {
@@ -87,31 +91,39 @@ function client(detailValue: SubscriptionDetail = detail) {
           discoveredItems: 0,
           diagnostic: "Timed out",
         },
-      ] as T;
+      ] as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one/source-url/preview")
       return {
         token: "preview-token",
         url: JSON.parse(String(init?.body)).url,
         title: "Alpha replacement",
         expiresAt: "2026-09-25T19:00:00Z",
-      } as T;
+      } as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one/source-url")
-      return { ...detailValue, sourceUrl: "https://new.test/feed" } as T;
+      return {
+        ...detailValue,
+        sourceUrl: "https://new.test/feed",
+      } as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one" && init?.method === "PATCH")
       return {
         ...detailValue,
         name: "Custom Alpha",
         customName: "Custom Alpha",
-      } as T;
+      } as unknown as ResponseValue<C>;
     if (path === "/api/web-feeds/recipes/one")
-      return { subscriptionId: "one", version: 2, draft: {} } as T;
-    if (path === "/api/subscriptions/one") return detailValue as T;
+      return {
+        subscriptionId: "one",
+        version: 2,
+        draft: {},
+      } as unknown as ResponseValue<C>;
+    if (path === "/api/subscriptions/one")
+      return detailValue as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one/note")
       return {
         ...detailValue,
         personalNote: JSON.parse(String(init?.body)).note,
-      } as T;
-    return undefined as T;
+      } as unknown as ResponseValue<C>;
+    return undefined as unknown as ResponseValue<C>;
   };
   return { api: new ApiClient(transport), calls };
 }
@@ -345,6 +357,7 @@ describe("subscription details", () => {
       id: "article-one",
       url: "https://alpha.test/post",
       source: "Alpha",
+      sources: ["Alpha"],
       subscriptionIds: ["one"],
       title: "A useful post",
       excerpt: "",
@@ -354,13 +367,12 @@ describe("subscription details", () => {
       later: false,
       fullText: "ready" as const,
     };
-    render(
-      <SubscriptionsPage
-        {...props(api, "one")}
-        articles={[article]}
-        onOpenArticles={open}
-      />,
-    );
+    vi.spyOn(api, "listArticles").mockResolvedValue({
+      articles: [article],
+      total: 1,
+      unreadTotal: 1,
+    });
+    render(<SubscriptionsPage {...props(api, "one")} onOpenArticles={open} />);
     await user.click(
       await screen.findByRole("button", { name: /A useful post/ }),
     );
@@ -439,13 +451,19 @@ describe("subscription details", () => {
       status: "archived" as const,
     };
     const calls: string[] = [];
-    const api = new ApiClient(async <T,>(path: string, init?: RequestInit) => {
-      calls.push(`${init?.method ?? "GET"} ${path}`);
-      if (path === "/api/subscriptions/old/restore")
-        return { ...archived, status: "active" } as T;
-      if (path === "/api/subscriptions/old") return archived as T;
-      return undefined as T;
-    });
+    const api = new ApiClient(
+      async <C extends ResponseContract>(path: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? "GET"} ${path}`);
+        if (path === "/api/subscriptions/old/restore")
+          return {
+            ...archived,
+            status: "active",
+          } as unknown as ResponseValue<C>;
+        if (path === "/api/subscriptions/old")
+          return archived as unknown as ResponseValue<C>;
+        return undefined as unknown as ResponseValue<C>;
+      },
+    );
     const changed = vi.fn();
     const user = userEvent.setup();
     render(

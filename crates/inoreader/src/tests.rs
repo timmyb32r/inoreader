@@ -214,3 +214,18 @@ fn bulk_selection_limit_rejects_invalid_configuration_before_connecting() {
         assert!(config.validate().is_err());
     }
 }
+
+#[test]
+fn stop_budgets_cover_both_paid_phases_and_container_never_preempts_drain() {
+    let mut value = example();
+    value.server.graceful_shutdown_seconds = value.ai.as_ref().unwrap().request_timeout_seconds;
+    assert!(value.validate().is_err());
+    value.server.graceful_shutdown_seconds = value.ai.as_ref().unwrap().lease_seconds + 1;
+    value.validate().unwrap();
+    assert!(value
+        .validate_container_stop_budget(value.server.graceful_shutdown_seconds)
+        .is_err());
+    value
+        .validate_container_stop_budget(value.server.graceful_shutdown_seconds + 1)
+        .unwrap();
+}

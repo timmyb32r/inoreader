@@ -1,3 +1,4 @@
+import type { ResponseContract, ResponseValue } from "../api/decode";
 import { ApiClient, type Bootstrap, type Transport } from "../api/client";
 import type { Article } from "../app/data";
 
@@ -65,25 +66,35 @@ const bootstrap: Bootstrap = {
 };
 
 export function mockClient(overrides: Record<string, unknown> = {}) {
-  const transport: Transport = async <T>(path: string, init?: RequestInit) => {
-    if (path.startsWith("/api/bootstrap")) return bootstrap as T;
-    if (path.startsWith("/api/articles?")) return bootstrap.articlePage as T;
-    if (path === "/api/subscriptions?workspace_id=finance") return [] as T;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
+    if (path.startsWith("/api/bootstrap"))
+      return bootstrap as unknown as ResponseValue<C>;
+    if (path.startsWith("/api/articles?"))
+      return bootstrap.articlePage as unknown as ResponseValue<C>;
+    if (path === "/api/subscriptions?workspace_id=finance")
+      return [] as unknown as ResponseValue<C>;
     if (path.includes("/state")) {
       const id = path.split("/").at(-2);
       return {
         ...articles.find((a) => a.id === id),
         ...JSON.parse(String(init?.body ?? "{}")),
-      } as T;
+      } as unknown as ResponseValue<C>;
     }
     if (path in overrides) {
       const value = overrides[path];
       if (value instanceof Error) throw value;
-      return value as T;
+      return value as unknown as ResponseValue<C>;
     }
     if (path.endsWith("/publication-history"))
-      return { days: [], undated: 0, conflicting: 0 } as T;
-    return undefined as T;
+      return {
+        days: [],
+        undated: 0,
+        conflicting: 0,
+      } as unknown as ResponseValue<C>;
+    return undefined as unknown as ResponseValue<C>;
   };
   return new ApiClient(transport);
 }

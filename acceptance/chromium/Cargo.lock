@@ -1504,6 +1504,8 @@ name = "reader-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
+ "scraper",
  "serde",
  "thiserror",
  "url",
@@ -1544,6 +1546,7 @@ dependencies = [
  "futures-util",
  "http",
  "reqwest 0.12.28",
+ "scraper",
  "thiserror",
  "tokio",
  "url",

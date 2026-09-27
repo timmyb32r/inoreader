@@ -2,7 +2,7 @@ server:
   bind: "0.0.0.0:8080"
   external_origin: "https://reader.example.com"
   request_timeout_seconds: 30
-  graceful_shutdown_seconds: 20
+  graceful_shutdown_seconds: 700
   max_request_body_bytes: 2097152
 database:
   postgres:

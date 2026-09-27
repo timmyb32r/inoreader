@@ -827,3 +827,25 @@ fn definitions_ground_exact_names_without_regenerating_surrounding_whitespace() 
         DefinitionResult::from_response(&snapshot, &response.replace("OLAP", "Invented")).is_err()
     );
 }
+
+#[test]
+fn streaming_segments_accept_every_character_boundary_and_escaped_braces() {
+    let envelope = r#" { "segments" : [ {"kind":"text","content":"A中文 {x} \\\" end"}, {"kind":"text","content":"Second"} ] } "#;
+    let mut whole = VerifiedSegments::new("source", envelope.len());
+    whole.push(envelope).unwrap();
+    let expected = whole.finish().unwrap().to_owned();
+    let mut incremental = VerifiedSegments::new("source", envelope.len());
+    for character in envelope.chars() {
+        incremental.push(&character.to_string()).unwrap();
+    }
+    assert_eq!(incremental.finish().unwrap(), expected);
+    assert_eq!(incremental.envelope(), envelope);
+}
+
+#[test]
+fn streaming_segments_reject_non_object_items_before_publishing() {
+    let mut stream = VerifiedSegments::new("source", 1024);
+    assert!(stream
+        .push(r#"{"segments":["invalid",{"kind":"text","content":"unchecked"}]}"#)
+        .is_err());
+}

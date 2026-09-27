@@ -17,25 +17,25 @@ const json = (method: string, body: unknown): RequestInit => ({
 export class GlossaryClient {
   constructor(private readonly transport: Transport) {}
   status = (workspace: string) =>
-    this.transport<ChannelStatus>(
+    this.transport(
       `/api/glossary/channel?workspace_id=${encodeURIComponent(workspace)}`,
       undefined,
       "ChannelStatus",
     );
   configure = (workspaceId: string, token: string) =>
-    this.transport<ChannelStatus>(
+    this.transport(
       "/api/glossary/channel",
       json("PUT", { workspaceId, token }),
       "ChannelStatus",
     );
   sync = (workspaceId: string) =>
-    this.transport<ChannelStatus>(
+    this.transport(
       "/api/glossary/channel/sync",
       json("POST", { workspaceId }),
       "ChannelStatus",
     );
   get = (workspace: string, article: string) =>
-    this.transport<DefinitionsView>(
+    this.transport(
       `/api/articles/${encodeURIComponent(article)}/definitions?workspace_id=${encodeURIComponent(workspace)}`,
       undefined,
       "DefinitionsView",
@@ -46,7 +46,7 @@ export class GlossaryClient {
     operationId: string,
     regenerate = false,
   ) =>
-    this.transport<DefinitionsView>(
+    this.transport(
       `/api/articles/${encodeURIComponent(article)}/definitions`,
       json("POST", { workspaceId, operationId, regenerate }),
       "DefinitionsView",

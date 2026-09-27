@@ -81,7 +81,7 @@ fn durable_job_ids_are_stable_and_include_the_complete_identity() {
 fn schema_has_one_concrete_source_of_truth() {
     assert_eq!(
         SCHEMA_SQL.matches("CREATE TABLE IF NOT EXISTS ").count(),
-        34
+        36
     );
     for obsolete in [
         "reader_documents",
@@ -99,6 +99,8 @@ fn schema_has_one_concrete_source_of_truth() {
         "web_feed_recipes",
         "ingest_jobs",
         "rule_evaluations",
+        "poll_backlog",
+        "article_history_links",
     ] {
         assert!(
             SCHEMA_SQL.contains(&format!("CREATE TABLE IF NOT EXISTS {table}")),

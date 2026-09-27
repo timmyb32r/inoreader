@@ -96,6 +96,18 @@ pub(super) fn subscription_view(
 }
 pub(super) fn article_view(value: &reader_application::ArticlePresentation) -> ArticleView {
     let mut view = article_domain_view(&value.article);
+    if matches!(
+        value.description_media_type.as_deref(),
+        Some("text/html" | "application/xhtml+xml")
+    ) {
+        let rendered = reader_web_runtime::SafeRenderedContent::from_untrusted_html_with_base(
+            value.article.key.description.as_deref().unwrap_or_default(),
+            Some(&view.url),
+        );
+        view.excerpt = reader_web_runtime::plain_text(rendered.html());
+        view.body = vec![view.excerpt.clone()];
+        view.body_html = Some(rendered.html().to_owned());
+    }
     view.sources = value.subscription_titles.clone();
     view.subscription_ids = value
         .subscription_ids

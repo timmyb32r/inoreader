@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "preact/hooks";
 import type { ApiClient, WebFeedRecipeView } from "../api/client";
 import { Icon } from "../ui/Icon";
-import type { Article, Subscription } from "./data";
+import type { Subscription } from "./data";
 import { SubscriptionCatalog } from "./SubscriptionCatalog";
 import { SubscriptionDetails, type DetailTab } from "./SubscriptionDetails";
 export function SubscriptionsPage({
@@ -9,7 +9,6 @@ export function SubscriptionsPage({
   workspaceId,
   workspaceName,
   subscriptions,
-  articles,
   subscriptionId,
   initialTab,
   onBack,
@@ -25,7 +24,6 @@ export function SubscriptionsPage({
   workspaceId: string;
   workspaceName: string;
   subscriptions: Subscription[];
-  articles: Article[];
   subscriptionId?: string;
   initialTab?: DetailTab;
   onBack: () => void;
@@ -92,7 +90,6 @@ export function SubscriptionsPage({
               workspaceId,
               workspaceName,
               subscriptions,
-              articles,
               subscriptionId,
               initialTab,
               onBack,

@@ -19,6 +19,14 @@ struct Envelope {
 /// source quotations. Final parsing rejects trailing/malformed provider output.
 pub(crate) struct VerifiedSegments<'a> {
     raw: String,
+    cursor: usize,
+    array_started: bool,
+    array_finished: bool,
+    object_start: Option<usize>,
+    depth: usize,
+    quoted: bool,
+    escaped: bool,
+    separator: bool,
     article: &'a str,
     emitted: usize,
     content: String,
@@ -29,6 +37,14 @@ impl<'a> VerifiedSegments<'a> {
     pub fn new(article: &'a str, limit: usize) -> Self {
         Self {
             raw: String::new(),
+            cursor: 0,
+            array_started: false,
+            array_finished: false,
+            object_start: None,
+            depth: 0,
+            quoted: false,
+            escaped: false,
+            separator: false,
             article,
             emitted: 0,
             content: String::new(),
@@ -46,51 +62,84 @@ impl<'a> VerifiedSegments<'a> {
             return Err(AiError::Protocol);
         }
         self.raw.push_str(text);
-        let trimmed = self.raw.trim_start();
-        // The envelope permits arbitrary JSON whitespace but no other fields.
-        let Some(after_object) = trimmed.strip_prefix('{') else {
-            return Ok(None);
-        };
-        let Some(after_key) = after_object.trim_start().strip_prefix("\"segments\"") else {
-            return Ok(None);
-        };
-        let Some(after_colon) = after_key.trim_start().strip_prefix(':') else {
-            return Ok(None);
-        };
-        let Some(mut rest) = after_colon.trim_start().strip_prefix('[') else {
-            return Ok(None);
-        };
-        let mut parsed = Vec::new();
-        loop {
-            rest = rest.trim_start();
-            if rest.starts_with(']') || rest.is_empty() {
-                break;
+        let mut changed = false;
+        // Scan every incoming byte once, including incomplete/escaped strings.
+        // Deserialize only a newly closed object, never the growing prefix.
+        while self.cursor < self.raw.len() {
+            let position = self.cursor;
+            let byte = self.raw.as_bytes()[position];
+            self.cursor += 1;
+            if self.array_finished {
+                continue;
             }
-            let mut stream = serde_json::Deserializer::from_str(rest).into_iter::<Segment>();
-            match stream.next() {
-                Some(Ok(segment)) => {
-                    parsed.push(segment);
-                    rest = &rest[stream.byte_offset()..];
-                    rest = rest.trim_start();
-                    if let Some(next) = rest.strip_prefix(',') {
-                        rest = next;
-                    } else {
-                        break;
-                    }
+            if self.quoted {
+                if self.escaped {
+                    self.escaped = false;
+                } else if byte == b'\\' {
+                    self.escaped = true;
+                } else if byte == b'"' {
+                    self.quoted = false;
                 }
-                Some(Err(error)) if error.is_eof() => break,
-                _ => return Err(AiError::Protocol),
+                continue;
+            }
+            if byte == b'"' {
+                if self.array_started && self.object_start.is_none() {
+                    return Err(AiError::Protocol);
+                }
+                self.quoted = true;
+                continue;
+            }
+            if !self.array_started {
+                if byte == b'[' {
+                    let header = format!("{}]}}", &self.raw[..self.cursor]);
+                    let _: Envelope =
+                        serde_json::from_str(&header).map_err(|_| AiError::Protocol)?;
+                    self.array_started = true;
+                }
+                continue;
+            }
+            if self.object_start.is_none() {
+                if byte.is_ascii_whitespace() {
+                    continue;
+                }
+                if byte == b']' {
+                    self.array_finished = true;
+                    continue;
+                }
+                if self.separator {
+                    if byte != b',' {
+                        return Err(AiError::Protocol);
+                    }
+                    self.separator = false;
+                    continue;
+                }
+                if byte != b'{' {
+                    return Err(AiError::Protocol);
+                }
+                self.object_start = Some(position);
+                self.depth = 1;
+                continue;
+            }
+            if byte == b'{' {
+                self.depth += 1;
+            }
+            if byte == b'}' {
+                self.depth -= 1;
+                if self.depth == 0 {
+                    let start = self.object_start.take().ok_or(AiError::Protocol)?;
+                    let segment: Segment = serde_json::from_str(&self.raw[start..self.cursor])
+                        .map_err(|_| AiError::Protocol)?;
+                    let rendered = render_segment(&segment, self.article)?;
+                    if !self.content.is_empty() {
+                        self.content.push_str("\n\n");
+                    }
+                    self.content.push_str(&rendered);
+                    self.emitted += 1;
+                    self.separator = true;
+                    changed = true;
+                }
             }
         }
-        let changed = parsed.len() > self.emitted;
-        for segment in parsed.iter().skip(self.emitted) {
-            let rendered = render_segment(segment, self.article)?;
-            if !self.content.is_empty() {
-                self.content.push_str("\n\n");
-            }
-            self.content.push_str(&rendered);
-        }
-        self.emitted = parsed.len();
         Ok(changed.then_some(self.content.as_str()))
     }
     pub fn finish(&self) -> Result<&str, AiError> {

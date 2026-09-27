@@ -224,6 +224,14 @@ where
         if self.store.active_delivery_count(source_id).await? == 0 {
             return Ok(());
         }
+        if let Some(pending) = self
+            .store
+            .pending_poll(source_id, self.limits.fanout_batch)
+            .await?
+        {
+            self.store.commit_poll(lease, pending).await?;
+            return Ok(());
+        }
         let source = self.store.source(source_id).await?;
         let validators = self.store.source_validators(source_id).await?;
         let page = self.feeds.fetch(source.url(), &validators).await?;
@@ -270,11 +278,13 @@ where
         let is_initial = !self.store.has_committed_poll(source_id).await?;
         let incomplete = is_initial && parsed.len() > self.limits.initial_feed_items;
         let mut records = Vec::new();
-        for parsed in parsed.into_iter().take(if is_initial {
-            self.limits.initial_feed_items
-        } else {
-            usize::MAX
-        }) {
+        let mut upstream_ids = std::collections::HashSet::new();
+        for parsed in parsed {
+            if !upstream_ids.insert(parsed.upstream_id.clone()) {
+                return Err(IngestError::Parse(
+                    "duplicate upstream identity in feed response".into(),
+                ));
+            }
             let value = match self
                 .store
                 .record_by_upstream(source_id, &parsed.upstream_id)
@@ -304,6 +314,11 @@ where
             };
             records.push(value);
         }
+        let remainder = if is_initial && records.len() > self.limits.initial_feed_items {
+            records.split_off(self.limits.initial_feed_items)
+        } else {
+            Vec::new()
+        };
         self.store
             .commit_poll(
                 lease,
@@ -311,6 +326,7 @@ where
                     source_id,
                     source_revision: source.revision(),
                     records,
+                    remainder,
                     fetched_at: now,
                     final_url: page.final_url,
                     validators: page.validators,
@@ -426,11 +442,19 @@ where
         now: DateTime<Utc>,
     ) -> Result<(), IngestError> {
         let started = std::time::Instant::now();
-        if self.browser.capability() == BrowserCapability::Degraded {
-            return Err(IngestError::BrowserDegraded);
-        }
         if self.store.active_delivery_count(source_id).await? == 0 {
             return Ok(());
+        }
+        if let Some(pending) = self
+            .store
+            .pending_poll(source_id, self.limits.fanout_batch)
+            .await?
+        {
+            self.store.commit_poll(lease, pending).await?;
+            return Ok(());
+        }
+        if self.browser.capability() == BrowserCapability::Degraded {
+            return Err(IngestError::BrowserDegraded);
         }
         let source = self.store.source(source_id).await?;
         let is_initial = !self.store.has_committed_poll(source_id).await?;
@@ -449,11 +473,13 @@ where
             return Err(IngestError::Parse("web_feed_empty_after_success".into()));
         }
         let incomplete = is_initial && collected.len() > self.limits.initial_feed_items;
-        for proposed in collected.into_iter().take(if is_initial {
-            self.limits.initial_feed_items
-        } else {
-            usize::MAX
-        }) {
+        let mut upstream_ids = std::collections::HashSet::new();
+        for proposed in collected {
+            if !upstream_ids.insert(proposed.upstream_id().to_owned()) {
+                return Err(IngestError::Parse(
+                    "duplicate upstream identity in collection".into(),
+                ));
+            }
             let value = match self
                 .store
                 .record_by_upstream(source_id, proposed.upstream_id())
@@ -482,6 +508,11 @@ where
             };
             records.push(value);
         }
+        let remainder = if is_initial && records.len() > self.limits.initial_feed_items {
+            records.split_off(self.limits.initial_feed_items)
+        } else {
+            Vec::new()
+        };
         self.store
             .commit_poll(
                 lease,
@@ -489,6 +520,7 @@ where
                     source_id,
                     source_revision: source.revision(),
                     records,
+                    remainder,
                     fetched_at: now,
                     final_url: source.url().clone(),
                     validators: Default::default(),

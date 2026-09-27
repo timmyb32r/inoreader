@@ -138,3 +138,14 @@ checks JavaScript actions, preview geometry, repeated scheduled collection,
 SSRF interception, and degraded/recovered probes. Missing Docker, an unavailable
 image, or a failed health check is a release failure and is never converted to a
 skip.
+
+## Consistency schema upgrade (2026-09-27)
+
+This release requires the explicit offline SQL steps documented in
+[consistency architecture](architecture/consistency-2026-09-27.md#deployment-and-rollback-contract).
+The normal startup path does not migrate obsolete duplicate article snapshots or
+split old AI documents implicitly. Preserve a verified old database/image/config
+set before upgrading. Configure `server.graceful_shutdown_seconds: 700` and
+`CONTAINER_STOP_GRACE_SECONDS=720` (Compose default); startup rejects insufficient
+budgets for admitted two-stage AI work. Larger configured AI leases require larger
+application and container budgets too.

@@ -15,3 +15,6 @@ pub use reason::*;
 pub use rules::*;
 pub use subscription::*;
 pub use workspace::*;
+
+mod web_feed;
+pub use web_feed::*;

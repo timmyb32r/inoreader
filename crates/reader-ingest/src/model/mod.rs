@@ -69,271 +69,10 @@ pub enum SourceKind {
     BuiltIn(BuiltInAdapter),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WebLoading {
-    Automatic,
-    Static,
-    Browser,
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SelectorLanguage {
-    Css,
-    XPath,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebSelector {
-    language: SelectorLanguage,
-    expression: String,
-}
-impl WebSelector {
-    pub fn new(language: SelectorLanguage, expression: String) -> Result<Self, ModelError> {
-        if expression.trim().is_empty() {
-            return Err(ModelError::EmptySelector);
-        }
-        if language == SelectorLanguage::Css {
-            scraper::Selector::parse(&expression).map_err(|_| ModelError::InvalidSelector)?;
-        } else if !expression.trim_start().starts_with('/')
-            && !expression.trim_start().starts_with('(')
-        {
-            return Err(ModelError::InvalidSelector);
-        }
-        Ok(Self {
-            language,
-            expression,
-        })
-    }
-    pub fn language(&self) -> SelectorLanguage {
-        self.language
-    }
-    pub fn expression(&self) -> &str {
-        &self.expression
-    }
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum WebViewport {
-    Desktop,
-    Mobile,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebFeedActions {
-    viewport: WebViewport,
-    hide_overlays: Vec<WebSelector>,
-    start_pages: Vec<Url>,
-    next_page: Option<WebSelector>,
-    load_more: Option<WebSelector>,
-    load_more_clicks: usize,
-    scrolls: usize,
-}
-impl WebFeedActions {
-    // Both configured limits are part of the construction boundary: keeping
-    // them here prevents callers from creating an unchecked action plan.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        viewport: WebViewport,
-        hide_overlays: Vec<WebSelector>,
-        start_pages: Vec<Url>,
-        next_page: Option<WebSelector>,
-        load_more: Option<WebSelector>,
-        load_more_clicks: usize,
-        scrolls: usize,
-        max_pages: usize,
-        max_actions: usize,
-    ) -> Result<Self, ModelError> {
-        let value = Self {
-            viewport,
-            hide_overlays,
-            start_pages,
-            next_page,
-            load_more,
-            load_more_clicks,
-            scrolls,
-        };
-        if value.page_count() > max_pages {
-            return Err(ModelError::LimitExceeded("start_pages"));
-        }
-        if value.action_count() > max_actions {
-            return Err(ModelError::LimitExceeded("actions"));
-        }
-        Ok(value)
-    }
-    pub fn viewport(&self) -> WebViewport {
-        self.viewport
-    }
-    pub fn hide_overlays(&self) -> &[WebSelector] {
-        &self.hide_overlays
-    }
-    pub fn start_pages(&self) -> &[Url] {
-        &self.start_pages
-    }
-    pub fn next_page(&self) -> Option<&WebSelector> {
-        self.next_page.as_ref()
-    }
-    pub fn load_more(&self) -> Option<&WebSelector> {
-        self.load_more.as_ref()
-    }
-    pub fn load_more_clicks(&self) -> usize {
-        self.load_more_clicks
-    }
-    pub fn scrolls(&self) -> usize {
-        self.scrolls
-    }
-    pub fn page_count(&self) -> usize {
-        self.start_pages.len().saturating_add(1)
-    }
-    pub fn action_count(&self) -> usize {
-        self.hide_overlays
-            .len()
-            .saturating_add(self.load_more_clicks)
-            .saturating_add(self.scrolls)
-            .saturating_add(usize::from(self.next_page.is_some()))
-    }
-}
-impl Default for WebFeedActions {
-    fn default() -> Self {
-        Self {
-            viewport: WebViewport::Desktop,
-            hide_overlays: vec![],
-            start_pages: vec![],
-            next_page: None,
-            load_more: None,
-            load_more_clicks: 0,
-            scrolls: 0,
-        }
-    }
-}
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebExtraction {
-    listing_url: Option<Url>,
-    card_selector: Option<WebSelector>,
-    title_selector: Option<WebSelector>,
-    date_selector: Option<WebSelector>,
-    content_selector: Option<WebSelector>,
-    wait_selector: Option<WebSelector>,
-    url_pattern: Option<String>,
-}
-impl WebExtraction {
-    pub fn new(
-        listing_url: Option<Url>,
-        card_selector: Option<String>,
-        title_selector: Option<String>,
-        date_selector: Option<String>,
-        content_selector: Option<String>,
-        wait_selector: Option<String>,
-        url_pattern: Option<String>,
-    ) -> Result<Self, ModelError> {
-        let css = |value: Option<String>| {
-            value
-                .map(|value| WebSelector::new(SelectorLanguage::Css, value))
-                .transpose()
-        };
-        if let Some(value) = url_pattern.as_deref() {
-            regex::Regex::new(value).map_err(|_| ModelError::InvalidUrlPattern)?;
-        }
-        Ok(Self {
-            listing_url,
-            card_selector: css(card_selector)?,
-            title_selector: css(title_selector)?,
-            date_selector: css(date_selector)?,
-            content_selector: css(content_selector)?,
-            wait_selector: css(wait_selector)?,
-            url_pattern,
-        })
-    }
-    pub fn listing_url(&self) -> Option<&Url> {
-        self.listing_url.as_ref()
-    }
-    pub fn card_selector(&self) -> Option<&WebSelector> {
-        self.card_selector.as_ref()
-    }
-    pub fn title_selector(&self) -> Option<&WebSelector> {
-        self.title_selector.as_ref()
-    }
-    pub fn date_selector(&self) -> Option<&WebSelector> {
-        self.date_selector.as_ref()
-    }
-    pub fn content_selector(&self) -> Option<&WebSelector> {
-        self.content_selector.as_ref()
-    }
-    pub fn wait_selector(&self) -> Option<&WebSelector> {
-        self.wait_selector.as_ref()
-    }
-    pub fn url_pattern(&self) -> Option<&str> {
-        self.url_pattern.as_deref()
-    }
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct WebFeedRecipe {
-    selector: WebSelector,
-    loading: WebLoading,
-    actions: WebFeedActions,
-    #[serde(default)]
-    extraction: WebExtraction,
-    #[serde(default = "one_page")]
-    max_pages: usize,
-}
-const fn one_page() -> usize {
-    1
-}
-impl WebFeedRecipe {
-    pub fn new(selector: String, loading: WebLoading) -> Result<Self, ModelError> {
-        Self::advanced(
-            WebSelector::new(SelectorLanguage::Css, selector)?,
-            loading,
-            WebFeedActions::default(),
-        )
-    }
-    pub fn advanced(
-        selector: WebSelector,
-        loading: WebLoading,
-        actions: WebFeedActions,
-    ) -> Result<Self, ModelError> {
-        Self::legacy(selector, loading, actions, WebExtraction::default(), 1)
-    }
-    pub fn legacy(
-        selector: WebSelector,
-        loading: WebLoading,
-        actions: WebFeedActions,
-        extraction: WebExtraction,
-        max_pages: usize,
-    ) -> Result<Self, ModelError> {
-        if loading == WebLoading::Static && selector.language() == SelectorLanguage::XPath {
-            return Err(ModelError::XPathRequiresBrowser);
-        }
-        if max_pages == 0 {
-            return Err(ModelError::ZeroLimit {
-                field: "web_feed.max_pages",
-            });
-        }
-        Ok(Self {
-            selector,
-            loading,
-            actions,
-            extraction,
-            max_pages,
-        })
-    }
-    pub fn selector(&self) -> &str {
-        self.selector.expression()
-    }
-    pub fn selector_kind(&self) -> SelectorLanguage {
-        self.selector.language()
-    }
-    pub fn loading(&self) -> WebLoading {
-        self.loading
-    }
-    pub fn actions(&self) -> &WebFeedActions {
-        &self.actions
-    }
-    pub fn extraction(&self) -> &WebExtraction {
-        &self.extraction
-    }
-    pub fn max_pages(&self) -> usize {
-        self.max_pages
-    }
-}
+pub use reader_core::{
+    SelectorLanguage, WebExtraction, WebFeedActions, WebFeedRecipe, WebLoading, WebSelector,
+    WebViewport,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SourceDefinition {
@@ -384,6 +123,7 @@ pub struct SourceRecord {
     source_id: SourceId,
     upstream_id: String,
     key: DedupKey,
+    description_media_type: Option<String>,
     feed_content_html: Option<String>,
     published_at: Option<DateTime<Utc>>,
     revision: u64,
@@ -407,6 +147,7 @@ impl SourceRecord {
                 title: value.title,
                 description: value.description,
             },
+            description_media_type: value.description_media_type,
             feed_content_html: value.content_html,
             published_at: value.published_at,
             revision: 0,
@@ -423,6 +164,9 @@ impl SourceRecord {
     }
     pub fn key(&self) -> &DedupKey {
         &self.key
+    }
+    pub fn description_media_type(&self) -> Option<&str> {
+        self.description_media_type.as_deref()
     }
     pub fn feed_content_html(&self) -> Option<&str> {
         self.feed_content_html.as_deref()
@@ -452,19 +196,21 @@ impl SourceRecord {
                 title: value.title,
                 description: value.description,
             },
+            description_media_type: value.description_media_type,
             feed_content_html: value.content_html,
             published_at: value.published_at,
             revision: self.revision + 1,
         };
-        let effect = if next.key != self.key {
-            RecordRevisionEffect::RegroupAndRefresh
-        } else if next.feed_content_html != self.feed_content_html
-            || next.published_at != self.published_at
-        {
-            RecordRevisionEffect::RefreshContent
-        } else {
-            RecordRevisionEffect::Unchanged
-        };
+        let effect =
+            if next.key != self.key || next.description_media_type != self.description_media_type {
+                RecordRevisionEffect::RegroupAndRefresh
+            } else if next.feed_content_html != self.feed_content_html
+                || next.published_at != self.published_at
+            {
+                RecordRevisionEffect::RefreshContent
+            } else {
+                RecordRevisionEffect::Unchanged
+            };
         Ok(RecordRevision {
             record: next,
             effect,
@@ -482,19 +228,21 @@ impl SourceRecord {
             source_id: self.source_id,
             upstream_id: self.upstream_id.clone(),
             key: value.key,
+            description_media_type: value.description_media_type,
             feed_content_html: value.feed_content_html,
             published_at: value.published_at,
             revision: self.revision + 1,
         };
-        let effect = if next.key != self.key {
-            RecordRevisionEffect::RegroupAndRefresh
-        } else if next.feed_content_html != self.feed_content_html
-            || next.published_at != self.published_at
-        {
-            RecordRevisionEffect::RefreshContent
-        } else {
-            RecordRevisionEffect::Unchanged
-        };
+        let effect =
+            if next.key != self.key || next.description_media_type != self.description_media_type {
+                RecordRevisionEffect::RegroupAndRefresh
+            } else if next.feed_content_html != self.feed_content_html
+                || next.published_at != self.published_at
+            {
+                RecordRevisionEffect::RefreshContent
+            } else {
+                RecordRevisionEffect::Unchanged
+            };
         Ok(RecordRevision {
             record: next,
             effect,
@@ -591,13 +339,16 @@ pub struct PollCommit {
     pub source_id: SourceId,
     pub source_revision: u64,
     pub records: Vec<PolledRecord>,
+    /// Already received records deferred only for initial visible-depth policy.
+    /// Storage retains them atomically with the first batch and its validators.
+    pub remainder: Vec<PolledRecord>,
     pub fetched_at: DateTime<Utc>,
     pub final_url: Url,
     pub validators: CacheValidators,
     pub incomplete: bool,
     pub duration_ms: u64,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum PollAction {
     Deliver,
     RefreshContent,
@@ -704,16 +455,6 @@ pub enum ModelError {
     UpstreamIdentityChanged,
     #[error("configured limit {field} must be greater than zero")]
     ZeroLimit { field: &'static str },
-    #[error("Web feed selector must not be empty")]
-    EmptySelector,
-    #[error("selector syntax is invalid")]
-    InvalidSelector,
-    #[error("URL pattern syntax is invalid")]
-    InvalidUrlPattern,
-    #[error("XPath selection requires browser or automatic loading")]
-    XPathRequiresBrowser,
-    #[error("configured Web feed limit exceeded: {0}")]
-    LimitExceeded(&'static str),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
