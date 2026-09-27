@@ -29,14 +29,20 @@ status:"waiting_content"|"queued"|"generating"|"verifying"|"completed"|"failed"|
 status:"started"|"completed"|"failed"|"interrupted"|"cancelled",
 usage?:{promptTokens:number,completionTokens:number,promptCacheHitTokens:number,
 promptCacheMissTokens:number,estimatedCostUsd?:string}}`. Each entry is one
-potentially billable request; absent usage/cost is unknown, never zero. Display
-known costs and the unknown-request count separately; retain earlier retry costs.
+potentially billable request; absent usage/cost is unknown, never zero. Retain
+known costs, unknown-request counts and earlier retry costs in the API; the
+compact chat does not display these technical accounting details.
 
-Initial summaries and regeneration always have two paid stages. Draft generation
-is retained internally and never exposed in the messages. Verification receives
-the identical full article plus that draft. Show `generating` / `verifying`
-immediately; display a summary body only when its assistant status is `complete`.
-Verification partial content remains provisional and is hidden by the client.
+Initial summaries and regeneration have two paid stages. New summaries default to
+`deepseek-flash` in non-thinking mode; the background checker remains Pro/low.
+After the first complete, transport/quote-validated response, the API projects its
+retained draft envelope into the incomplete summary's `content`. Its status stays
+non-complete, and the UI labels it as not yet checked. Before a complete draft
+exists, `content` is empty. Partial verifier text is never exposed: only successful
+final verification replaces the preview. Failure/cancellation keeps the complete
+preview available, with its non-complete status and explicit error. GET/list,
+retry, stop and idempotent responses use this same projection. No schema change
+or deletion of original drafts/older conversations is involved.
 Follow-up `purpose:"chat"` uses one request and displays streamed content normally.
 Final summary acceptance requires the original snapshot title byte-for-byte as
 the first standalone `**bold heading**`, including non-breaking spaces. A title
@@ -51,8 +57,8 @@ heading requirement. No title is silently normalized, substituted or repaired.
   regenerate?:boolean}`: return existing latest conversation, or create one when
   absent. regenerate explicitly creates a retained new version. Returns ArticleChat.
 - GET `/api/articles/{id}/chats?workspace_id=...`: `ArticleChat[]` (versions).
-- GET `/api/ai/chats/{id}`: latest ArticleChat including currently verified partial
-  output. Client polls only while pending; browser reconnect does not regenerate.
+- GET `/api/ai/chats/{id}`: latest ArticleChat including the complete early summary
+  preview or streamed follow-up output. Client polls only while pending; browser reconnect does not regenerate.
 - POST `/api/ai/chats/{id}/messages` body `{operationId:string,content:string}`:
   append user turn and enqueue one generation; returns ArticleChat.
 - POST `/api/ai/chats/{id}/stop`: stop waiting/generation; returns ArticleChat.

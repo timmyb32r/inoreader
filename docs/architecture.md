@@ -79,7 +79,11 @@ that immutable snapshot across follow-up turns and explicit regenerated versions
 Leases and operation IDs prevent concurrent duplicate submissions; uncertain
 provider outcomes require a deliberate retry. The server verifies each complete
 quotation segment before publishing it. This is an exact-quotation guarantee,
-not a guarantee of factual correctness for arbitrary model prose.
+not a guarantee of factual correctness for arbitrary model prose. Completed
+Flash previews are exposed while Pro verification runs; `into_public_view`
+projects the retained draft instead of partial verification output. Non-complete
+status identifies the unchecked preview; final acceptance replaces it without
+discarding the draft or prior versions.
 
 The Preact `ai/` feature owns profile controls, safe Markdown and the floating chat.
 The reader supplies article identity; `api/ai.ts` owns its wire contract. Chat state

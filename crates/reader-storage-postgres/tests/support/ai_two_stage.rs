@@ -58,6 +58,7 @@ impl AiProvider for Scripted {
         let text = match step {
             Step::Error(error) => return Err(error),
             Step::Wait(notify) => {
+                progress.publish("Partial verifier output").await?;
                 notify.notify_one();
                 std::future::pending().await
             }
@@ -158,7 +159,7 @@ pub(super) async fn verify(
             failed.status,
             ChatStatus::Failed | ChatStatus::Interrupted
         ));
-        assert!(failed.messages[0].content.is_empty());
+        assert_eq!(failed.messages[0].content, "Unverified draft");
         assert_eq!(failed.messages[0].phase, Some(GenerationPhase::Verifying));
         assert_eq!(failed.provider_calls.len(), 2);
         assert_eq!(
@@ -248,7 +249,7 @@ pub(super) async fn verify(
     service.work_once().await.unwrap();
     let bad = service.chat(owner, id).await.unwrap();
     assert_eq!(bad.status, ChatStatus::Failed);
-    assert!(bad.messages[0].content.is_empty());
+    assert_eq!(bad.messages[0].content, "Unverified");
     assert!(bad.provider_calls.iter().all(|c| c.usage.is_some()));
 
     // Stop in the durable stage handoff must prevent the second paid request,
@@ -268,7 +269,10 @@ pub(super) async fn verify(
         assert_eq!(provider.inputs.lock().unwrap().len(), 1);
         assert_eq!(stopped.provider_calls.len(), 1);
         assert!(stopped.provider_calls[0].usage.is_some());
-        assert!(stopped.messages[0].content.is_empty());
+        assert_eq!(
+            stopped.messages[0].content,
+            "Unverified draft retained after stop"
+        );
         let saved = store.chat(owner, id).await.unwrap();
         assert!(
             matches!(&saved.operations[0].task,AttemptTask::Summary{draft:Some(text)} if text.contains("Unverified draft"))
@@ -315,7 +319,38 @@ pub(super) async fn verify(
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
         .await
         .unwrap();
+    let preview = service.chat(owner, id).await.unwrap();
+    assert_eq!(preview.status, ChatStatus::Verifying);
+    assert_eq!(preview.messages[0].content, "Unverified before crash");
+    assert_ne!(preview.messages[0].status, MessageStatus::Complete);
+    assert!(service.chat(Uuid::new_v4(), id).await.is_err());
+    let listed = service.chats(owner, ws, article).await.unwrap();
+    assert_eq!(
+        listed.iter().find(|chat| chat.id == id).unwrap().messages[0].content,
+        "Unverified before crash"
+    );
     let old_record = store.chat(owner, id).await.unwrap();
+    assert_eq!(
+        old_record.view.messages[0].content,
+        "Partial verifier output"
+    );
+    let mut corrupt = old_record.clone();
+    corrupt.operations[0].task = AttemptTask::Summary {
+        draft: Some("malformed".into()),
+    };
+    assert!(matches!(corrupt.into_public_view(), Err(AiError::Protocol)));
+    let mut forged_quote = old_record.clone();
+    forged_quote.operations[0].task = AttemptTask::Summary {
+        draft: Some(
+            serde_json::json!({"segments":[{"kind":"quote","content":"invented quote"}]})
+                .to_string(),
+        ),
+    };
+    assert!(matches!(
+        forged_quote.into_public_view(),
+        Err(AiError::Quote)
+    ));
+
     let lease: Uuid = sqlx::query_scalar("SELECT lease FROM ai_chats WHERE id=$1")
         .bind(id)
         .fetch_one(pool)
@@ -334,6 +369,7 @@ pub(super) async fn verify(
     worker.abort();
     let interrupted = service.chat(owner, id).await.unwrap();
     assert_eq!(interrupted.status, ChatStatus::Interrupted);
+    assert_eq!(interrupted.messages[0].content, "Unverified before crash");
     assert!(interrupted.provider_calls[0].usage.is_some());
     assert!(interrupted.provider_calls[1].usage.is_none());
     assert_eq!(
@@ -341,6 +377,10 @@ pub(super) async fn verify(
         CallStatus::Interrupted
     );
     let retry = service.retry(owner, id, Uuid::new_v4()).await.unwrap();
+    assert_eq!(
+        retry.messages.last().unwrap().content,
+        "Unverified before crash"
+    );
     assert_eq!(
         retry.messages.last().unwrap().phase,
         Some(GenerationPhase::Verifying)
@@ -394,7 +434,7 @@ pub(super) async fn verify(
     let stopped = service.chat(owner, id).await.unwrap();
     assert_eq!(stopped.status, ChatStatus::Cancelled);
     assert_eq!(provider.inputs.lock().unwrap().len(), 2);
-    assert!(stopped.messages[0].content.is_empty());
+    assert_eq!(stopped.messages[0].content, "Unverified before stop");
     assert!(stopped.provider_calls.iter().all(|c| c.usage.is_some()));
 
     // Repository boundaries independently reject publishing a raw draft,

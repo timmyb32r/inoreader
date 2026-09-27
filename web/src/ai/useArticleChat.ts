@@ -14,7 +14,6 @@ const orderedVersions = (values: ArticleChat[]) => [...values].sort((a, b) => Da
 export function useArticleChat(client: AiClient, accountId: string, profile: AiProfile | null) {
   const [target, setTarget] = useState<ChatTarget | null>(null);
   const [chat, setChat] = useState<ArticleChat | null>(null);
-  const [versions, setVersions] = useState<ArticleChat[]>([]);
   const [visible, setVisible] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [busy, setBusy] = useState("");
@@ -40,7 +39,7 @@ export function useArticleChat(client: AiClient, accountId: string, profile: AiP
     epoch.current += 1;
     lock.current = false;
     pendingRequests.current.clear();
-    setTarget(null); setChat(null); setVersions([]); setDrafts({});
+    setTarget(null); setChat(null); setDrafts({});
     setVisible(false); setBusy(""); setError(""); setRetryable(false); setPollFailed(false);
     setCompletedGeneration(0);
   }, [accountId]);
@@ -50,7 +49,6 @@ export function useArticleChat(client: AiClient, accountId: string, profile: AiP
     if (current.current?.id === next.id && isChatActive(current.current) && next.status === "completed") setCompletedGeneration(value => value + 1);
     current.current = next;
     setChat(next);
-    setVersions(values => orderedVersions([...values.filter(value => value.id !== next.id), next]));
   };
   const command = async (label: string, action: PendingAction, actionScope = scope, billable = true) => {
     const prior = pendingRequests.current.get(actionScope);
@@ -86,13 +84,12 @@ export function useArticleChat(client: AiClient, accountId: string, profile: AiP
     trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const token = ++epoch.current;
     lock.current = true;
-    setTarget(nextTarget); setChat(null); setVersions([]); setBusy("Opening chat");
+    setTarget(nextTarget); setChat(null); setBusy("Opening chat");
     const nextScope = targetScope(nextTarget), pendingRequest = pendingRequests.current.get(nextScope);
     setError(pendingRequest?.error ?? ""); setRetryable(!!pendingRequest); setPollFailed(false);
     try {
       const saved = orderedVersions(await client.versions(nextTarget.workspaceId, nextTarget.articleId));
       if (token !== epoch.current) return;
-      setVersions(saved);
       if (saved.length) { accept(saved[0]); return; }
       if (pendingRequest) return;
       if (!generateIfMissing) { setError("No saved conversation yet. Click Summarize to start one."); return; }
@@ -153,24 +150,15 @@ export function useArticleChat(client: AiClient, accountId: string, profile: AiP
     void command(lastAssistant(chat)?.phase === "verifying" ? "Retrying verification" : "Retrying response", { run: () => client.retry(chat.id, operationId) });
   };
   const stop = () => { if (chat && isChatActive(chat)) void command("Stopping", { run: () => client.stop(chat.id) }, scope, false); };
-  const selectVersion = (id: string) => {
-    if (lock.current) return;
-    const next = versions.find(value => value.id === id);
-    if (!next) return;
-    epoch.current += 1;
-    const pendingRequest = pendingRequests.current.get(scope);
-    setError(pendingRequest?.error ?? ""); setRetryable(!!pendingRequest); setPollFailed(false);
-    accept(next);
-  };
   const reconnect = () => {
     if (!chat) { if (target) void open(target, false); return; }
     void command("Reconnecting", { run: () => client.get(chat.id) }, scope, false);
   };
   const close = () => { setVisible(false); trigger.current?.focus(); };
   return {
-    target, chat, versions, visible, collapsed, setCollapsed, busy, error, retryable, unresolved,
+    target, chat, visible, collapsed, setCollapsed, busy, error, retryable, unresolved,
     pollFailed, draft, completedGeneration, open, close, send, regenerate, retry, stop,
-    reconnect, selectVersion,
+    reconnect,
     setDraft: (value: string) => { if (chat) setDrafts(values => ({ ...values, [chat.id]: value })); },
   };
 }

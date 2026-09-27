@@ -52,7 +52,7 @@ it("gates generation without credentials but retains access to saved chats", asy
   render(<Harness client={new AiClient(transport)} configured={{ configured: false, enabled: false }}/>);
   await user.click(screen.getByRole("button", { name: "Summarize A" }));
   await screen.findByText(/Add and validate your DeepSeek API key/);
-  expect(screen.getByRole("button", { name: "Open DeepSeek profile" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: /profile/i })).toBeNull();
   await user.click(screen.getByRole("button", { name: "Summarize B" }));
   await screen.findByText("Useful summary");
   expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
@@ -121,7 +121,9 @@ it("preserves an uncertain accepted message operation across reconnect and artic
   expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
   expect(screen.getByRole("button", { name: "New summary" })).toBeDisabled();
   fireEvent.keyDown(screen.getByLabelText("Message DeepSeek"), { key: "Enter", ctrlKey: true });
-  await user.click(screen.getByRole("button", { name: "Reconnect" }));
+  // Reopening can reconcile reads but cannot silently repeat the uncertain POST.
+  await user.click(screen.getByRole("button", { name: "Close chat" }));
+  await user.click(screen.getByRole("button", { name: "Summarize A" }));
   await screen.findByRole("region", { name: "Your message" });
   expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "Close chat" }));
@@ -217,30 +219,28 @@ it("polls only an active visible conversation and reconnects without a paid requ
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Summarize A" })); });
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(reads).toBe(2);
-    expect(screen.getByRole("status")).toHaveTextContent("Conversation saved");
+    expect(screen.getByRole("status")).toHaveTextContent("");
     await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
     expect(reads).toBe(2);
   } finally { vi.useRealTimers(); }
 });
 
-it("retains previous summary versions and selects them without generating", async () => {
-  const old = saved("old"), newest = { ...saved("new"), createdAt: "2026-09-27T12:00:00Z" };
+it("opens latest saved summary without a version picker and regenerates only explicitly", async () => {
+  const old = saved("old"), newest = { ...saved("new"), createdAt: "2026-09-27T12:00:00Z", messages: [{ ...saved().messages[0], content: "New summary text" }] };
   const mutations: unknown[] = [];
   const transport: Transport = async <T,>(_path: string, init?: RequestInit) => {
     if (init) { mutations.push(JSON.parse(String(init.body))); return newest as T; }
-    return [old] as T;
+    return [old, newest] as T;
   };
   const user = userEvent.setup();
   render(<Harness client={new AiClient(transport)}/>);
   await user.click(screen.getByRole("button", { name: "Summarize A" }));
-  await screen.findByText("Useful summary");
+  await screen.findByText("New summary text");
+  expect(screen.queryByRole("combobox")).toBeNull();
+  expect(screen.queryByLabelText("Provider request costs")).toBeNull();
+  expect(mutations).toHaveLength(0);
   await user.click(screen.getByRole("button", { name: "New summary" }));
-  const select = screen.getByLabelText("Summary version");
-  await waitFor(() => expect(select).toHaveValue("new"));
-  expect(screen.getAllByRole("option")).toHaveLength(2);
-  await user.selectOptions(select, "old");
-  expect(select).toHaveValue("old");
-  expect(mutations).toHaveLength(1);
+  await waitFor(() => expect(mutations).toHaveLength(1));
   expect(mutations[0]).toMatchObject({ regenerate: true, workspaceId: "ws" });
 });
 
@@ -249,9 +249,9 @@ it.each(["failed", "interrupted", "cancelled"] as const)("does not leave an empt
   const transport: Transport = async <T,>() => [terminal] as T;
   render(<Harness client={new AiClient(transport)}/>);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
-  await screen.findByText("No verified summary is available for this attempt.");
+  await screen.findByText("No summary is available for this attempt.");
   expect(screen.queryByLabelText("Waiting for response")).toBeNull();
   expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "false");
-  expect(screen.getByRole("button", { name: "Stop", exact: true })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Stop", exact: true })).toBeNull();
   expect(screen.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
 });

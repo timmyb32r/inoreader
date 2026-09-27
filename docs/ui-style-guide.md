@@ -26,3 +26,9 @@ Reader layout uses three stable regions on desktop: navigation, article list,
 and article content. Narrow screens show one region at a time with an explicit
 back action. Source text is never translated or reformatted silently.
 
+
+The article chat reserves its header, 36px status row and 80px composer. Copy and
+send use icon buttons; request accounting and version selection are not part of
+the reading surface. A complete first-pass summary can be shown as unchecked
+while fact-checking runs. Replacement preserves scroll position and waits for
+active presses, text selections and scrolling to finish.

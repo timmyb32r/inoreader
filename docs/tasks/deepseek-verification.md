@@ -379,3 +379,13 @@ The optional local master-key export was rejected by automatic approval review;
 it was not performed. The separate protected server copy remains available.
 Full build, backup/rollback, package installation, security and test scope details
 are recorded in [the deployment report](../deepseek-deployment-2026-09-27.md).
+
+## Compact Flash chat amendment — 2026-09-27
+
+The owner subsequently requested early first-pass publication and a simpler
+widget. The full release gate passed again (frontend126, browser31; Rust and
+Docker acceptance unchanged). The new image is deployed, the owner's key and
+two saved conversations survived, and temporary smoke-session cleanup passed.
+See [the amendment record](flash-chat-2026-09-27.md) for exact behavior, image,
+backup location and verification scope. Earlier private-draft-only statements
+above describe the superseded behavior. No paid Flash latency benchmark was run.

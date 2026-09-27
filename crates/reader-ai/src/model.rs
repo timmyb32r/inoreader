@@ -172,6 +172,38 @@ pub struct ChatRecord {
     pub operations: Vec<Operation>,
 }
 
+impl ChatRecord {
+    /// Public summaries show a complete, transport-validated first-pass preview
+    /// until verification finishes. Preview status remains non-complete; partial
+    /// verifier output is never exposed. The original envelope stays persisted
+    /// in the operation for retry/provenance, including after a failed check.
+    pub fn into_public_view(mut self) -> Result<ArticleChat, AiError> {
+        for message in &mut self.view.messages {
+            if message.purpose != Some(MessagePurpose::Summary)
+                || message.status == MessageStatus::Complete
+            {
+                continue;
+            }
+            message.content.clear();
+            let operation = self
+                .operations
+                .iter()
+                .find(|op| op.assistant_id == message.id)
+                .ok_or(AiError::Storage)?;
+            if let AttemptTask::Summary { draft: Some(draft) } = &operation.task {
+                let source = self.snapshot.as_ref().ok_or(AiError::Storage)?;
+                let mut parser = crate::stream::VerifiedSegments::new(
+                    &source.text,
+                    self.limits.max_response_bytes,
+                );
+                parser.push(draft)?;
+                message.content = parser.finish()?.to_owned();
+            }
+        }
+        Ok(self.view)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArticleSnapshot {
     pub title: String,

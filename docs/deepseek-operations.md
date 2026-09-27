@@ -32,16 +32,13 @@ allowlist. No new human score is recorded. See
 streaming smoke or the previous candidate's20/20 style votes with this separate
 explicit operator acceptance. The failed factual gate remains failed.
 
-Production runs image
-`sha256:35da77df56ccc5a772aafe4784be1a9996eff66dbae1a9d729ac20c44cfa2dbd`
-with the owner-only candidate04/review v3 enabled. The owner's provider key remains
-intentionally unconfigured (`configured: false`); enter it in Profile to enable
-generation. Public live/ready returned204, unauthenticated profile401 and
-wrong-origin POST403. All11 Playwright UI checks passed, including immediate
-opening, duplicate-activation protection, missing-key generation blocking,
-drag/minimize stability, protected key input and restored focus on close. The
-temporary test session was deleted and deletion verified. No paid deployed request
-was made; the earlier real-provider two-stage streaming smoke is separate evidence.
+Production now runs image
+`sha256:24929210d1617d58f2e9630ae8573f51c7f84c5777c0961ea9b9a851e4ecbdc6`
+with owner-only access. The owner has configured their provider key; the latest
+public smoke confirmed it remained enabled and both saved chats were readable
+after restart. New summaries default to Flash with background Pro verification.
+See [the compact-chat deployment and verification record](tasks/flash-chat-2026-09-27.md).
+The earlier deployment report records the original, then-keyless state.
 
 `prompt_path` points to **style.md**, the editable style instruction. The compiled
 `prompts/reading-data-news/transport.md` instruction is appended with one newline.
@@ -101,14 +98,24 @@ in one statement's MVCC snapshot. Source refresh and old chunk cleanup cannot
 change an existing conversation. New versions are explicit; existing output is
 never replaced by regeneration.
 
-Generation is a durable job, not a long-lived API request. Initial summaries and
-explicit regeneration use two requests: create a private draft, then check it
-against the identical full article. The draft's exact transport envelope is
-retained as internal account data; it never enters the public messages. The
-review request receives `ARTICLE_SNAPSHOT` and `DRAFT_SUMMARY` together, without
-external search or case-specific hints. The UI shows Generating, then Checking;
-it exposes a summary only after the complete second response passes the transport
-and quote checks plus an exact original-title check. The first standalone bold
+Generation is a durable job, not a long-lived API request. New initial summaries
+and explicit regeneration use `deepseek-flash`, standard/non-thinking mode at
+configured temperature0.3, then Pro/low checks the identical full article and
+retained draft. The owner explicitly requested this faster flow on2026-09-27;
+the candidate04 style/review text is unchanged, but the old Pro/high research
+scores do not evaluate this new model configuration. Configured Flash tariffs
+are peak-price estimates (USD0.3 input,0.006 cached input,1.2 output per million;
+[provider prices](https://api-docs.deepseek.com/quick_start/pricing/) checked
+2026-09-27); actual off-peak billing can be lower. Existing chats retain their
+original model/mode/rate snapshots; New summary explicitly uses current defaults.
+
+Once the first complete response passes transport and exact-quote validation,
+the public API projects the retained draft as an early preview. It is labelled
+not yet checked while verification continues in the background. Failure or Stop
+keeps the preview; Retry runs only the missing check. Partial verifier output
+never replaces it. Successful verification atomically replaces the displayed
+body with the complete checked response. The original envelope remains retained.
+The first standalone bold
 heading must preserve every title byte, including Unicode whitespace. The worker
 checks after recording known usage; the repository repeats the same invariant
 at the final accepted-state transition. A mismatch fails explicitly and permits
@@ -117,14 +124,25 @@ title error that review can correct; chat replies do not require a title.
 This second model pass reduces factual errors; it is not a
 mathematical guarantee of truth. Follow-up questions use one streaming request.
 
+
+The compact widget has no version selector, profile shortcut or request-cost
+panel. Copy, new summary, send and recovery use labelled icons. Stop/retry/reconnect
+appear only when applicable, in fixed reserved positions. Profile/key management
+remains under the account menu. Older versions and per-call usage remain persisted
+and available through the account-scoped API. The message viewport keeps its
+scroll position/minimum reading surface when the checked result is shorter;
+remote replacement waits until pointer/selection interaction and scrolling end
+(180ms scroll-idle threshold). The fixed header/status/composer footprint prevents
+asynchronous answer changes from moving controls.
+
 Workers claim jobs
 with leases; no database transaction stays open during provider I/O. The client
-polls the persisted verified content. The shared outbound boundary streams real
+polls the account-scoped public projection. The shared outbound boundary streams real
 provider bytes, enforces an overall deadline/body bound, validates each redirect
 and IP, and never retries an ambiguous POST against another address. Complete
 JSON segments of follow-up answers are published progressively; exact quotation
 segments are checked before publication. Summary verification partials remain
-provisional and hidden by the UI. The lease must exceed twice the configured
+internal and are replaced by the completed draft in every public API response. The lease must exceed twice the configured
 provider request deadline so one claim can cover both stages. Context/input
 limits fail explicitly, without truncation or
 automatic conversation compression. Before any paid call, a conservative upper

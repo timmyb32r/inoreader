@@ -90,10 +90,10 @@ ai:
     output_usd_per_million_tokens: "3.96"
   enabled_accounts: []
   encryption_key_file_env: "AI_ENCRYPTION_KEY_FILE"
-  model: "deepseek-v4-pro"
+  model: "deepseek-flash"
   generation_mode:
-    kind: thinking
-    effort: high
+    kind: standard
+    temperature: 0.3
   context_tokens: 1048576
   # Conservative UTF-8 byte-token preflight plus explicitly reserved chat framing.
   framing_tokens_per_message: 64
@@ -108,7 +108,7 @@ ai:
   poll_milliseconds: 500
   # One claim covers draft and verification; must exceed both request deadlines.
   lease_seconds: 660
-  # Verify current provider prices before enabling; exact USD decimal rates.
-  input_usd_per_million_tokens: "1.32"
-  cached_input_usd_per_million_tokens: "0.044"
-  output_usd_per_million_tokens: "3.96"
+  # Peak-price estimate; off-peak billing can be lower. Verified 2026-09-27.
+  input_usd_per_million_tokens: "0.3"
+  cached_input_usd_per_million_tokens: "0.006"
+  output_usd_per_million_tokens: "1.2"

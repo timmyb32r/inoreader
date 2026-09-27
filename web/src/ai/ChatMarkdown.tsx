@@ -1,8 +1,9 @@
 import type { ComponentChildren } from "preact";
+import { ChatCopyButton } from "./ChatCopyButton";
 
 /** Small, deliberately non-HTML Markdown renderer. Provider strings always become
  * text nodes; links accept only HTTP(S), and images never trigger remote loads. */
-export function ChatMarkdown({ text, onCopy }: { text: string; onCopy: (text: string) => void }) {
+export function ChatMarkdown({ text }: { text: string }) {
   const lines = text.split("\n"), blocks: ComponentChildren[] = [];
   for (let index = 0; index < lines.length;) {
     const line = lines[index];
@@ -19,7 +20,7 @@ export function ChatMarkdown({ text, onCopy }: { text: string; onCopy: (text: st
       const quoted: string[] = [];
       while (index < lines.length && /^> ?/.test(lines[index])) quoted.push(lines[index++].replace(/^> ?/, ""));
       const quote = quoted.join("\n");
-      blocks.push(<blockquote key={index}><p>{inline(quote)}</p><button class="text-button" onClick={() => onCopy(quote)}>Copy quote</button></blockquote>);
+      blocks.push(<blockquote key={index}><p>{inline(quote)}</p><ChatCopyButton text={quote} label="Copy quote"/></blockquote>);
       continue;
     }
     const heading = /^(#{1,6})\s+(.+)$/.exec(line);

@@ -4,9 +4,9 @@ import type { Transport } from "../api/client";
 import { Harness, saved } from "./tests/chatTestSupport";
 
 const call = (phase: ChatProviderCall["phase"], status: ChatProviderCall["status"]): ChatProviderCall => ({ id: phase, assistantId: "m1", phase, status });
-const pending = (status: "generating" | "verifying"): ArticleChat => ({ ...saved(), status, providerCalls: status === "verifying" ? [call("generating", "completed"), call("verifying", "started")] : [call("generating", "started")], messages: [{ ...saved().messages[0], phase: status, status: "streaming", content: "Unchecked draft must stay private" }] });
+const pending = (status: "generating" | "verifying"): ArticleChat => ({ ...saved(), status, providerCalls: status === "verifying" ? [call("generating", "completed"), call("verifying", "started")] : [call("generating", "started")], messages: [{ ...saved().messages[0], phase: status, status: "streaming", content: status === "verifying" ? "Early summary preview" : "" }] });
 
-it("polls through verification, hides unverified drafts and only publishes the completed checked summary", async () => {
+it("shows the first complete summary while checking and replaces it with the checked response", async () => {
   vi.useFakeTimers();
   try {
     let reads = 0;
@@ -18,16 +18,16 @@ it("polls through verification, hides unverified drafts and only publishes the c
     };
     render(<Harness client={new AiClient(transport)}/>);
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Summarize A" })); });
-    expect(screen.getByRole("status")).toHaveTextContent("Step 1 of 2");
-    expect(screen.queryByText("Unchecked draft must stay private")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Writing summary");
+    expect(screen.queryByText("Early summary preview")).toBeNull();
     expect(screen.getByRole("button", { name: "Copy response" })).toBeDisabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
-    expect(screen.getByRole("status")).toHaveTextContent("Step 2 of 2");
+    expect(screen.getByRole("status")).toHaveTextContent("Checking facts");
     expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByLabelText("Provider request costs")).toHaveTextContent("2 provider requests");
+    expect(screen.queryByLabelText("Provider request costs")).toBeNull();
     expect(screen.getByRole("button", { name: "New summary" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
-    expect(screen.queryByText("Unchecked draft must stay private")).toBeNull();
+    expect((await screen.findAllByText("Early summary preview"))[0]).toBeVisible();
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByText("Useful summary")).toBeVisible();
     expect(screen.getByRole("button", { name: "Copy response" })).toBeEnabled();
@@ -50,12 +50,11 @@ it("explains verification failure and retries it once while retaining drafts and
   render(<Harness client={new AiClient(transport)}/>);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
   await screen.findByText(/Verification failed/);
-  expect(screen.getByRole("status")).toHaveTextContent("Provider timeout");
-  expect(screen.queryByText("Unchecked draft must stay private")).toBeNull();
+  expect(screen.getByRole("status")).toHaveAttribute("title", "Provider timeout");
+  expect((await screen.findAllByText("Early summary preview"))[0]).toBeVisible();
   expect(screen.queryByLabelText("Waiting for response")).toBeNull();
   fireEvent.input(screen.getByLabelText("Message DeepSeek"), { target: { value: "Keep my question" } });
   expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();
-  expect(screen.getByText(/Chat unlocks after a verified summary/)).toBeVisible();
   fireEvent.keyDown(screen.getByLabelText("Message DeepSeek"), { key: "Enter", ctrlKey: true });
   expect(retries).toHaveLength(0);
   const retry = screen.getByRole("button", { name: "Retry", exact: true });
@@ -64,12 +63,12 @@ it("explains verification failure and retries it once while retaining drafts and
   expect(retry).toBeDisabled();
   expect(retries).toHaveLength(1);
   resolve({ ...pending("verifying"), messages: [...failed.messages, { ...pending("verifying").messages[0], id: "retry" }] });
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Step 2 of 2"));
-  expect(screen.getAllByRole("region", { name: "DeepSeek response" })).toHaveLength(2);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking facts"));
+  await waitFor(() => expect(screen.getAllByRole("region", { name: "DeepSeek response" })).toHaveLength(2));
   expect(screen.getByLabelText("Message DeepSeek")).toHaveValue("Keep my question");
 });
 
-it("cancels verification with immediate feedback and deduplication without revealing the draft", async () => {
+it("cancels verification with immediate feedback and keeps the early summary", async () => {
   let resolve!: (chat: ArticleChat) => void;
   let stops = 0;
   const transport: Transport = async <T,>(path: string, init?: RequestInit) => {
@@ -79,7 +78,7 @@ it("cancels verification with immediate feedback and deduplication without revea
   };
   render(<Harness client={new AiClient(transport)}/>);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
-  await screen.findByText(/Step 2 of 2/);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Checking facts"));
   const stop = screen.getByRole("button", { name: "Stop", exact: true });
   fireEvent.click(stop); fireEvent.click(stop);
   expect(screen.getByRole("status")).toHaveTextContent("Stopping");
@@ -87,7 +86,7 @@ it("cancels verification with immediate feedback and deduplication without revea
   resolve({ ...pending("verifying"), status: "cancelled", messages: [{ ...pending("verifying").messages[0], status: "interrupted" }] });
   await screen.findByText(/Stopped during verification/);
   expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "false");
-  expect(screen.queryByText("Unchecked draft must stay private")).toBeNull();
+  expect((await screen.findAllByText("Early summary preview"))[0]).toBeVisible();
   expect(screen.queryByLabelText("Waiting for response")).toBeNull();
   fireEvent.input(screen.getByLabelText("Message DeepSeek"), { target: { value: "Unsent question" } });
   expect(screen.getByRole("button", { name: "Send", exact: true })).toBeDisabled();

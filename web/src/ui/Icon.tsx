@@ -1,8 +1,11 @@
 import type { JSX } from "preact";
 
-export type IconName = "chat" | "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
+export type IconName = "copy" | "send" | "stop" | "chat" | "home" | "collapse" | "inbox" | "unread" | "star" | "later" | "trash" | "feed" | "search" | "settings" | "sun" | "moon" | "plus" | "refresh" | "dots" | "check" | "arrow" | "close" | "external" | "rule" | "globe" | "pause" | "archive" | "menu";
 
 const paths: Record<IconName, JSX.Element> = {
+  copy: <><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></>,
+  send: <><path d="m5 12 7-7 7 7M12 5v15"/></>,
+  stop: <rect x="6" y="6" width="12" height="12" rx="2"/>,
   chat: <><path d="M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-5 3V6a2 2 0 0 1 2-2Z"/><path d="M7 9h10M7 13h7"/></>,
   home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
   collapse: <><path d="m14 7-5 5 5 5"/><path d="M20 4v16"/></>,

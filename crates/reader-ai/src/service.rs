@@ -106,16 +106,15 @@ impl AiService {
         workspace: Uuid,
         article: Uuid,
     ) -> Result<Vec<ArticleChat>, AiError> {
-        Ok(self
-            .store
+        self.store
             .chats(owner, workspace, article)
             .await?
             .into_iter()
-            .map(|v| v.view)
-            .collect())
+            .map(ChatRecord::into_public_view)
+            .collect()
     }
     pub async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ArticleChat, AiError> {
-        Ok(self.store.chat(owner, id).await?.view)
+        self.store.chat(owner, id).await?.into_public_view()
     }
     pub async fn start(
         &self,
@@ -138,11 +137,11 @@ impl AiService {
             {
                 return Err(AiError::Conflict);
             }
-            return Ok(existing.view.clone());
+            return existing.clone().into_public_view();
         }
         if !regenerate {
             if let Some(existing) = prior.first() {
-                return Ok(existing.view.clone());
+                return existing.clone().into_public_view();
             }
         }
         self.policy.generation_allowed(owner)?;
@@ -201,11 +200,10 @@ impl AiService {
                 task: AttemptTask::Summary { draft: None },
             }],
         };
-        Ok(self
-            .store
+        self.store
             .create_chat(record, operation, regenerate)
             .await?
-            .view)
+            .into_public_view()
     }
     pub async fn message(
         &self,
@@ -241,13 +239,16 @@ impl AiService {
             if op.kind != kind {
                 return Err(AiError::Conflict);
             }
-            return Ok(prior.view);
+            return prior.into_public_view();
         }
         self.policy.generation_allowed(owner)?;
         self.key(owner).await?;
-        Ok(self.store.append(owner, id, operation, kind).await?.view)
+        self.store
+            .append(owner, id, operation, kind)
+            .await?
+            .into_public_view()
     }
     pub async fn stop(&self, owner: Uuid, id: Uuid) -> Result<ArticleChat, AiError> {
-        Ok(self.store.stop(owner, id).await?.view)
+        self.store.stop(owner, id).await?.into_public_view()
     }
 }
