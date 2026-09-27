@@ -303,7 +303,7 @@ describe("reader application", () => {
       expect(action.dataset.tooltip).toBeTruthy();
       expect(action.getAttribute("aria-label")).toBeTruthy();
     }
-    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Термины","Open original"]);
+    expect(actions.map(action=>action.getAttribute("aria-label"))).toEqual(["Mark read","Read later","Translate paragraphs","Terms","Open original"]);
     expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toBeDisabled();
     expect(within(reader).getByRole("button",{name:"Translate paragraphs"})).toHaveAttribute("data-tooltip","Configure DeepSeek in Settings");
   });

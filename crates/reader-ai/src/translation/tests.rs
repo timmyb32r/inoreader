@@ -135,3 +135,21 @@ fn orphan_text_membership_is_exact_and_does_not_accept_partial_blocks_or_code() 
         assert!(!contains_paragraph(html, source), "{source}");
     }
 }
+
+#[test]
+fn chinese_original_is_not_a_russian_translation_in_provider_or_storage() {
+    let valid = r#"{"translation":"База данных","words":[{"source":"数据库","pinyin":"shùjùkù","translation":"база данных"}]}"#;
+    let result = ParagraphTranslation::from_response("数据库", valid).unwrap();
+    let stored = serde_json::to_string(&result).unwrap();
+    for invalid in ["数据库", "database"] {
+        assert!(ParagraphTranslation::from_response(
+            "数据库",
+            &valid.replace("База данных", invalid)
+        )
+        .is_err());
+        assert!(serde_json::from_str::<ParagraphTranslation>(
+            &stored.replace("База данных", invalid)
+        )
+        .is_err());
+    }
+}

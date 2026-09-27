@@ -3,7 +3,7 @@ import type {ChannelStatus,DefinitionsView} from "../src/api/glossary";
 
 test("terms show immediate feedback, deduplicate, preserve targets and split original definitions",async({page})=>{
   const channel:ChannelStatus={channel:"reading_data_news",configured:false,botUsername:null,indexReady:true,revision:1,posts:1529,definitions:400,unindexed:0,pending:0,conflicts:0,lastPoll:null,lastHistory:null,pollError:null,historyError:null,historyIncomplete:true,coverageNote:"Публичная история может быть неполной",syncPending:false,generationAllowed:true};
-  const article={id:"a",title:"CDC and Kafka",url:"https://example.com/a",source:"Example",subscriptionIds:["source"],excerpt:"Intro",body:["CDC and Kafka."],fullText:"ready",age:"2026-09-26T12:00:00Z",read:false,later:false};
+  const article={id:"a",title:"TapTalk | 圆桌实录：澳门综合度假村敏捷转型之旅，MongoDB + TapData 赋能酒店业卓越实践 ".repeat(5),url:"https://example.com/a",source:"Example",subscriptionIds:["source"],excerpt:"Intro",body:["CDC and Kafka."],fullText:"ready",age:"2026-09-26T12:00:00Z",read:false,later:false};
   const articlePage={articles:[article],total:1,unreadTotal:1};
   let mutations=0,complete=false,failedPolls=2,configurationCalls=0,releaseConfiguration=false;
   let job:DefinitionsView["job"]=null;
@@ -26,7 +26,7 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
     return route.fulfill({json:[]});
   });
   await page.goto("/reader");
-  const trigger=page.getByRole("button",{name:"Термины",exact:true});
+  const trigger=page.getByRole("button",{name:"Terms",exact:true});
   const before=await trigger.boundingBox();
   await trigger.click();
   const dialog=page.getByRole("dialog",{name:"Термины статьи"});
@@ -40,6 +40,9 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
   await expect(dialog.getByRole("link",{name:"Пост в канале ↗"})).toHaveAttribute("href","https://t.me/reading_data_news/42");
   expect(await trigger.boundingBox()).toEqual(before);expect(await close.boundingBox()).toEqual(closeBefore);expect(await copy.boundingBox()).toEqual(copyBefore);
   const copied=await dialog.locator(".glossary-entry strong").allTextContents();expect(copied).toEqual(["Kafka","CDC"]);
+  for(const selector of [".glossary-panel",".glossary-content",".glossary-panel header"]){
+    expect(await page.locator(selector).evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  }
   await close.click();await expect(trigger).toBeFocused();await trigger.click();await expect(dialog).toBeVisible();expect(mutations).toBe(1);
   await expect(dialog.getByText("Платформа для потоков событий.",{exact:false})).toBeVisible();
   await page.screenshot({path:"test-results/glossary-panel.png",fullPage:true});
