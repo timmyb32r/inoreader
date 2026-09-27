@@ -32,3 +32,27 @@ it("keeps the calendar structure during loading, reports errors and prevents rep
   expect(container.querySelectorAll(".publication-month")).toHaveLength(12);
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
 });
+
+it("shows an immediate tooltip and an integer scale for every interval", async () => {
+  const client = mockClient();
+  vi.spyOn(client, "publicationHistory").mockResolvedValue(history);
+  const { container } = render(<PublicationHistory client={client} subscriptionId="sub"/>);
+  await screen.findByText(/6 dated articles/);
+  for (const scale of ["Months", "Days", "Years"]) {
+    fireEvent.click(screen.getByRole("button", { name: scale, exact: true }));
+    const bar = within(screen.getByRole("group", { name: `Articles by ${scale.toLowerCase()}` })).getAllByRole("button")[0];
+    expect(bar).not.toHaveAttribute("title");
+    fireEvent.mouseEnter(bar);
+    expect(screen.getByRole("tooltip")).toHaveTextContent(bar.getAttribute("aria-label")!);
+    const ticks = [...container.querySelectorAll(".publication-axis>span")].map(node => Number(node.textContent));
+    expect(ticks[0]).toBe(0);
+    expect(ticks.every(Number.isInteger)).toBe(true);
+    expect(ticks.at(-1)).toBeGreaterThanOrEqual(scale === "Days" ? 3 : 4);
+    fireEvent.mouseLeave(container.querySelector(".publication-chart-frame")!);
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    fireEvent.focus(bar);
+    expect(screen.getByRole("tooltip")).toBeVisible();
+    fireEvent.keyDown(bar, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  }
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useMemo, useState } from "preact/hooks";
 import type { ApiClient, PublicationHistory as History } from "../api/client";
 import { AutofillResistantSelect } from "../ui/fields";
 import "./publication-history.css";
@@ -17,6 +17,7 @@ export function PublicationHistory({ client, subscriptionId }: { client: ApiClie
   const [year, setYear] = useState(new Date().getUTCFullYear());
   const [month, setMonth] = useState(new Date().getUTCMonth());
   const [inspected, setInspected] = useState("");
+  const [tooltip, setTooltip] = useState<{ text: string; x: number } | null>(null);
   useEffect(() => {
     let active = true;
     setHistory(null); setError("");
@@ -39,7 +40,17 @@ export function PublicationHistory({ client, subscriptionId }: { client: ApiClie
     history?.days.forEach(day => { const y = Number(day.date.slice(0, 4)); totals.set(y, (totals.get(y) ?? 0) + day.count); });
     return Array.from({ length: last - first + 1 }, (_, index) => ({ label: String(first + index), title: String(first + index), count: totals.get(first + index) ?? 0, value: first + index }));
   }, [scale, history, year, month, counts, years, monthCounts]);
-  const max = Math.max(1, ...bars.map(bar => bar.count));
+  const peak = Math.max(1, ...bars.map(bar => bar.count));
+  const step = Math.max(1, Math.ceil(peak / 4));
+  const max = Math.ceil(peak / step) * step;
+  const ticks = Array.from({ length: max / step + 1 }, (_, index) => index * step);
+  const showTooltip = (button: HTMLButtonElement, text: string) => {
+    const frame = button.closest(".publication-chart-frame")!.getBoundingClientRect();
+    const bar = button.getBoundingClientRect();
+    setTooltip({ text, x: Math.max(148, Math.min(frame.width - 100, bar.left - frame.left + bar.width / 2)) });
+    setInspected(text);
+  };
+  useLayoutEffect(() => setTooltip(null), [scale, year, month, subscriptionId]);
   const maxDay = Math.max(1, ...(history?.days.filter(day => day.date.startsWith(`${year}-`)).map(day => day.count) ?? []));
   const total = history?.days.reduce((sum, day) => sum + day.count, 0) ?? 0;
   const caption = (title: string, count: number) => `${title} · ${count} ${count === 1 ? "article" : "articles"}`;
@@ -49,8 +60,13 @@ export function PublicationHistory({ client, subscriptionId }: { client: ApiClie
     <p class="publication-summary">{history ? `${total.toLocaleString("en-US")} dated articles${history.days.length ? ` · ${history.days[0].date} — ${history.days.at(-1)!.date}` : ""}` : "Publication dates from collected articles"}</p>
     <div class="publication-controls"><label>Year <AutofillResistantSelect aria-label="Publication year" disabled={!history} value={String(year)} onChange={event => { setYear(Number(event.currentTarget.value)); setInspected(""); }}>{years.map(value => <option value={value}>{value}</option>)}</AutofillResistantSelect></label><label class={scale === "days" ? "" : "publication-month-hidden"}>Month <AutofillResistantSelect aria-label="Publication month" disabled={!history || scale !== "days"} value={String(month)} onChange={event => { setMonth(Number(event.currentTarget.value)); setInspected(""); }}>{months.map((value, index) => <option value={index}>{value}</option>)}</AutofillResistantSelect></label><span>Articles / {scale === "days" ? "day" : scale === "months" ? "month" : "year"}</span></div>
     <div class="publication-content">
+      <div class="publication-chart-frame" onMouseLeave={() => setTooltip(null)}>
+        <div class="publication-axis" aria-label="Article count scale">{ticks.map(tick => <span style={{ bottom: `${tick / max * 100}%` }}>{tick}</span>)}</div>
       <div class="publication-chart" role="group" aria-label={`Articles by ${scale}`}>
-        {bars.map(bar => <button disabled={!history} class="publication-bar" title={caption(bar.title, bar.count)} aria-label={caption(bar.title, bar.count)} aria-pressed={scale === "years" ? bar.value === year : scale === "months" ? bar.value === month : inspected === caption(bar.title, bar.count)} onMouseEnter={() => setInspected(caption(bar.title, bar.count))} onFocus={() => setInspected(caption(bar.title, bar.count))} onClick={() => { setInspected(caption(bar.title, bar.count)); if (scale === "years") setYear(bar.value); if (scale === "months") setMonth(bar.value); }}><span class="publication-bar-track"><span style={{ height: `${bar.count / max * 100}%` }}/></span><span class="publication-bar-label">{bar.label}</span></button>)}
+        <div class="publication-grid" aria-hidden="true">{ticks.map(tick => <i style={{ bottom: `${tick / max * 100}%` }}/>)}</div>
+        {bars.map(bar => <button disabled={!history} class="publication-bar" aria-label={caption(bar.title, bar.count)} aria-pressed={scale === "years" ? bar.value === year : scale === "months" ? bar.value === month : inspected === caption(bar.title, bar.count)} onMouseEnter={event => showTooltip(event.currentTarget, caption(bar.title, bar.count))} onFocus={event => showTooltip(event.currentTarget, caption(bar.title, bar.count))} onBlur={() => setTooltip(null)} onKeyDown={event => { if (event.key === "Escape") setTooltip(null); }} onClick={() => { setInspected(caption(bar.title, bar.count)); if (scale === "years") setYear(bar.value); if (scale === "months") setMonth(bar.value); }}><span class="publication-bar-track"><span style={{ height: `${bar.count / max * 100}%` }}/></span><span class="publication-bar-label">{bar.label}</span></button>)}
+      </div>
+      {tooltip && <div class="publication-tooltip" role="tooltip" style={{ left: `${tooltip.x}px` }}>{tooltip.text}</div>}
       </div>
       <div class="publication-inspected" aria-live="polite">{inspected || (history && !total ? "No dated articles collected yet." : "Hover or focus a bar or date to see the article count.")}</div>
       <div class="publication-calendar-heading"><h3>{year} at a glance</h3><span>Fewer <i class="publication-dot publication-dot--small"/><i class="publication-dot"/> More</span></div>

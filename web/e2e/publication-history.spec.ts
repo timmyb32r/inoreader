@@ -25,6 +25,12 @@ test("publication calendar keeps controls fixed through loading and every chart 
   for (const scale of ["Days", "Years", "Months"]) {
     await chart.getByRole("button", { name: scale, exact: true }).click();
     await expect(chart.getByRole("button", { name: scale, exact: true })).toHaveAttribute("aria-pressed", "true");
+    const bar = chart.getByRole("group", { name: `Articles by ${scale.toLowerCase()}` }).getByRole("button").first();
+    const barBefore = await bar.boundingBox();
+    await bar.hover();
+    expect(await chart.getByRole("tooltip").isVisible()).toBe(true);
+    expect(await chart.getByRole("tooltip").textContent()).toBe(await bar.getAttribute("aria-label"));
+    expect(await bar.boundingBox()).toEqual(barBefore);
     expect(await controls.boundingBox()).toEqual(controlsBefore);
     expect(await chart.boundingBox()).toEqual(before);
   }
