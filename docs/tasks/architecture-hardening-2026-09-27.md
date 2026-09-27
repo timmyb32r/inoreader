@@ -6,7 +6,7 @@ deployment to 158.160.186.87. Preserve user data and existing UI semantics.
 
 | Obligation | Status | Acceptance evidence |
 | --- | --- | --- |
-| 1. Reader read/write concurrency | verified | 9 controller regression tests passed; Page loads cannot discard pending writes; reordered success/failure tests, immediate pending feedback and stable controls. |
+| 1. Reader read/write concurrency | verified | 10 controller regression tests passed; Page loads cannot discard pending writes; reordered success/failure tests, immediate pending feedback and stable controls. |
 | 2. Durable AI replies | verified | Persist received attempt bytes before parsing/accounting, independently of publication lease; late reply and failure tests. |
 | 3. Bounded bulk marking | verified | Application-owned scenario, bounded filtered storage selection, atomic conflict handling, isolation tests. |
 | 4. Endpoint response contracts | verified | Explicit per-method decoders, unsupported schema rejection, mutation response regression. |
@@ -31,8 +31,10 @@ deterministic verification.
 ## Local verification
 
 - `just check-affected`: passed (Rust 6.51s plus frontend typecheck).
-- `just check-release`: passed on final implementation: 207 Rust tests across 21 suites, 148 frontend tests, 37 mocked browser scenarios, 14 Python tests.
+- `just check-release`: passed on final implementation: 207 Rust tests across 21 suites, 149 frontend tests, 37 mocked browser scenarios, 14 Python tests.
 - PostgreSQL acceptance includes backup/restore, bulk limit/conflict/isolation checks, immutable late AI reply capture and three real-backend browser scenarios (reader persistence, translation failure/retry/persistence, HTTP latency/request budgets).
 - Full gate initially exposed incomplete Web Feed test data. Fixture was corrected to the real `FeedPreviewResponse`; targeted and complete reruns passed.
 - No production schema change, no paid provider requests, no data transformation.
 - `git diff --check` and final source review passed. Rollout remains in progress.
+
+- Final controller review also fixed polling after refreshing a page with the same selected article. A regression proves polling restarts and the previous response cannot replace the fresh article.

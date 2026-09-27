@@ -88,4 +88,12 @@ remain explicit request errors, not fabricated successful wait samples.
 
 ## Verification evidence
 
-Pending final release run and deployment; see the authoritative task ledger.
+`just check-release` passed: 207 Rust tests, 149 frontend tests, 37 mocked
+browser scenarios and 14 Python tests. Real PostgreSQL/backup/Chromium and three
+real-backend browser scenarios ran inside the release gate.
+
+Fixture p95 HTTP latency: bootstrap **21.79 ms**, article list **11.67 ms**,
+subscriptions **12.19 ms**, article detail **19.18 ms** (budget: 500 ms).
+Exact twenty-sample distributions are retained in
+`hardening-latency-2026-09-27.json`. These are local fixture results, not production
+latency or a before/after comparison. Deployment evidence is in the task ledger.

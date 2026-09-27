@@ -197,3 +197,31 @@ it("retains the account write barrier across workspace replacement", async () =>
   await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
   expect(result.current.selected?.read).toBe(false);
 });
+
+it("restarts full-text polling when a refreshed page keeps the same selected article", async () => {
+  const client = mockClient(),
+    bootstrap = await client.bootstrap();
+  const old = deferred<any>();
+  const get = vi.spyOn(client, "getArticle").mockReturnValue(old.promise);
+  const { result } = renderHook(() =>
+    useReaderController(client, bootstrap, [], vi.fn(), vi.fn()),
+  );
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  vi.spyOn(client, "listArticles").mockResolvedValue(bootstrap.articlePage);
+  const fresh = {
+    ...bootstrap.articlePage.articles[0],
+    title: "Fresh full text",
+  };
+  get.mockResolvedValue(fresh);
+  await act(async () => {
+    await result.current.loadPage("feed", null);
+  });
+  await waitFor(() =>
+    expect(result.current.selected?.title).toBe("Fresh full text"),
+  );
+  await act(async () => {
+    old.resolve({ ...fresh, title: "Stale" });
+    await old.promise;
+  });
+  expect(result.current.selected?.title).toBe("Fresh full text");
+});

@@ -30,6 +30,7 @@ export function useReaderController(
     },
     [],
   );
+  const [pageGeneration, setPageGeneration] = useState(0);
   const [view, setView] = useState<View>(initialPagePosition.view);
   const [articles, setArticles] = useState<Article[]>(
     bootstrap.articlePage.articles,
@@ -126,7 +127,7 @@ export function useReaderController(
       active = false;
       if (timer) window.clearTimeout(timer);
     };
-  }, [client, workspaceId, selected?.id]);
+  }, [client, workspaceId, selected?.id, pageGeneration]);
 
   const update = (
     id: string,
@@ -218,6 +219,7 @@ export function useReaderController(
   };
   const applyPage = (page: ArticlePage, batch: number) => {
     epoch.current++;
+    setPageGeneration((value) => value + 1);
     bulkLock.current = false;
     pending.current.clear();
     mutationQueue.current.clear();
