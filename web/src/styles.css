@@ -3201,24 +3201,16 @@ select:focus-visible {
   justify-content: center;
   width: 34px;
   height: 34px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  background: var(--surface);
 }
 .sidebar--collapsed .sidebar__section-link em {
   margin: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 11px;
 }
-.sidebar--collapsed .sidebar__section-link:hover,
-.sidebar--collapsed .sidebar__section-link:focus-visible {
+.sidebar__section-link:hover em,
+.sidebar__section-link:focus-visible em {
   background: var(--accent-soft);
-  border-color: var(--accent);
   color: var(--accent-deep);
 }
-.sidebar--collapsed .sidebar__section-link:active {
+.sidebar__section-link:active em {
   background: color-mix(in srgb, var(--accent) 25%, var(--surface));
 }
 .home-dashboard {

@@ -123,11 +123,31 @@ test("collapsed subscription count opens the catalog and returns to the same rea
     exact: true,
   });
   await expect(subscriptions).toContainText("Subscriptions");
+  const badge = subscriptions.locator("em");
+  const appearance = () =>
+    badge.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        width: style.width,
+        height: style.height,
+        font: style.font,
+        color: style.color,
+        background: style.backgroundColor,
+        border: style.border,
+        radius: style.borderRadius,
+        padding: style.padding,
+      };
+    });
+  const expanded: Record<string, Awaited<ReturnType<typeof appearance>>> = {};
+  expanded.light = await appearance();
+  await page.getByRole("button", { name: "Use dark theme" }).click();
+  expanded.dark = await appearance();
+  await page.getByRole("button", { name: "Use light theme" }).click();
   await page.getByRole("button", { name: "Collapse sidebar" }).click();
   await expect(subscriptions).toBeVisible();
   await expect(subscriptions.locator("span")).toBeHidden();
   await expect(subscriptions.locator("em")).toHaveText("2");
-  await expect(subscriptions).toHaveCSS("border-radius", "50%");
+  await expect(subscriptions).toHaveCSS("border-width", "0px");
   const before = await subscriptions.boundingBox();
   expect(before!.width).toBe(before!.height);
   const settings = page.getByRole("button", { name: "Settings", exact: true });
@@ -136,16 +156,17 @@ test("collapsed subscription count opens the catalog and returns to the same rea
     if (theme === "dark")
       await page.getByRole("button", { name: "Use dark theme" }).click();
     await page.mouse.move(0, 0);
-    const idle = await subscriptions.evaluate(
+    expect(await appearance()).toEqual(expanded[theme]);
+    const idle = await badge.evaluate(
       (el) => getComputedStyle(el).backgroundColor,
     );
     await subscriptions.hover();
-    await expect(subscriptions).not.toHaveCSS("background-color", idle);
-    const hover = await subscriptions.evaluate(
+    await expect(badge).not.toHaveCSS("background-color", idle);
+    const hover = await badge.evaluate(
       (el) => getComputedStyle(el).backgroundColor,
     );
     await page.mouse.down();
-    await expect(subscriptions).not.toHaveCSS("background-color", hover);
+    await expect(badge).not.toHaveCSS("background-color", hover);
     expect(await subscriptions.boundingBox()).toEqual(before);
     expect(await settings.boundingBox()).toEqual(settingsBefore);
     await page.mouse.up();
