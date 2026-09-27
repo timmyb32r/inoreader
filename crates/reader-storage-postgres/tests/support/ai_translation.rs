@@ -43,6 +43,22 @@ pub async fn verify(
     workspace: Uuid,
     article: Uuid,
 ) {
+    for text in ["Title", "Exact introduction."] {
+        assert!(store
+            .article_intro_contains(owner, workspace, article, text)
+            .await
+            .unwrap());
+    }
+    for text in ["Tit", "Exact introduction", "Injected paragraph", ""] {
+        assert!(!store
+            .article_intro_contains(owner, workspace, article, text)
+            .await
+            .unwrap());
+    }
+    assert!(store
+        .article_intro_contains(other, workspace, article, "Title")
+        .await
+        .is_err());
     let provider = Arc::new(Translator(AtomicUsize::new(0)));
     let service = AiService::new(
         store.clone(),

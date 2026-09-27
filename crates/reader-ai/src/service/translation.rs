@@ -24,7 +24,12 @@ impl AiService {
             ArticleInput::Ready(s) => s,
             _ => return Err(AiError::FullText),
         };
-        if !contains_paragraph(&snapshot.safe_html, &source) {
+        if !contains_paragraph(&snapshot.safe_html, &source)
+            && !self
+                .store
+                .article_intro_contains(owner, workspace, article, &source)
+                .await?
+        {
             return Err(AiError::Message);
         }
         self.store

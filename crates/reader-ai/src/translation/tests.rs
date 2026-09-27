@@ -25,8 +25,8 @@ fn exact_segments_reject_loss_normalization_missing_pinyin_and_fake_literals() {
 }
 #[test]
 fn paragraph_membership_preserves_dom_text_without_accepting_injected_or_partial_text() {
-    let html="<p>磁盘 <strong>读取</strong> &amp; SQL。</p><ul><li><p>nested</p></li><li>leaf</li></ul><pre><code>not selectable</code></pre>";
-    for text in ["磁盘 读取 & SQL。", "nested", "leaf"] {
+    let html="<h1>标题</h1><h2>技术细节</h2><p>磁盘 <strong>读取</strong> &amp; SQL。</p><ul><li><p>nested</p></li><li>leaf</li></ul><pre><code>not selectable</code></pre>";
+    for text in ["标题", "技术细节", "磁盘 读取 & SQL。", "nested", "leaf"] {
         assert!(contains_paragraph(html, text), "{text}");
     }
     for text in [

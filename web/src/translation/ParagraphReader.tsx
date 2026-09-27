@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { AiClient, ParagraphJob, ParagraphTranslation, TranslationSegment } from "../api/ai";
 import { Icon } from "../ui/Icon";
@@ -5,8 +6,8 @@ import { annotate, clearAnnotations, paragraphs } from "./annotations";
 import "./translation.css";
 
 type Word=Extract<TranslationSegment,{kind:"word"}>;
-type Props={client:AiClient;workspaceId:string;articleId:string;html:string;body:string[];enabled:boolean};
-export function ParagraphReader({client,workspaceId,articleId,html,body,enabled}:Props) {
+type Props={client:AiClient;workspaceId:string;articleId:string;html:string;body:string[];enabled:boolean;title?:string;excerpt?:string;children?:ComponentChildren};
+export function ParagraphReader({client,workspaceId,articleId,html,body,enabled,title,excerpt,children}:Props) {
   const root=useRef<HTMLDivElement>(null),glossary=useRef(new Map<string,Word>());
   const busy=useRef(false),mounted=useRef(true),pressed=useRef(false),lastScroll=useRef(0);
   const [jobs,setJobs]=useState<ParagraphJob[]>([]),[selection,setSelection]=useState("");
@@ -44,7 +45,7 @@ export function ParagraphReader({client,workspaceId,articleId,html,body,enabled}
       paragraphs(root.current).forEach(p=>p.classList.toggle("paragraph-selected",p.textContent===selection));
     };
     update();return()=>{cancelled=true;clearTimeout(timer);};
-  },[enabled,completedSignature,html,selection]);
+  },[enabled,completedSignature,html,title,excerpt,selection]);
   useEffect(()=>{if(!enabled){setWord(null);setSelection("");}},[enabled]);
   useEffect(()=>{
     const escape=(event:KeyboardEvent)=>{if(event.key==="Escape"){setWord(null);setSelection("");}};
@@ -82,13 +83,13 @@ export function ParagraphReader({client,workspaceId,articleId,html,body,enabled}
   },[word]);
   const pending=loading||current?.status==="queued"||current?.status==="generating";
   return <>
-    <div ref={root} class={`article-content ${enabled?"paragraph-translation-mode":""}`} onMouseOver={event=>hovered(event.target)} onMouseLeave={()=>setWord(null)} onFocusIn={event=>hovered(event.target)} onFocusOut={()=>setWord(null)} onClick={event=>{
+    <div ref={root} class={`paragraph-reader ${enabled?"paragraph-translation-mode":""}`} onMouseOver={event=>hovered(event.target)} onMouseLeave={()=>setWord(null)} onFocusIn={event=>hovered(event.target)} onFocusOut={()=>setWord(null)} onClick={event=>{
       if(!enabled)return;
       const target=event.target instanceof Element?event.target:null;
       if(target?.closest("[data-translation-word]")){event.preventDefault();hovered(target);return;}
       const paragraph=target?.closest<HTMLElement>("[data-translatable]");
       if(paragraph&&window.getSelection()?.isCollapsed!==false){event.preventDefault();void translate(paragraph.textContent??"");}
-    }} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){const span=(event.target as Element).closest("[data-translation-word]");if(span){event.preventDefault();hovered(span);}}}} dangerouslySetInnerHTML={html?{__html:html}:undefined}>{!html&&body.map((p,i)=><p key={i}>{p}</p>)}</div>
+    }} onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){const span=(event.target as Element).closest("[data-translation-word]");if(span){event.preventDefault();hovered(span);}}}}>{title&&<h1>{title}</h1>}{excerpt&&<p class="reader-deck">{excerpt}</p>}{children}<div class="article-content" dangerouslySetInnerHTML={html?{__html:html}:undefined}>{!html&&body.map((p,i)=><p key={i}>{p}</p>)}</div></div>
     {enabled&&selection&&<section class="paragraph-result" role="region" aria-label="Paragraph translation" aria-busy={pending}>
       <header><strong>Перевод абзаца</strong><button class="icon-button" aria-label="Close paragraph translation" onClick={()=>setSelection("")}><Icon name="close"/></button></header>
       <div class="paragraph-result-body" aria-live="polite">{pending?<div class="paragraph-wait"><span class="spinner"/>Переводим абзац…</div>:error||current?.status==="failed"?<div role="alert">{error||(current?.status==="failed"?current.error:"")}</div>:current?.status==="completed"?<p>{current.result.translation}</p>:null}</div>

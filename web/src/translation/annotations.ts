@@ -1,8 +1,8 @@
 import type { ParagraphTranslation, TranslationSegment } from "../api/ai";
 
-export const paragraphSelector = "p, li";
+export const paragraphSelector = "p, li, h1, h2, h3, h4, h5, h6";
 export function paragraphs(root:HTMLElement):HTMLElement[] {
-  return [...root.querySelectorAll<HTMLElement>(paragraphSelector)].filter(p => !p.querySelector("p, li, pre") && !!p.textContent?.trim());
+  return [...root.querySelectorAll<HTMLElement>(paragraphSelector)].filter(p => !p.querySelector(`${paragraphSelector}, pre`) && !!p.textContent?.trim());
 }
 export function clearAnnotations(root:HTMLElement) {
   root.querySelectorAll("[data-translation-word]").forEach(span => span.replaceWith(...span.childNodes));

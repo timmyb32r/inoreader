@@ -282,6 +282,28 @@ impl AiStore for PostgresAiStore {
         }
         Ok(())
     }
+    async fn article_intro_contains(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+        source: &str,
+    ) -> Result<bool, AiError> {
+        owned_workspace(&self.pool, owner, workspace).await?;
+        let value = self
+            .reader
+            .article(
+                WorkspaceId::from_uuid(workspace),
+                ArticleId::from_uuid(article),
+            )
+            .await
+            .map_err(|error| match error {
+                reader_application::RepositoryError::NotFound => AiError::NotFound,
+                _ => AiError::Storage,
+            })?;
+        Ok(!source.trim().is_empty()
+            && (value.key.title == source || value.key.description.as_deref() == Some(source)))
+    }
     async fn article_input(
         &self,
         owner: Uuid,

@@ -16,3 +16,9 @@ it("rejects mismatched segmentation without rewriting source text",()=>{
  expect(()=>annotate(root,new Map([[result.source,{...result,segments:[]}]]))).toThrow("does not match");
  expect(root.textContent).toBe(text);
 });
+
+it("selects the title, introduction and body headings as independent complete blocks",()=>{
+ const root=document.createElement("div");root.innerHTML='<h1>标题</h1><p class="reader-deck">导语</p><div><h2>技术细节</h2><p>正文</p><ul><li><h3>嵌套标题</h3><p>嵌套正文</p></li></ul></div>';
+ expect(paragraphs(root).map(p=>p.textContent)).toEqual(["标题","导语","技术细节","正文","嵌套标题","嵌套正文"]);
+ annotate(root,new Map());expect(root.querySelectorAll("[data-translatable]")).toHaveLength(6);
+});

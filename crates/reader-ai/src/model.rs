@@ -381,6 +381,15 @@ pub trait AiStore: Send + Sync {
         balance: Option<Balance>,
         error: Option<String>,
     ) -> Result<(), AiError>;
+    /// Exact membership in the owned article's displayed title or RSS description.
+    /// No normalization or arbitrary client text is accepted.
+    async fn article_intro_contains(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+        source: &str,
+    ) -> Result<bool, AiError>;
     async fn article_input(
         &self,
         owner: Uuid,

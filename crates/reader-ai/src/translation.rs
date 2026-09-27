@@ -182,14 +182,14 @@ impl TranslationInput {
     }
 }
 
-/// This explicit selection contract matches frontend p/leaf-li textContent.
+/// This explicit selection contract matches frontend paragraph/heading/leaf-li textContent.
 /// Nested list parents and blocks containing preformatted code are not selectable.
 pub fn contains_paragraph(html: &str, source: &str) -> bool {
     let document = scraper::Html::parse_fragment(html);
-    let Ok(selector) = scraper::Selector::parse("p, li") else {
+    let Ok(selector) = scraper::Selector::parse("p, li, h1, h2, h3, h4, h5, h6") else {
         return false;
     };
-    let Ok(nested) = scraper::Selector::parse("p, li, pre") else {
+    let Ok(nested) = scraper::Selector::parse("p, li, h1, h2, h3, h4, h5, h6, pre") else {
         return false;
     };
     document.select(&selector).any(|node| {

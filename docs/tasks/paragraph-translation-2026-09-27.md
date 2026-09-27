@@ -45,3 +45,29 @@ Deployment on 2026-09-27:
   smoke-test session was deleted and its deletion verified.
 - Credential-free local smoke evidence is in ignored
   `.inoreader-state/deployments/paragraph-translation-20260927/smoke-report.json`.
+
+## Follow-up: title, introduction and headings
+
+The initial selector only covered `p`/leaf `li` inside the full-text container.
+Consequently the displayed title and RSS introduction above that container, and
+headings inside it, were not selectable. The annotation boundary now includes the
+article title/introduction while keeping the full-text typography container intact.
+Frontend and backend both accept h1–h6; title/introduction requests require exact
+membership in the owned article metadata. Summary snapshots and stored data are
+unchanged.
+
+Validation: `just check-affected` and the complete `just check-release` passed;
+132 frontend tests and 35 browser tests passed. New cases cover title/introduction/
+heading clicks and dictionary cards, unchanged toolbar/following-paragraph geometry,
+exact metadata membership, rejected partial/injected text and cross-account access.
+
+Deployed follow-up image `inoreader-app:translation-intro-20260927`
+(`sha256:c56a635df1170c9ac02f00a8211ff850dff709fa99f0bb2e39206f8e92b7b144`)
+on `158.160.186.87`; readiness returned 204. No database migration or data rewrite.
+Live title/introduction requests passed article membership and were queued, but
+three provider attempts returned invalid/incomplete segmentation and failed closed.
+Thus live selection/API acceptance is verified; successful real-provider translation
+for those particular metadata texts is not verified. Browser tests verify successful
+rendering with valid provider results. All temporary smoke sessions were removed.
+Provider-output reliability remains a separate limitation; no source normalization,
+weakened validation, or automatic paid retry was introduced to conceal it.

@@ -195,7 +195,7 @@ pub async fn verify(pool: &PgPool) {
         key: DedupKey {
             location: ArticleLocation::from(url::Url::parse("https://example.com/same").unwrap()),
             title: "Title".into(),
-            description: None,
+            description: Some("Exact introduction.".into()),
         },
         state: ArticleState::default(),
         first_arrived_at: Utc::now(),

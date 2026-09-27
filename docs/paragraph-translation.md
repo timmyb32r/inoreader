@@ -10,7 +10,8 @@ result. The button exits selection mode.
 
 The full Russian paragraph translation appears in a fixed overlay, so neither
 network completion nor annotations move subsequent paragraphs. Word wrappers
-preserve the source text and HTML, including emphasis and hyperlinks. Paragraphs
+preserve the source text and HTML, including emphasis and hyperlinks. Paragraphs,
+headings (h1–h6), the displayed article title and RSS introduction,
 and leaf list items are eligible; nested list containers and preformatted code
 blocks are not. Inline code retains its original formatting.
 
@@ -18,7 +19,9 @@ blocks are not. Inline code retains its original formatting.
 
 - `POST /api/articles/{id}/translations`: `workspaceId`, `operationId`, exact
   `source` text. Authentication and CSRF precede work. The server verifies workspace
-  ownership, article access, and exact `textContent` membership in archived HTML.
+  ownership, article access, and exact `textContent` membership in archived HTML or exact equality with
+  the owned article’s displayed title/RSS description. No partial matches or
+  client-supplied replacement metadata are accepted.
 - `GET /api/articles/{id}/translations?workspace_id=...`: account/workspace-scoped
   persisted results and pending jobs. The UI polls only while work is outstanding.
 - `reader-ai::translation` owns the validated source segmentation contract.
