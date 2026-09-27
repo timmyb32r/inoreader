@@ -793,6 +793,21 @@ select:focus-visible {
   align-items: center;
   gap: 10px;
 }
+.reader-meta--link {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+.reader-meta--link:hover,
+.reader-meta--link:focus-visible {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+.reader-meta--link:active {
+  background: var(--line);
+}
 .reader-meta div {
   display: flex;
   flex-direction: column;

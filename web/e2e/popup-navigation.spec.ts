@@ -1,5 +1,57 @@
 import { expect, test } from "@playwright/test";
 
+for (const readerUrl of [
+  "/reader",
+  "/reader?view=subscription&subscription=sub",
+]) {
+  test(`article source opens its subscription and returns without shifting the reader: ${readerUrl}`, async ({
+    page,
+  }) => {
+    await page.goto(readerUrl);
+    const reader = page.getByRole("article", { name: "Article reader" });
+    const source = reader.getByRole("link", {
+      name: "Open subscription This Week in Rust",
+    });
+    await expect(source).toHaveAttribute("href", "/subscriptions/sub");
+    const title = await reader.locator("h1").textContent();
+    const url = page.url();
+    const bounds = await source.boundingBox();
+    const toolbarBounds = await reader.locator(".reader-toolbar").boundingBox();
+    const normalBackground = await source.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await source.hover();
+    await expect(source).not.toHaveCSS("background-color", normalBackground);
+    expect(await source.boundingBox()).toEqual(bounds);
+    const hoverBackground = await source.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    await page.mouse.down();
+    await expect(source).not.toHaveCSS("background-color", hoverBackground);
+    expect(await source.boundingBox()).toEqual(bounds);
+    await page.mouse.up();
+    await expect(
+      page.getByRole("dialog", { name: "Subscription details", exact: true }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/subscriptions\/sub$/);
+    expect(await reader.locator(".reader-toolbar").boundingBox()).toEqual(
+      toolbarBounds,
+    );
+    await page.getByRole("button", { name: "Close subscriptions" }).click();
+    await expect(page).toHaveURL(url);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(reader.locator("h1")).toHaveText(title!);
+    await expect(source).toBeFocused();
+    expect(await source.boundingBox()).toEqual(bounds);
+    await source.press("Enter");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page).toHaveURL(url);
+    await source.locator(".source__mark").click();
+    await expect(page).toHaveURL(/\/subscriptions\/sub$/);
+  });
+}
+
 test("direct subscription popup returns to the same reader with stable geometry", async ({
   page,
 }) => {

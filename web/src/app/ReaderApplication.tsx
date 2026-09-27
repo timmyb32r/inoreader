@@ -434,6 +434,9 @@ export function ReaderApplication({
                   pending={pendingArticleMutations}
                   className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`}
                   onBack={() => setMobilePanel("list")}
+                  onOpenSubscription={(id) =>
+                    navigate(`/subscriptions/${encodeURIComponent(id)}`)
+                  }
                   onUpdate={(patch) => update(selected.id, patch)}
                   onRefresh={() => reader.refreshFullText(selected.id)}
                   onNotice={announce}

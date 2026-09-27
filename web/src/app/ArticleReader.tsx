@@ -12,6 +12,7 @@ export function ArticleReader({
   pending,
   className,
   onBack,
+  onOpenSubscription,
   onUpdate,
   onRefresh,
   onNotice,
@@ -27,6 +28,7 @@ export function ArticleReader({
   pending: Set<string>;
   className: string;
   onBack: () => void;
+  onOpenSubscription: (id: string) => void;
   onUpdate: (p: Partial<Article>) => void;
   onRefresh: () => Promise<void>;
   onNotice: (m: string) => void;
@@ -39,6 +41,17 @@ export function ArticleReader({
   translationEnabled: boolean;
 }) {
   const [translating, setTranslating] = useState(false);
+  // The displayed source and the first subscription ID share the same origin.
+  const sourceSubscriptionId = article.subscriptionIds?.[0];
+  const sourceMeta = (
+    <>
+      <span class="source__mark">{article.source.slice(0, 1)}</span>
+      <div>
+        <strong>{article.source}</strong>
+        <time>{formatArticleDate(article.age)}</time>
+      </div>
+    </>
+  );
   return (
     <article class={`article-reader ${className}`} aria-label="Article reader">
       <header class="reader-toolbar">
@@ -144,13 +157,29 @@ export function ArticleReader({
         </a>
       </header>
       <div class="reader-body">
-        <div class="reader-meta">
-          <span class="source__mark">{article.source.slice(0, 1)}</span>
-          <div>
-            <strong>{article.source}</strong>
-            <time>{formatArticleDate(article.age)}</time>
-          </div>
-        </div>
+        {sourceSubscriptionId ? (
+          <a
+            class="reader-meta reader-meta--link"
+            href={`/subscriptions/${encodeURIComponent(sourceSubscriptionId)}`}
+            aria-label={`Open subscription ${article.source}`}
+            onClick={(event) => {
+              if (
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              )
+                return;
+              event.preventDefault();
+              onOpenSubscription(sourceSubscriptionId);
+            }}
+          >
+            {sourceMeta}
+          </a>
+        ) : (
+          <div class="reader-meta">{sourceMeta}</div>
+        )}
         <ParagraphReader
           client={aiClient}
           workspaceId={workspaceId}
