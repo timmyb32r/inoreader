@@ -8,7 +8,8 @@ async fn disabled_ai_needs_neither_secret_nor_prompt_artifact() {
         .connect_lazy("postgres://unused:unused@127.0.0.1/unused")
         .unwrap();
     let repository = Arc::new(
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap(),
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100, 86400)
+            .unwrap(),
     );
     assert!(ai::compose(&config, pool, repository).unwrap().is_none());
 }

@@ -71,6 +71,7 @@ async fn ai_routes_require_reader_auth_and_exact_origin() {
         StatusCode::FORBIDDEN
     );
     for path in [
+        "/api/profile/zhihu".to_owned(),
         format!("/api/glossary/channel?workspace_id={workspace}"),
         format!("/api/articles/{article}/definitions?workspace_id={workspace}"),
     ] {
@@ -84,6 +85,21 @@ async fn ai_routes_require_reader_auth_and_exact_origin() {
         );
     }
     for (method, path, body) in [
+        (
+            "PUT",
+            "/api/profile/zhihu".to_owned(),
+            serde_json::json!({"cookies":"z_c0=fixture"}),
+        ),
+        (
+            "POST",
+            "/api/profile/zhihu/check".to_owned(),
+            serde_json::json!({}),
+        ),
+        (
+            "DELETE",
+            "/api/profile/zhihu".to_owned(),
+            serde_json::json!({}),
+        ),
         (
             "PUT",
             "/api/glossary/channel".to_owned(),
@@ -340,7 +356,7 @@ fn workspace_and_subscription_dtos_expose_reasons_without_domain_layout() {
 }
 
 #[test]
-fn subscription_attention_is_explained_after_three_failures() {
+fn subscription_attention_uses_the_durable_duration_policy() {
     let subscription = Subscription::new(
         SubscriptionId::new(),
         WorkspaceId::new(),
@@ -350,6 +366,7 @@ fn subscription_attention_is_explained_after_three_failures() {
     let view = subscription_view(
         &subscription,
         &reader_application::SubscriptionStats {
+            needs_attention: true,
             consecutive_failures: 3,
             error: Some("upstream timeout".into()),
             ..Default::default()
@@ -360,7 +377,7 @@ fn subscription_attention_is_explained_after_three_failures() {
 }
 
 #[test]
-fn incomplete_refresh_needs_attention_without_lowering_failure_threshold() {
+fn continuation_and_transient_failures_do_not_raise_attention() {
     let subscription = Subscription::new(
         SubscriptionId::new(),
         WorkspaceId::new(),
@@ -371,16 +388,16 @@ fn incomplete_refresh_needs_attention_without_lowering_failure_threshold() {
         &subscription,
         &reader_application::SubscriptionStats {
             incomplete: true,
-            consecutive_failures: 2,
+            consecutive_failures: 100,
             ..Default::default()
         },
     );
-    assert!(incomplete.needs_attention);
-    assert!(incomplete.attention_reason.unwrap().contains("incomplete"));
+    assert!(!incomplete.needs_attention);
+    assert!(incomplete.attention_reason.is_none());
     let ordinary = subscription_view(
         &subscription,
         &reader_application::SubscriptionStats {
-            consecutive_failures: 2,
+            consecutive_failures: 100,
             ..Default::default()
         },
     );

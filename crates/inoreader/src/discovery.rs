@@ -5,6 +5,7 @@ pub(super) struct ProductionWebCollector {
     pub(super) static_feeds: StaticWebFeedCollector<ProductionFetcher>,
     pub(super) adapters: BuiltInAdapterCollector,
     pub(super) cdp: CdpBrowserCollector,
+    pub(super) zhihu: Option<Arc<reader_ingest::zhihu::Service>>,
     pub(super) max_pages: usize,
     pub(super) max_actions: usize,
 }
@@ -24,6 +25,13 @@ impl BrowserCollector for ProductionWebCollector {
             }
         }
         match source.kind() {
+            SourceKind::BuiltIn(reader_ingest::BuiltInAdapter::Zhihu { max_pages }) => {
+                self.zhihu
+                    .as_ref()
+                    .ok_or_else(|| FetchError::Rejected("zhihu_unavailable".into()))?
+                    .collect(source, *max_pages)
+                    .await
+            }
             SourceKind::BuiltIn(_) => self.adapters.collect(source).await,
             SourceKind::WebPage(recipe) if recipe.loading() == WebLoading::Browser => {
                 self.cdp.collect(source).await

@@ -252,6 +252,7 @@ fn public_proxy_routes_default_to_direct_and_validate_before_io() {
         max_connect_header_bytes: 8192,
         endpoint_attempt_timeout_ms: 8000,
         quarantine_ms: 60000,
+        direct_first: false,
     };
     let mut config = example();
     config.http.public_proxy_routes = vec![route.clone()];
@@ -313,6 +314,7 @@ fn public_proxy_routes_have_disjoint_hosts_and_independent_pools() {
         max_connect_header_bytes: 8192,
         endpoint_attempt_timeout_ms: 8000,
         quarantine_ms: 60000,
+        direct_first: false,
     };
     config.http.public_proxy_routes = vec![
         route.clone(),
@@ -336,7 +338,7 @@ fn public_proxy_routes_have_disjoint_hosts_and_independent_pools() {
 fn public_proxy_route_wire_configuration_rejects_unknown_or_malformed_fields() {
     let mut raw: serde_yaml::Value =
         serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
-    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['user:password@proxy.example:8080']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000").unwrap();
+    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['user:password@proxy.example:8080']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000\n  direct_first: false").unwrap();
     assert!(serde_yaml::from_value::<Config>(raw.clone()).is_err());
     raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['35.207.254.58:8899']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000\n  forward_credentials: true").unwrap();
     assert!(serde_yaml::from_value::<Config>(raw).is_err());
@@ -363,7 +365,7 @@ fn omitted_public_proxy_routes_are_direct_but_non_sequences_are_rejected() {
 fn enabled_public_proxy_routes_require_explicit_health_intervals() {
     let raw: serde_yaml::Value =
         serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
-    let proxy: serde_yaml::Value = serde_yaml::from_str("target_hosts: [example.com]\nendpoints: ['8.8.8.8:80']\nmax_connect_header_bytes: 8192\nendpoint_attempt_timeout_ms: 8000\nquarantine_ms: 60000").unwrap();
+    let proxy: serde_yaml::Value = serde_yaml::from_str("target_hosts: [example.com]\nendpoints: ['8.8.8.8:80']\nmax_connect_header_bytes: 8192\nendpoint_attempt_timeout_ms: 8000\nquarantine_ms: 60000\ndirect_first: false").unwrap();
     for missing in ["endpoint_attempt_timeout_ms", "quarantine_ms"] {
         let mut document = raw.clone();
         let mut incomplete = proxy.clone();
@@ -395,4 +397,16 @@ fn retry_pacing_seconds_reject_overflow_before_startup_conversions() {
     let mut config = example();
     config.scheduler.retry_jitter_seconds = 0;
     config.validate().unwrap();
+}
+
+#[test]
+fn attention_duration_is_explicit_positive_and_lossless() {
+    for seconds in [0, u64::MAX] {
+        let mut config = example();
+        config.subscriptions.attention_after_seconds = seconds;
+        assert!(config.validate().is_err());
+    }
+    let missing = include_str!("../../../config.example.yaml")
+        .replace("  attention_after_seconds: 86400\n", "");
+    assert!(serde_yaml::from_str::<Config>(&missing).is_err());
 }

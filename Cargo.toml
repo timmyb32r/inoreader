@@ -3,6 +3,7 @@ resolver = "2"
 exclude = ["acceptance/chromium"]
 members = [
   "crates/reader-runtime",
+  "crates/reader-wiki",
   "crates/reader-ai",
   "crates/reader-glossary",
   "crates/reader-core",

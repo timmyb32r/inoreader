@@ -25,11 +25,11 @@ describe("subscription catalog contracts", () => {
   it("uses the same attention classification for indicators, sorting and filters", () => {
     expect(isProblem(healthy)).toBe(false);
     expect(isProblem({ ...healthy, error: "Transient timeout" })).toBe(false);
-    for (const flags of [
-      { needsAttention: true },
-      { incomplete: true },
-      { attentionReason: "Repeated failures" },
-    ]) {
+    expect(isProblem({ ...healthy, incomplete: true })).toBe(false);
+    expect(isProblem({ ...healthy, attentionReason: "old diagnostic" })).toBe(
+      false,
+    );
+    for (const flags of [{ needsAttention: true }]) {
       const item = { ...healthy, id: problem.id, name: problem.name, ...flags };
       expect(isProblem(item)).toBe(true);
       expect(

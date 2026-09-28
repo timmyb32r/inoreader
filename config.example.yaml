@@ -38,6 +38,7 @@ http:
   #     max_connect_header_bytes: 8192
   #     endpoint_attempt_timeout_ms: 8000
   #     quarantine_ms: 60000
+  #     direct_first: false
   public_proxy_routes: []
 scheduler:
   polling_interval_seconds: 1800
@@ -53,6 +54,8 @@ scheduler:
   retry_jitter_seconds: 60
   max_retry_age_seconds: 86400
 subscriptions:
+  # Only surface an outage after failed attempts span this duration.
+  attention_after_seconds: 86400
   pause_reason_max_bytes: 4096
 browser:
   cdp_endpoint: "http://chromium:9222"
@@ -136,3 +139,12 @@ glossary:
   history_pages_per_run: 5
   worker_poll_milliseconds: 1000
   workers: 2
+
+# Private wiki limits, UTF-8 bytes. Draft delay is milliseconds.
+wiki:
+  name_bytes: 512
+  markdown_bytes: 524288
+  search_bytes: 512
+  search_excerpt_characters: 200
+  page_size: 50
+  draft_save_delay_ms: 1000

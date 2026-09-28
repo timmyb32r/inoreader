@@ -117,11 +117,7 @@ export function formatKind(v?: Subscription["sourceType"]) {
     : "Unknown";
 }
 export function isProblem(subscription: Subscription) {
-  return !!(
-    subscription.needsAttention ||
-    subscription.attentionReason ||
-    subscription.incomplete
-  );
+  return subscription.needsAttention === true;
 }
 function sortableValue(
   subscription: Subscription,

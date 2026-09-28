@@ -1,6 +1,7 @@
 import { CountdownTimer } from "./timer/CountdownTimer";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { ArticleChatWidget } from "../ai/ArticleChatWidget";
+import { ZhihuProfile } from "../profile/ZhihuProfile";
 import { DeepSeekProfile } from "../ai/DeepSeekProfile";
 import { useAiProfile } from "../ai/useAiProfile";
 import { useArticleChat } from "../ai/useArticleChat";
@@ -21,6 +22,7 @@ import {
   ReasonDialog,
   RestoreDialog,
 } from "./subscriptionDialogs";
+import { WikiApplication } from "../wiki/WikiApplication";
 import { ReaderSidebar } from "./ReaderSidebar";
 import { SubscriptionsPage } from "./SubscriptionsPage";
 import { usePopupNavigation } from "./usePopupNavigation";
@@ -90,15 +92,24 @@ export function ReaderApplication({
   const noticeTimer = useRef<number>();
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const dirtySubscriptionNote = useRef(false);
+  const dirtyWiki = useRef(false);
   const confirmDiscard = () =>
-    !dirtySubscriptionNote.current ||
-    window.confirm("Discard unsaved changes to your personal note?");
+    (!dirtySubscriptionNote.current && !dirtyWiki.current) ||
+    window.confirm(
+      "Leave with unsaved changes? Text not saved to the server may be lost.",
+    );
   const {
     path: locationPath,
     backgroundPath,
-    navigate,
+    navigate: rawNavigate,
     close: closeSubscriptions,
+    backFromWiki,
   } = usePopupNavigation(confirmDiscard);
+  const navigate = (path: string) => {
+    const moved = rawNavigate(path);
+    if (moved && path.startsWith("/wiki")) setMobilePanel("list");
+    return moved;
+  };
   const readerPath = locationPath.startsWith("/subscriptions")
     ? backgroundPath
     : locationPath;
@@ -354,7 +365,7 @@ export function ReaderApplication({
         </div>
       </header>
       <main
-        class={`reader-grid${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
+        class={`reader-grid${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
       >
         <>
           <ReaderSidebar
@@ -397,7 +408,18 @@ export function ReaderApplication({
             }}
             onRefresh={subscriptionCommands.refresh}
           />
-          {readerPath === "/" ? (
+          {readerPath.startsWith("/wiki") ? (
+            <WikiApplication
+              key={account.id}
+              client={client.wiki}
+              path={readerPath}
+              onBack={backFromWiki}
+              navigate={navigate}
+              onDirty={(v) => {
+                dirtyWiki.current = v;
+              }}
+            />
+          ) : readerPath === "/" ? (
             <ActivityDashboard
               activity={activity}
               workspaceName={workspace}
@@ -463,6 +485,7 @@ export function ReaderApplication({
       </main>
       {subscriptionRoute && (
         <SubscriptionsPage
+          onOpenWiki={navigate}
           client={client}
           workspaceId={workspaceId}
           workspaceName={workspace}
@@ -636,7 +659,7 @@ export function ReaderApplication({
       {modal === "profile" && (
         <ModalDialog
           title="Profile"
-          description="Your personal DeepSeek key and balance."
+          description="Your personal integrations and credentials."
           onClose={() => setModal(null)}
           width="540px"
         >
@@ -645,6 +668,7 @@ export function ReaderApplication({
             onProfile={(value) => aiProfileState.update(account.id, value)}
             completedGeneration={chat.completedGeneration}
           />
+          <ZhihuProfile key={account.id} client={client.zhihu} />
           <footer class="modal__actions">
             <span />
             <span />

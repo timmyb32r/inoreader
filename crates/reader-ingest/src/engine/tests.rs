@@ -949,3 +949,72 @@ async fn dropbox_collection_preserves_rss_metadata_before_commit() {
     assert_eq!(new.feed_content_html(), old.feed_content_html());
     assert_eq!(new.key().title, "After");
 }
+
+#[tokio::test]
+async fn recurring_poll_uses_new_zhihu_adapter_after_profile_connects_session() {
+    let source = SourceDefinition::new(
+        SourceId::new(),
+        Url::parse("https://www.zhihu.com/people/ververica/posts").unwrap(),
+        SourceKind::BuiltIn(BuiltInAdapter::Zhihu {
+            max_pages: std::num::NonZeroUsize::new(1).unwrap(),
+        }),
+    )
+    .unwrap();
+    let source_id = source.id();
+    let store = Arc::new(store(source));
+    let fetcher = fetch(Err(FetchError::Rejected(
+        "old unauthenticated path must not run".into(),
+    )));
+    worker(
+        store.clone(),
+        fetcher.clone(),
+        BrowserCapability::Available,
+        20,
+    )
+    .handle(&lease(WorkItem::PollSource { source_id }), now())
+    .await
+    .unwrap();
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(store.polls.lock().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn zhihu_fulltext_uses_persisted_post_body_without_fetching_landing_page() {
+    let source = SourceDefinition::new(
+        SourceId::new(),
+        Url::parse("https://www.zhihu.com/people/ververica").unwrap(),
+        SourceKind::BuiltIn(BuiltInAdapter::Zhihu {
+            max_pages: std::num::NonZeroUsize::new(1).unwrap(),
+        }),
+    )
+    .unwrap();
+    let id = SourceRecordId::new();
+    let storage = Arc::new(fulltext_store(source, id));
+    let fetcher = fetch(Err(FetchError::Rejected(
+        "must_not_fetch_zhihu_landing_page".into(),
+    )));
+    worker(
+        storage.clone(),
+        fetcher.clone(),
+        BrowserCapability::Available,
+        10,
+    )
+    .handle(
+        &lease(WorkItem::ExtractFullText {
+            record_id: id,
+            source_revision: 0,
+            url: Url::parse("https://zhuanlan.zhihu.com/p/3078").unwrap(),
+            manual: false,
+        }),
+        now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(fetcher.calls.load(Ordering::SeqCst), 0);
+    let manifest = storage.manifests.lock().unwrap();
+    let raw: Vec<u8> = manifest[0]
+        .raw_chunks
+        .iter()
+        .flat_map(|chunk| chunk.bytes.clone())
+        .collect();
+    assert!(String::from_utf8(raw).unwrap().contains("Exact caption"));
+}

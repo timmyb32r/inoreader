@@ -59,7 +59,7 @@ pub async fn upgrade_roundtrip(pool: &PgPool) {
         .connect_with((*pool.connect_options()).clone())
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+    sqlx::raw_sql("CREATE TABLE accounts(id TEXT PRIMARY KEY,document TEXT NOT NULL); CREATE TABLE source_health(source_id TEXT PRIMARY KEY,document TEXT NOT NULL); CREATE TABLE subscription_sources(subscription_id TEXT,source_id TEXT); CREATE TABLE subscription_activity(subscription_id TEXT,occurred_at_ms BIGINT,document TEXT); CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
         .execute(&isolated).await.unwrap();
     let value = ai_tests::record(
         Uuid::new_v4(),
@@ -176,7 +176,7 @@ async fn binary_roundtrip(pool: &PgPool) {
         .connect_with((*pool.connect_options()).clone())
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+    sqlx::raw_sql("CREATE TABLE accounts(id TEXT PRIMARY KEY,document TEXT NOT NULL); CREATE TABLE source_health(source_id TEXT PRIMARY KEY,document TEXT NOT NULL); CREATE TABLE subscription_sources(subscription_id TEXT,source_id TEXT); CREATE TABLE subscription_activity(subscription_id TEXT,occurred_at_ms BIGINT,document TEXT); CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
         .execute(&isolated).await.unwrap();
     let source: Vec<u8> = (0..262144).map(|i| (i % 256) as u8).collect();
     let old = serde_json::to_string(&source).unwrap();
@@ -271,13 +271,28 @@ pub async fn subscription_upgrade(pool: &PgPool) {
         .await
         .unwrap();
     prepare_schema(&isolated).await.unwrap();
-    sqlx::raw_sql("DROP VIEW article_subscription_provenance; DROP TABLE removed_subscriptions; UPDATE schema_releases SET version=1,release='architecture-contracts-2026-09-27'; INSERT INTO subscriptions VALUES('exact',0,' { \"title\": \"原文\" } ');").execute(&isolated).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE source_health DROP COLUMN failure_since_ms; UPDATE schema_releases SET version=4,release='source-attention-2026-09-28'; INSERT INTO subscriptions VALUES('exact',0,' { \"title\": \"原文\" } ');").execute(&isolated).await.unwrap();
+    sqlx::raw_sql("INSERT INTO source_health VALUES('failing','{\"consecutive_failures\":5,\"last_success_ms\":100,\"last_error_ms\":900}'),('healthy','{\"consecutive_failures\":0,\"last_success_ms\":1000,\"last_error_ms\":900}'); INSERT INTO subscription_sources(subscription_id,source_id) VALUES('exact','failing'); INSERT INTO subscription_activity(subscription_id,occurred_at_ms,id,document) VALUES('exact',50,'a','{\"successful\":false}'),('exact',200,'b','{\"successful\":false}'),('exact',900,'c','{\"successful\":false}');").execute(&isolated).await.unwrap();
+    sqlx::raw_sql(include_str!("../../src/schema/attention.sql"))
+        .execute(&isolated)
+        .await
+        .unwrap();
+    sqlx::raw_sql("DROP TABLE subscription_wiki_links,wiki_operations,wiki_links,wiki_drafts,wiki_revisions,wiki_page_names,wiki_pages,wiki_members,wiki_namespaces").execute(&isolated).await.unwrap();
     assert!(reader_storage_postgres::verify_schema(&isolated)
         .await
         .is_err());
     reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
         .await
         .unwrap();
+    let streaks: Vec<(String, Option<i64>)> =
+        sqlx::query_as("SELECT source_id,failure_since_ms FROM source_health ORDER BY source_id")
+            .fetch_all(&isolated)
+            .await
+            .unwrap();
+    assert_eq!(
+        streaks,
+        vec![("failing".into(), Some(200)), ("healthy".into(), None)]
+    );
     let exact: String =
         sqlx::query_scalar("SELECT document FROM article_subscription_provenance WHERE id='exact'")
             .fetch_one(&isolated)

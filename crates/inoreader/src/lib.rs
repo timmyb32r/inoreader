@@ -6,6 +6,7 @@ use thiserror::Error;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    pub wiki: reader_wiki::LimitsInput,
     pub ai: Option<reader_ai::AiConfig>,
     pub glossary: Option<reader_glossary::GlossaryConfig>,
 
@@ -114,6 +115,8 @@ where
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PublicProxy {
+    /// Try direct first; fall back on transport failure, never on HTTP 429.
+    pub direct_first: bool,
     /// Exact destination hostnames; subdomains are not implicitly included.
     pub target_hosts: Vec<String>,
 
@@ -154,7 +157,8 @@ impl Http {
                     attempt_timeout,
                     std::time::Duration::from_millis(proxy.quarantine_ms),
                 )
-                .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))?,
+                .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))?
+                .with_direct_first(proxy.direct_first),
             );
         }
         reader_web_runtime::PublicFetchTransport::new(routes)
@@ -182,6 +186,8 @@ pub struct Scheduler {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Subscriptions {
+    /// Continuous failed collection time before showing Needs attention.
+    pub attention_after_seconds: u64,
     pub pause_reason_max_bytes: usize,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -272,6 +278,8 @@ impl Config {
         Ok(())
     }
     pub fn validate(&self) -> Result<(), ConfigError> {
+        reader_wiki::Limits::try_from(self.wiki.clone())
+            .map_err(|_| ConfigError::Invalid("wiki"))?;
         if let Some(glossary) = &self.glossary {
             reader_glossary::GlossaryPolicy::new(glossary.clone())
                 .map_err(|_| ConfigError::Invalid("glossary"))?;
@@ -509,6 +517,13 @@ impl Config {
         }
         reader_application::SelectionLimit::new(self.ingest.batch_items)
             .map_err(|_| ConfigError::Invalid("ingest.batch_items"))?;
+        if self.subscriptions.attention_after_seconds == 0
+            || self.subscriptions.attention_after_seconds > i64::MAX as u64 / 1000
+        {
+            return Err(ConfigError::Invalid(
+                "subscriptions.attention_after_seconds",
+            ));
+        }
         if self.http.redirect_hops == 0
             || self.scheduler.retry_attempts == 0
             || self.database.postgres.max_connections == 0

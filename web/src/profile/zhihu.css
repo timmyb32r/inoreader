@@ -1,0 +1,62 @@
+.zhihu-profile {
+  border-top: 1px solid var(--line);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.zhihu-profile p {
+  margin: 0;
+  font-size: 12px;
+}
+.zhihu-profile h3 {
+  margin: 0;
+}
+.zhihu-profile__state {
+  height: 24px;
+  color: var(--text-muted);
+}
+.modal .zhihu-profile__secret {
+  display: block;
+  width: 100%;
+  height: 64px;
+  resize: none;
+  -webkit-text-security: disc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px;
+}
+#zhihu-help {
+  color: var(--text-muted);
+  font-size: 12px;
+  min-height: 36px;
+}
+.zhihu-profile__actions {
+  display: flex;
+  gap: 8px;
+}
+.zhihu-profile__actions button {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  max-width: 150px;
+  height: 38px;
+}
+.zhihu-profile button:active {
+  background: var(--accent-soft);
+}
+.zhihu-profile__confirmation {
+  height: 88px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.zhihu-profile__feedback {
+  height: 64px;
+  overflow: auto;
+  font-size: 13px;
+  color: var(--text-muted);
+}

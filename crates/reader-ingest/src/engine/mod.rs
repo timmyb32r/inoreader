@@ -214,8 +214,7 @@ where
 
     pub async fn handle(&self, lease: &LeasedWork, now: DateTime<Utc>) -> Result<(), IngestError> {
         match &lease.item {
-            WorkItem::PollSource { source_id } => self.poll(lease, *source_id, now).await,
-            WorkItem::RefreshSource { source_id } => {
+            WorkItem::PollSource { source_id } | WorkItem::RefreshSource { source_id } => {
                 let source = self.store.source(*source_id).await?;
                 if matches!(
                     source.kind(),
@@ -473,19 +472,21 @@ where
         let result = async {
             let record = self.store.record(record_id).await?;
             let definition = self.store.source(record.source_id()).await?;
-            let telegram = matches!(
+            let embedded = matches!(
                 definition.kind(),
-                SourceKind::BuiltIn(crate::BuiltInAdapter::Telegram { .. })
+                SourceKind::BuiltIn(
+                    crate::BuiltInAdapter::Telegram { .. } | crate::BuiltInAdapter::Zhihu { .. }
+                )
             );
-            let page = if telegram {
+            let page = if embedded {
                 if record.revision() != source_revision {
                     return Err(IngestError::Parse(
-                        "telegram_content_revision_changed".into(),
+                        "embedded_content_revision_changed".into(),
                     ));
                 }
                 let html = record
                     .feed_content_html()
-                    .ok_or_else(|| IngestError::Parse("telegram_stored_body_missing".into()))?;
+                    .ok_or_else(|| IngestError::Parse("embedded_stored_body_missing".into()))?;
                 crate::FetchedPage {
                     final_url: url.clone(),
                     content_type: Some("text/html; charset=utf-8".into()),
@@ -508,7 +509,7 @@ where
             let source = crate::web_feed::decode_html(&page.body, page.content_type.as_deref())
                 .map_err(|error| IngestError::Parse(error.to_string()))?;
             let publication = crate::extract_publication(&source, &page.final_url);
-            let readable = if telegram {
+            let readable = if embedded {
                 source
             } else {
                 crate::web_feed::readable_fragment(&source)

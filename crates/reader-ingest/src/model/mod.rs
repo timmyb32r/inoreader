@@ -57,6 +57,10 @@ pub enum BuiltInAdapter {
     },
     Mirrorship,
     Dropbox,
+    /// Account-owned session; only public author article listings are collected.
+    Zhihu {
+        max_pages: std::num::NonZeroUsize,
+    },
     /// Public Telegram history window; empty source title is preserved.
     Telegram {
         max_pages: std::num::NonZeroUsize,
@@ -137,6 +141,11 @@ impl SourceDefinition {
             {
                 return Err(ModelError::InvalidSourceUrl);
             }
+        }
+        if matches!(kind, SourceKind::BuiltIn(BuiltInAdapter::Zhihu { .. }))
+            && crate::zhihu::author(&url).is_none()
+        {
+            return Err(ModelError::InvalidSourceUrl);
         }
         Ok(Self {
             id,

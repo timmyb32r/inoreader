@@ -318,7 +318,7 @@ pub(super) async fn record_source_success_state(
     };
     sqlx::query(
         "INSERT INTO source_health (source_id, document) VALUES ($1, $2)
-         ON CONFLICT (source_id) DO UPDATE SET document = EXCLUDED.document",
+         ON CONFLICT (source_id) DO UPDATE SET document = EXCLUDED.document, failure_since_ms = NULL",
     )
     .bind(source_text)
     .bind(encode(&health)?)

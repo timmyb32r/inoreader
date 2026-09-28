@@ -386,11 +386,13 @@ async fn record_source_failure(
     health.last_error_ms = Some(Utc::now().timestamp_millis());
     health.consecutive_failures = health.consecutive_failures.saturating_add(1);
     sqlx::query(
-        "INSERT INTO source_health (source_id, document) VALUES ($1, $2)
-         ON CONFLICT (source_id) DO UPDATE SET document = EXCLUDED.document",
+        "INSERT INTO source_health (source_id, document, failure_since_ms) VALUES ($1, $2, $3)
+         ON CONFLICT (source_id) DO UPDATE SET document = EXCLUDED.document,
+         failure_since_ms = COALESCE(source_health.failure_since_ms, EXCLUDED.failure_since_ms)",
     )
     .bind(key)
     .bind(encode(&health)?)
+    .bind(health.last_error_ms)
     .execute(&mut **tx)
     .await
     .map_err(storage)?;

@@ -282,6 +282,23 @@ data or deploying unrelated projects or to other destinations.
 
 ## Outbound HTTP security
 
+- **Secrets may traverse a proxy only inside end-to-end HTTPS to the intended
+  origin.** An HTTPS connection to the proxy alone is insufficient: the destination
+  must also use HTTPS, with certificate and hostname verification enabled. Never
+  downgrade a secret-bearing request to HTTP, including redirects or fallbacks.
+  This applies to cookies, authorization, API keys, secret URL paths/query values,
+  and request bodies. Never put origin secrets in CONNECT headers or diagnostics.
+  If proxy authentication is introduced, its credentials also require TLS to the
+  proxy itself: CONNECT does not encrypt the proxy handshake.
+- Public/free proxy pools have a stricter contract: **no secrets at all**, even
+  over HTTPS. DeepSeek, Telegram Bot and Zhihu credentials use dedicated direct
+  transports. A credentialed trusted-proxy integration requires an explicit trust
+  decision and regression coverage before it can be introduced.
+- Direct clients must explicitly disable automatic system/environment proxy
+  discovery (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, including lowercase forms).
+  Only the reviewed, explicit proxy transport may select a proxy. Verify this with
+  an isolated-process regression test; do not mutate process-wide environment
+  variables in concurrent tests. Reject disallowed requests before opening a socket.
 - Every production outbound HTTP request must use the repository's shared HTTP
   client wrapper. Do not construct or execute a connector-local `reqwest::Client`,
   `hyper` client, or another general-purpose HTTP client directly.

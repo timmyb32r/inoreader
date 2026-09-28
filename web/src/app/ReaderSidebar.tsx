@@ -98,6 +98,17 @@ export function ReaderSidebar({
           <Icon name="home" />
           <span>Home</span>
         </button>
+        <button
+          class={
+            readerPath.startsWith("/wiki") ? "nav-item active" : "nav-item"
+          }
+          aria-label="Wiki"
+          title="Wiki"
+          onClick={() => navigate("/wiki")}
+        >
+          <Icon name="book" />
+          <span>Wiki</span>
+        </button>
         {views.map((item) => (
           <button
             key={item.id}

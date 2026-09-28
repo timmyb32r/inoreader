@@ -1,5 +1,7 @@
 import type { Article, Subscription, Workspace } from "../api/viewModels";
 import { reportApiRequest } from "../performanceDiagnostics";
+import { WikiClient } from "./wiki";
+import { ZhihuClient } from "./zhihu";
 import { AiClient } from "./ai";
 import {
   decodeResponse,
@@ -97,9 +99,13 @@ export class ApiError extends Error {
 export class ApiClient {
   readonly ai: AiClient;
   readonly glossary: GlossaryClient;
+  readonly zhihu: ZhihuClient;
+  readonly wiki: WikiClient;
   constructor(private readonly transport: Transport) {
     this.ai = new AiClient(transport);
     this.glossary = new GlossaryClient(transport);
+    this.zhihu = new ZhihuClient(transport);
+    this.wiki = new WikiClient(transport);
   }
   bootstrap = (position?: ArticlePagePosition): Promise<Bootstrap> =>
     this.transport(

@@ -1,0 +1,1 @@
+SELECT id,name,updated_at,CASE WHEN $3='' THEN '' ELSE left(markdown,$7) END AS excerpt,($3<>'' AND char_length(markdown)>$7) AS excerpt_truncated FROM wiki_pages WHERE namespace=$1 AND deleted=$2 AND ($3='' OR name ILIKE $4 OR markdown ILIKE $4) ORDER BY name,id LIMIT $5 OFFSET $6

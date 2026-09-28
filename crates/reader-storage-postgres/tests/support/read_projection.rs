@@ -7,6 +7,7 @@ pub async fn verify(pool: &PgPool) {
     let plan: serde_json::Value = sqlx::query_scalar(&sql)
         .bind(vec!["projection-subscription".to_owned()])
         .bind("projection-workspace")
+        .bind(86_400_000_i64)
         .fetch_one(pool)
         .await
         .unwrap();

@@ -67,6 +67,7 @@ pub struct PublicProxyRoute {
     endpoint_attempt_timeout: Duration,
 
     health: Arc<RouteHealth>,
+    direct_first: bool,
 }
 
 impl PublicProxyRoute {
@@ -114,7 +115,17 @@ impl PublicProxyRoute {
             max_connect_response_header_bytes,
             endpoint_attempt_timeout,
             health,
+            direct_first: false,
         })
+    }
+}
+
+impl PublicProxyRoute {
+    /// Try the shared pinned direct transport before the proxy pool. Only a
+    /// transport failure falls back; HTTP errors and Retry-After stay authoritative.
+    pub fn with_direct_first(mut self, enabled: bool) -> Self {
+        self.direct_first = enabled;
+        self
     }
 }
 
@@ -124,6 +135,7 @@ impl PublicProxyRoute {
 #[derive(Clone)]
 pub struct PublicFetchTransport {
     routes: Vec<PublicProxyRoute>,
+    direct: Arc<dyn OutboundTransport>,
     tls: Arc<ClientConfig>,
     observer: Option<Arc<dyn ExternalRequestObserver>>,
 }
@@ -147,6 +159,7 @@ impl PublicFetchTransport {
                 .with_no_client_auth();
         Ok(Self {
             routes,
+            direct: Arc::new(ReqwestPinnedTransport),
             tls: Arc::new(tls),
             observer: None,
         })
@@ -214,7 +227,8 @@ impl OutboundTransport for PublicFetchTransport {
                 .is_some_and(|host| route.hosts.contains(host))
         });
         let Some(route) = route else {
-            return ReqwestPinnedTransport
+            return self
+                .direct
                 .execute(request, authorization, connect_timeout, remaining_deadline)
                 .await;
         };
@@ -227,6 +241,29 @@ impl OutboundTransport for PublicFetchTransport {
         }
         let headers = public_headers(&request.headers)?;
         let started = Instant::now();
+        if route.direct_first {
+            let budget = remaining_deadline.min(route.endpoint_attempt_timeout);
+            let response = tokio::time::timeout(
+                budget,
+                self.direct
+                    .execute(request, authorization, connect_timeout.min(budget), budget),
+            )
+            .await;
+            let succeeded = matches!(response, Ok(Ok(_)));
+            health::observe(
+                &self.observer,
+                "direct_attempt",
+                if succeeded {
+                    ExternalRequestOutcome::Success
+                } else {
+                    ExternalRequestOutcome::Failed
+                },
+                started,
+            );
+            if let Ok(Ok(response)) = response {
+                return Ok(response);
+            }
+        }
         let mut last_error = failure("proxy_pool_quarantined");
         let mut attempted = vec![false; route.endpoints.len()];
         let host = request

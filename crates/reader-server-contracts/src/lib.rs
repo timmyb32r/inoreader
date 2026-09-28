@@ -449,3 +449,19 @@ pub struct PublicationDayView {
     pub date: String,
     pub count: u64,
 }
+
+#[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ZhihuProfileView {
+    pub available: bool,
+    pub configured: bool,
+}
+// No Debug on credential-bearing request DTOs.
+#[derive(schemars::JsonSchema, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ZhihuSessionCommand {
+    pub cookies: String,
+}
+
+mod wiki;
+pub use wiki::*;

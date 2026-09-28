@@ -27,7 +27,7 @@ impl reader_server::FeedDiscovery for NoDiscovery {
 }
 pub async fn verify(pool: &PgPool) {
     let repository = Arc::new(
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20).unwrap(),
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20, 86400).unwrap(),
     );
     let mut fixtures = Vec::new();
     for label in ["Browser owner", "Private owner"] {
@@ -92,6 +92,16 @@ pub async fn verify(pool: &PgPool) {
     ai_service.spawn_workers(&mut workers);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
+    let wiki_limits: reader_wiki::Limits = reader_wiki::LimitsInput {
+        name_bytes: 512,
+        markdown_bytes: 524288,
+        search_excerpt_characters: 200,
+        search_bytes: 512,
+        page_size: 50,
+        draft_save_delay_ms: 200,
+    }
+    .try_into()
+    .unwrap();
     let state = reader_server::AppState::new(
         repository.clone(),
         Arc::new(NoDiscovery),
@@ -106,9 +116,20 @@ pub async fn verify(pool: &PgPool) {
         100,
         reader_application::SelectionLimit::new(1000).unwrap(),
     )
-    .with_ai(ai_service);
+    .with_ai(ai_service)
+    .with_wiki(
+        Arc::new(reader_storage_postgres::PostgresWikiStore::new(
+            pool.clone(),
+            wiki_limits.clone(),
+        )),
+        wiki_limits,
+    );
     let app = reader_server::router(state).fallback(|uri: axum::http::Uri| async move {
-        match reader_server_ui::asset(uri.path()) {
+        match reader_server_ui::asset(uri.path()).or_else(|| {
+            (!uri.path().starts_with("/api/"))
+                .then(|| reader_server_ui::asset("/index.html"))
+                .flatten()
+        }) {
             Some(asset) => axum::http::Response::builder()
                 .header("content-type", asset.content_type)
                 .body(axum::body::Body::from(asset.bytes))

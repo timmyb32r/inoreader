@@ -34,6 +34,7 @@ impl BuiltInAdapterCollector {
             BuiltInAdapter::Cloudera { listing_url } => self.cloudera(source, listing_url).await,
             BuiltInAdapter::Digoal { listing_url } => self.digoal(source, listing_url).await,
             BuiltInAdapter::Mirrorship => self.mirrorship(source).await,
+            BuiltInAdapter::Zhihu { .. } => Err(rejected("zhihu_session_not_configured")),
             BuiltInAdapter::Dropbox => self.dropbox(source).await,
             BuiltInAdapter::Telegram { max_pages } => self.telegram(source, max_pages.get()).await,
             BuiltInAdapter::Pingkai { listing_url } => self.pingkai(source, listing_url).await,

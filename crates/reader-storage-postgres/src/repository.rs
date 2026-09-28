@@ -43,33 +43,34 @@ pub struct PostgresRepository {
     pool: PgPool,
     reason_policy: ReasonPolicy,
     initial_scope: usize,
+    attention_after_seconds: u64,
 }
 impl PostgresRepository {
     pub async fn connect(
         options: PgConnectOptions,
         reason_policy: ReasonPolicy,
         initial_scope: usize,
+        attention_after_seconds: u64,
     ) -> Result<Self, RepositoryError> {
+        validate_repository_limits(initial_scope, attention_after_seconds)?;
         let pool = PgPool::connect_with(crate::instrument_postgres(options))
             .await
             .map_err(storage)?;
         crate::verify_schema(&pool).await.map_err(storage)?;
-        Self::new(pool, reason_policy, initial_scope)
+        Self::new(pool, reason_policy, initial_scope, attention_after_seconds)
     }
     pub fn new(
         pool: PgPool,
         reason_policy: ReasonPolicy,
         initial_scope: usize,
+        attention_after_seconds: u64,
     ) -> Result<Self, RepositoryError> {
-        if initial_scope == 0 {
-            return Err(RepositoryError::Storage(
-                "initial feed scope must be positive".into(),
-            ));
-        }
+        validate_repository_limits(initial_scope, attention_after_seconds)?;
         Ok(Self {
             pool,
             reason_policy,
             initial_scope,
+            attention_after_seconds,
         })
     }
     pub fn pool(&self) -> &PgPool {
@@ -130,6 +131,23 @@ impl PostgresRepository {
             Err(RepositoryError::Conflict)
         }
     }
+}
+
+fn validate_repository_limits(
+    initial_scope: usize,
+    attention_after_seconds: u64,
+) -> Result<(), RepositoryError> {
+    if attention_after_seconds == 0 || attention_after_seconds > i64::MAX as u64 / 1000 {
+        return Err(storage(
+            "attention duration must be positive and fit milliseconds",
+        ));
+    }
+    if initial_scope == 0 {
+        return Err(RepositoryError::Storage(
+            "initial feed scope must be positive".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -329,7 +347,7 @@ async fn source_for_subscription(
     ))
 }
 
-async fn enqueue_work_tx(
+pub(crate) async fn enqueue_work_tx(
     tx: &mut Transaction<'_, Postgres>,
     id: Uuid,
     item: &WorkItem,

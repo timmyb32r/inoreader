@@ -102,6 +102,8 @@ pub struct RuleApplicationProgress {
 }
 #[derive(Clone, Debug)]
 pub struct SubscriptionStats {
+    /// Failure streak has reached the configured attention duration.
+    pub needs_attention: bool,
     pub article_count: usize,
 
     pub unread_count: usize,
@@ -119,6 +121,7 @@ pub struct SubscriptionStats {
 impl Default for SubscriptionStats {
     fn default() -> Self {
         Self {
+            needs_attention: false,
             article_count: 0,
             unread_count: 0,
             last_success_at: None,

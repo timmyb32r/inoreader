@@ -47,6 +47,7 @@ use url::Url;
 mod ai;
 mod glossary;
 mod icons;
+mod zhihu;
 
 #[derive(Parser)]
 struct Cli {
@@ -188,6 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pool,
                 ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?,
                 config.ingest.initial_feed_items,
+                config.subscriptions.attention_after_seconds,
             )?;
             let started = std::time::Instant::now();
             let workspace = WorkspaceId::from_uuid(workspace_id);
@@ -218,6 +220,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pool.clone(),
                 ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?,
                 config.ingest.initial_feed_items,
+                config.subscriptions.attention_after_seconds,
             )?);
             let account = AuthService::new(repository, auth_policy(&config)?)
                 .bootstrap_admin(username, &password)
@@ -230,8 +233,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             let seed = load_seed(&manifest)?;
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
-            let repository =
-                PostgresRepository::new(pool.clone(), policy, config.ingest.initial_feed_items)?;
+            let repository = PostgresRepository::new(
+                pool.clone(),
+                policy,
+                config.ingest.initial_feed_items,
+                config.subscriptions.attention_after_seconds,
+            )?;
             repository
                 .account(AccountId::from_uuid(seed.owner_account_id))
                 .await?;
@@ -276,8 +283,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let policy = ReasonPolicy::new(config.subscriptions.pause_reason_max_bytes)?;
-            let repository =
-                PostgresRepository::new(pool, policy, config.ingest.initial_feed_items)?;
+            let repository = PostgresRepository::new(
+                pool,
+                policy,
+                config.ingest.initial_feed_items,
+                config.subscriptions.attention_after_seconds,
+            )?;
             repository
                 .workspace(WorkspaceId::from_uuid(workspace_id))
                 .await?;

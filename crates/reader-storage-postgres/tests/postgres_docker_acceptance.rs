@@ -19,6 +19,12 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/wiki.rs"]
+mod wiki;
+
+#[path = "support/zhihu.rs"]
+mod zhihu;
+
 #[path = "support/manual_refresh.rs"]
 mod manual_refresh;
 
@@ -39,6 +45,8 @@ mod glossary_tests;
 mod admission;
 #[path = "support/article_delivery.rs"]
 mod article_delivery;
+#[path = "support/attention.rs"]
+mod attention;
 #[path = "support/browser.rs"]
 mod browser_tests;
 #[path = "support/bulk_read.rs"]
@@ -177,6 +185,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
         .await
         .expect("prepare PostgreSQL schema a second time");
 
+    zhihu::verify(&pool).await;
     read_projection::verify(&pool).await;
     schema_upgrade::verify(&pool).await;
     schema_contracts::verify(&pool).await;
@@ -214,7 +223,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 49); // Includes retained subscription provenance.
+    assert_eq!(table_count, 59); // Includes account-owned encrypted Zhihu sessions.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -285,9 +294,11 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     bulk_read::verify(&pool).await;
     article_delivery::verify(&pool).await;
     subscription_deletion::verify(&pool).await;
+    attention::verify(&pool).await;
     schema_contracts::subscription_upgrade(&pool).await;
     admission::verify(&pool).await;
     browser_tests::verify(&pool).await;
+    wiki::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
 }
 
@@ -320,7 +331,8 @@ async fn verify_article_state_conversion(pool: &PgPool) {
         .await
         .unwrap();
     let repository =
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap();
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100, 86400)
+            .unwrap();
     let converted = repository.article(workspace, article.id).await.unwrap();
     assert!(converted.state.read && converted.state.later);
     assert_eq!(converted.key, article.key);
@@ -364,6 +376,7 @@ async fn verify_repository_isolation(pool: &PgPool) {
         pool.clone(),
         ReasonPolicy::new(4096).expect("valid reason policy"),
         100,
+        86400,
     )
     .expect("valid repository limits");
     let account_a = AccountRecord {
@@ -936,6 +949,14 @@ async fn verify_database_backup_restore(container: &PostgresContainer, pool: &Pg
         "glossary_definitions",
         "ai_definitions",
         "ai_definition_operations",
+        "wiki_namespaces",
+        "wiki_members",
+        "wiki_pages",
+        "wiki_revisions",
+        "wiki_drafts",
+        "wiki_links",
+        "wiki_operations",
+        "subscription_wiki_links",
     ];
     for table in original_tables {
         let sql=format!("SELECT COALESCE(jsonb_agg(v ORDER BY v::text),'[]'::jsonb)::text FROM (SELECT to_jsonb(t) v FROM \"{table}\" t) rows");

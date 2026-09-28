@@ -53,7 +53,8 @@ impl AiProvider for SlowProvider {
 pub async fn child(connection: &str, marker: PathBuf) {
     let pool = sqlx::PgPool::connect(connection).await.unwrap();
     let reader = Arc::new(
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap(),
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100, 86400)
+            .unwrap(),
     );
     let owner = AccountId::new();
     let workspace = Workspace::new(WorkspaceId::new(), owner, "Shutdown fixture".into());

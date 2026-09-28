@@ -48,7 +48,16 @@ export function imports(text: string): Edge[] {
   return edges;
 }
 
-const layers = new Set(["app", "api", "ui", "ai", "translation", "glossary"]);
+const layers = new Set([
+  "app",
+  "api",
+  "ui",
+  "ai",
+  "translation",
+  "glossary",
+  "profile",
+  "wiki",
+]);
 const layer = (path: string) =>
   layers.has(path.split("/")[0]) ? path.split("/")[0] : "shared";
 const allowed: Record<string, string[]> = {
@@ -58,6 +67,8 @@ const allowed: Record<string, string[]> = {
   ai: ["ai", "api", "ui", "shared"],
   translation: ["translation", "api", "ui", "shared"],
   glossary: ["glossary", "api", "ui", "shared"],
+  wiki: ["wiki", "api", "ui", "shared"],
+  profile: ["profile", "api", "ui", "shared"],
   shared: ["shared"],
 };
 

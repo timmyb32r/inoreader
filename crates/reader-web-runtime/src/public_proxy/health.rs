@@ -15,6 +15,7 @@ use crate::{
 #[derive(Clone, Debug, Default)]
 struct EndpointHealth {
     failed_at: Option<Instant>,
+    last_attempt: Option<Instant>,
     probing: bool,
     healthy: bool,
 }
@@ -77,12 +78,15 @@ impl RouteHealth {
                     (false, false, _) => 2,
                     (true, _, false) => 3,
                 };
-                (priority, *i)
+                (priority, state.failed_at.and(state.last_attempt), *i)
             })
             .map(|(i, _)| i);
         let Some(index) = index else {
             return Ok(None);
         };
+        // Oldest eligible attempt first: a short request deadline must not
+        // starve the tail of the pool when every quarantine has expired.
+        states[index].last_attempt = Some(now);
         let probe = states[index].failed_at.is_some();
         if probe {
             states[index].probing = true;

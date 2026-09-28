@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug)]
 pub(super) enum ApiFailure {
     Ai(reader_ai::AiError),
+    Wiki(reader_wiki::Error),
     Glossary(reader_glossary::GlossaryError),
     Command(CommandError),
     Auth(AuthError),
@@ -47,6 +48,17 @@ impl From<opml::Error> for ApiFailure {
 impl IntoResponse for ApiFailure {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::Wiki(error) => {
+                use reader_wiki::Error;
+                let status = match error {
+                    Error::NotFound => StatusCode::NOT_FOUND,
+                    Error::Forbidden => StatusCode::FORBIDDEN,
+                    Error::Conflict | Error::NameTaken => StatusCode::CONFLICT,
+                    Error::Invalid(_) => StatusCode::UNPROCESSABLE_ENTITY,
+                    Error::Storage => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                (status, "wiki_error", error.to_string())
+            }
             Self::Glossary(error) => {
                 use reader_glossary::GlossaryError;
                 let status = match error {

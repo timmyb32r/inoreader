@@ -1,3 +1,4 @@
+import { WikiBinding } from "../wiki/WikiBinding";
 import { useSubscriptionLifecycle } from "./useSubscriptionLifecycle";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type {
@@ -34,6 +35,7 @@ export function SubscriptionDetails({
   onRemoved,
   onEditRecipe,
   onDirtyNoteChange,
+  onOpenWiki,
 }: {
   client: ApiClient;
   workspaceId: string;
@@ -49,6 +51,7 @@ export function SubscriptionDetails({
   onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
   onDirtyNoteChange?: (dirty: boolean) => void;
+  onOpenWiki?: (path: string) => boolean;
 }) {
   const summary = subscriptions.find((x) => x.id === subscriptionId);
   const [detail, setDetail] = useState<SubscriptionDetail | null>(
@@ -327,6 +330,15 @@ export function SubscriptionDetails({
                 {detail.lastUpdate
                   ? new Date(detail.lastUpdate).toLocaleString()
                   : "Not updated yet"}
+              </dd>
+              <dt>Wiki page</dt>
+              <dd>
+                <WikiBinding
+                  key={detail.id}
+                  client={client.wiki}
+                  subscription={detail.id}
+                  onOpen={onOpenWiki}
+                />
               </dd>
               <dt>Articles</dt>
               <dd>{detail.count}</dd>

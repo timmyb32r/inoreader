@@ -1750,6 +1750,7 @@ dependencies = [
  "reader-server-ui",
  "reader-storage-postgres",
  "reader-web-runtime",
+ "reader-wiki",
  "rpassword",
  "serde",
  "serde_json",
@@ -2803,6 +2804,7 @@ dependencies = [
  "reader-runtime",
  "reader-server-contracts",
  "reader-web-runtime",
+ "reader-wiki",
  "roxmltree",
  "serde",
  "serde_json",
@@ -2818,6 +2820,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "reader-core",
+ "reader-wiki",
  "schemars 1.2.2",
  "serde",
  "serde_json",
@@ -2850,6 +2853,7 @@ dependencies = [
  "reader-server",
  "reader-server-contracts",
  "reader-server-ui",
+ "reader-wiki",
  "serde",
  "serde_json",
  "sqlx",
@@ -2884,6 +2888,19 @@ dependencies = [
  "url",
  "uuid",
  "webpki-roots 1.0.9",
+]
+
+[[package]]
+name = "reader-wiki"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]

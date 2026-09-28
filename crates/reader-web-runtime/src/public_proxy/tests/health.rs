@@ -242,3 +242,24 @@ fn older_inflight_attempt_cannot_release_another_requests_recovery_probe() {
         .unwrap()
         .is_probe());
 }
+
+#[test]
+fn expired_quarantines_rotate_across_requests_with_one_attempt_budget() {
+    let start = Instant::now();
+    let health = Arc::new(RouteHealth::new(
+        ["a.test".into()].into_iter(),
+        3,
+        Duration::from_secs(60),
+    ));
+    for i in 0..3 {
+        let mut attempt = health.claim("a.test", &[false; 3], start).unwrap().unwrap();
+        assert_eq!(attempt.index, i);
+        attempt.finish(false, start).unwrap();
+    }
+    for round in 0..9 {
+        let now = start + Duration::from_secs(120 * (round + 1));
+        let mut attempt = health.claim("a.test", &[false; 3], now).unwrap().unwrap();
+        assert_eq!(attempt.index, round as usize % 3);
+        attempt.finish(false, now).unwrap();
+    }
+}

@@ -59,11 +59,7 @@ impl TryFrom<RawOutboundLimits> for OutboundLimits {
                 field: "http.request_deadline_ms",
             });
         }
-        if raw.max_redirect_hops == 0 {
-            return Err(LimitsError::Zero {
-                field: "http.max_redirect_hops",
-            });
-        }
+        // Zero explicitly disables redirects for origin-bound session requests.
         if raw.max_response_body_bytes == 0 {
             return Err(LimitsError::Zero {
                 field: "http.max_response_body_bytes",

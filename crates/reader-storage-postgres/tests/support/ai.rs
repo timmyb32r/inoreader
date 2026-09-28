@@ -183,7 +183,8 @@ pub(super) fn record(owner: Uuid, workspace: Uuid, article: Uuid, operation: Uui
 
 pub async fn verify(pool: &PgPool) {
     let reader = Arc::new(
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap(),
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100, 86400)
+            .unwrap(),
     );
     let store = Arc::new(PostgresAiStore::new(
         pool.clone(),

@@ -31,7 +31,15 @@ test("real Rust API commits browser mutations and isolates account data", async 
   const later = page
     .locator(".reader-toolbar")
     .getByRole("button", { name: "Read later", exact: true });
-  await later.click();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url().includes("/state") &&
+        response.request().method() === "POST" &&
+        response.status() === 200,
+    ),
+    later.click(),
+  ]);
   await expect(
     page.getByRole("button", { name: "Remove from later", exact: true }),
   ).toBeVisible();

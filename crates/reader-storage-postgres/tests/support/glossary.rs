@@ -25,7 +25,8 @@ fn batch(update: i64, message: i64, text: &str, edit: Option<i64>) -> UpdateBatc
 
 pub async fn verify(pool: &PgPool) {
     let reader =
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100).unwrap();
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(4096).unwrap(), 100, 86400)
+            .unwrap();
     let owner = AccountId::new();
     let other = AccountId::new();
     let workspace = Workspace::new(WorkspaceId::new(), owner, "Glossary".into());

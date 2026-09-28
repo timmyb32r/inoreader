@@ -8,7 +8,7 @@ if (!baseURL)
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "**/real-backend.acceptance.spec.ts",
+  testMatch: "**/*.acceptance.spec.ts",
   timeout: 60_000,
   retries: 0,
   reporter: [

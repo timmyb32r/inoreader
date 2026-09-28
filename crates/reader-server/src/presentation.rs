@@ -75,17 +75,12 @@ pub(super) fn subscription_view(
         last_update: stats.last_success_at,
         last_error_at: stats.last_error_at,
         consecutive_failures: stats.consecutive_failures,
-        needs_attention: stats.consecutive_failures >= 3 || stats.incomplete,
-        attention_reason: if stats.consecutive_failures >= 3 {
-            stats
-                .error
-                .clone()
-                .or_else(|| Some("Three consecutive refresh failures".to_owned()))
-        } else if stats.incomplete {
-            Some("Source refresh is incomplete and requires continuation".to_owned())
-        } else {
-            None
-        },
+        needs_attention: stats.needs_attention,
+        attention_reason: stats.needs_attention.then(|| {
+            stats.error.clone().unwrap_or_else(|| {
+                "Source refresh has been failing for the configured attention duration".to_owned()
+            })
+        }),
         incomplete: stats.incomplete,
         continuation: stats.continuation.clone(),
         error: stats.error.clone(),

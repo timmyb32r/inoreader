@@ -11,6 +11,8 @@ WITH counts AS (
                )
                SELECT requested.subscription_id,
                       health.document,
+                      COALESCE((health.document::jsonb->>'consecutive_failures')::bigint > 0
+                        AND (health.document::jsonb->>'last_error_ms')::bigint::numeric - health.failure_since_ms::numeric >= $3::bigint, false),
                       source.document,
                       recipe.id IS NOT NULL,
                       icon.data_url,

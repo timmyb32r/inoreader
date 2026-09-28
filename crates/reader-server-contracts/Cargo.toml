@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 [dependencies]
+reader-wiki = { path = "../reader-wiki", features = ["schema"] }
 reader-core = { path = "../reader-core", features = ["schema"] }
 chrono.workspace = true
 serde.workspace = true

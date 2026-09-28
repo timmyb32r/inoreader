@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+reader-wiki = { path = "../reader-wiki" }
 async-trait.workspace = true
 chrono.workspace = true
 futures-util = "0.3"

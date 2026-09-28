@@ -211,3 +211,160 @@ async fn incomplete_success_body_is_visible_and_never_replayed_from_next_proxy()
     );
     server.await.unwrap();
 }
+
+struct DirectFixture(Option<http::StatusCode>);
+#[async_trait]
+impl OutboundTransport for DirectFixture {
+    async fn execute(
+        &self,
+        _: &PreparedRequest,
+        _: &ConnectionAuthorization,
+        _: Duration,
+        _: Duration,
+    ) -> Result<TransportResponse, TransportError> {
+        match self.0 {
+            Some(status) => Ok(TransportResponse {
+                status,
+                connected_peer: "8.8.8.8".parse().unwrap(),
+                headers: HeaderMap::new(),
+                body: Box::new(EmptyDirectBody),
+            }),
+            None => Err(failure("direct_fixture_unavailable")),
+        }
+    }
+}
+struct EmptyDirectBody;
+#[async_trait]
+impl ResponseBody for EmptyDirectBody {
+    async fn next_chunk(&mut self) -> Result<Option<Vec<u8>>, TransportError> {
+        Ok(None)
+    }
+}
+#[tokio::test]
+async fn direct_first_preserves_http_results_without_opening_proxy() {
+    for status in [
+        http::StatusCode::OK,
+        http::StatusCode::FORBIDDEN,
+        http::StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut transport = trusted_transport(
+            vec![listener.local_addr().unwrap()],
+            Duration::from_millis(200),
+        );
+        transport.routes[0].direct_first = true;
+        transport.direct = Arc::new(DirectFixture(Some(status)));
+        let (request, auth) = request();
+        let response = transport
+            .execute(
+                &request,
+                &auth,
+                Duration::from_secs(1),
+                Duration::from_secs(3),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status, status);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+}
+#[tokio::test]
+async fn direct_transport_failure_uses_reserved_proxy() {
+    let (endpoint, server) = tls_proxy_fixture().await;
+    let mut transport = trusted_transport(vec![endpoint], Duration::from_secs(2));
+    transport.routes[0].direct_first = true;
+    transport.direct = Arc::new(DirectFixture(None));
+    let (request, auth) = request();
+    let mut response = transport
+        .execute(
+            &request,
+            &auth,
+            Duration::from_secs(1),
+            Duration::from_secs(3),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status, http::StatusCode::OK);
+    while response.body.next_chunk().await.unwrap().is_some() {}
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn secrets_and_plain_http_are_rejected_before_direct_or_proxy_io() {
+    for direct_first in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut transport = trusted_transport(
+            vec![listener.local_addr().unwrap()],
+            Duration::from_millis(100),
+        );
+        transport.routes[0].direct_first = direct_first;
+        transport.direct = Arc::new(DirectFixture(Some(http::StatusCode::OK)));
+        for name in [
+            "authorization",
+            "cookie",
+            "proxy-authorization",
+            "x-api-key",
+            "x-auth-token",
+            "x-secret",
+        ] {
+            let (mut request, auth) = request();
+            request.headers.insert(
+                http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                header::HeaderValue::from_static("fixture-only"),
+            );
+            assert!(
+                transport
+                    .execute(
+                        &request,
+                        &auth,
+                        Duration::from_secs(1),
+                        Duration::from_secs(1)
+                    )
+                    .await
+                    .is_err(),
+                "{name}"
+            );
+        }
+        let (mut request, _) = request();
+        request.url.set_scheme("http").unwrap();
+        let policy = crate::OutboundPolicy::new(
+            true,
+            crate::OutboundLimits::try_from(crate::RawOutboundLimits {
+                connect_timeout_ms: 1000,
+                request_deadline_ms: 1000,
+                max_redirect_hops: 2,
+                max_response_body_bytes: 1024,
+            })
+            .unwrap(),
+        );
+        let ip = "8.8.8.8".parse().unwrap();
+        let auth = policy
+            .authorize_resolution(&request.url, vec![ip])
+            .unwrap()
+            .connection(ip)
+            .unwrap();
+        assert_eq!(
+            transport
+                .execute(
+                    &request,
+                    &auth,
+                    Duration::from_secs(1),
+                    Duration::from_secs(1)
+                )
+                .await
+                .err()
+                .unwrap()
+                .kind,
+            "proxy_public_https_get_required"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), listener.accept())
+                .await
+                .is_err()
+        );
+    }
+}

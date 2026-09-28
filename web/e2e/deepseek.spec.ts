@@ -667,3 +667,71 @@ test("verification cannot replace selected text until the reader releases the se
     composer,
   );
 });
+
+test("Zhihu profile keeps control geometry through save, check, confirmation and removal", async ({
+  page,
+}) => {
+  await fixture(page);
+  let configured = false,
+    release: (() => void) | undefined;
+  const mutations: string[] = [];
+  await page.route(/\/api\/profile\/zhihu(?:\/check)?$/, async (route) => {
+    const method = route.request().method();
+    if (method !== "GET") mutations.push(method);
+    if (method === "PUT") {
+      await new Promise<void>((r) => (release = r));
+      configured = true;
+    }
+    if (method === "DELETE") configured = false;
+    await route.fulfill({ json: { available: true, configured } });
+  });
+  await page.goto("/reader");
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
+  const section = page.locator(".zhihu-profile"),
+    field = section.getByLabel("Zhihu cookies");
+  await expect(field).toBeEnabled();
+  await field.fill("z_c0=fixture");
+  await expect(section).toHaveCSS("padding-left", "22px");
+  await expect(field).toHaveCSS("resize", "none");
+  const save = section.getByRole("button", { name: "Save", exact: true }),
+    check = section.getByRole("button", { name: "Check", exact: true }),
+    remove = section.getByRole("button", { name: "Remove", exact: true });
+  await save.scrollIntoViewIfNeeded();
+  const before = await Promise.all(
+    [save, check, remove].map((v) => v.boundingBox()),
+  );
+  await save.click();
+  await expect(save).toHaveAttribute("aria-busy", "true");
+  await save.dispatchEvent("click");
+  expect(mutations).toEqual(["PUT"]);
+  expect(
+    await Promise.all([save, check, remove].map((v) => v.boundingBox())),
+  ).toEqual(before);
+  await expect.poll(() => !!release).toBe(true);
+  release!();
+  await expect(section.getByRole("status")).toContainText("verified and saved");
+  await expect(field).toHaveValue("");
+  expect(
+    await Promise.all([save, check, remove].map((v) => v.boundingBox())),
+  ).toEqual(before);
+  await check.click();
+  await expect(section.getByRole("status")).toContainText("is valid");
+  await remove.click();
+  await expect(
+    section.getByRole("button", { name: "Confirm removal" }),
+  ).toBeVisible();
+  expect(
+    await Promise.all([save, check, remove].map((v) => v.boundingBox())),
+  ).toEqual(before);
+  await section.getByRole("button", { name: "Confirm removal" }).click();
+  await expect(section.getByRole("status")).toContainText("articles kept");
+  expect(
+    await Promise.all([save, check, remove].map((v) => v.boundingBox())),
+  ).toEqual(before);
+  expect(
+    await page.evaluate(() =>
+      JSON.stringify({ ...localStorage, ...sessionStorage }),
+    ),
+  ).not.toContain("z_c0");
+});

@@ -31,7 +31,25 @@ export function usePopupNavigation(confirmDiscard: () => boolean) {
   const navigate = (next: string) => {
     if (!confirm.current()) return false;
     const trail = isPopup(next) ? [...parents(), currentUrl()] : [];
-    history.pushState({ popupParents: trail }, "", next);
+    const wikiDepth = next.startsWith("/wiki")
+      ? currentUrl().startsWith("/wiki")
+        ? Number.isInteger(history.state?.wikiDepth)
+          ? history.state.wikiDepth + 1
+          : undefined
+        : 1
+      : undefined;
+    history.pushState(
+      {
+        popupParents: trail,
+        wikiDepth,
+        wikiReturn: next.startsWith("/wiki")
+          ? (history.state?.wikiReturn ??
+            new URLSearchParams(location.search).get("return"))
+          : undefined,
+      },
+      "",
+      next,
+    );
     previousState.current = history.state;
     previous.current = currentUrl();
     setUrl(previous.current);
@@ -49,7 +67,25 @@ export function usePopupNavigation(confirmDiscard: () => boolean) {
     previous.current = currentUrl();
     setUrl(previous.current);
   };
+  const backFromWiki = () => {
+    if (closing.current || !confirm.current()) return;
+    const depth = history.state?.wikiDepth;
+    if (Number.isInteger(depth) && depth > 0 && depth < history.length) {
+      closing.current = true;
+      history.go(-depth);
+      return;
+    }
+    const target =
+      history.state?.wikiReturn ??
+      new URLSearchParams(location.search).get("return");
+    if (target?.startsWith("/subscriptions/")) {
+      location.replace(target);
+      return;
+    }
+    navigate("/reader");
+  };
   return {
+    backFromWiki,
     path: url.split("?")[0],
     backgroundPath: (parents()[0] ?? "/reader").split("?")[0],
     navigate,

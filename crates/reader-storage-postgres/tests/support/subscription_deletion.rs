@@ -3,7 +3,7 @@ use reader_ingest::{DeliveryCommit, DeliveryResult, DeliveryTarget, LeasedWork, 
 
 pub async fn verify(pool: &PgPool) {
     let repository =
-        PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20).unwrap();
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20, 86400).unwrap();
     let owner = AccountRecord {
         id: AccountId::new(),
         username: Uuid::new_v4().to_string(),

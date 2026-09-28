@@ -474,3 +474,51 @@ async fn credential_in_path_origin_restriction_checks_every_redirect_before_tran
 }
 
 mod conditional;
+
+#[tokio::test]
+async fn zero_redirect_policy_never_forwards_cookie_even_to_same_origin() {
+    for target in [
+        "https://www.zhihu.com/next",
+        "https://evil.test/next",
+        "http://127.0.0.1/",
+    ] {
+        let client = OutboundHttpClient::new(
+            OutboundPolicy::new(
+                false,
+                OutboundLimits::try_from(crate::RawOutboundLimits {
+                    connect_timeout_ms: 1000,
+                    request_deadline_ms: 5000,
+                    max_redirect_hops: 0,
+                    max_response_body_bytes: 10,
+                })
+                .unwrap(),
+            ),
+            Resolver {
+                answers: Mutex::new(VecDeque::from([vec!["93.184.216.34".parse().unwrap()]])),
+            },
+            Transport {
+                responses: Mutex::new(VecDeque::from([response(
+                    StatusCode::FOUND,
+                    Some(target),
+                    b"",
+                )])),
+                requests: Mutex::new(vec![]),
+            },
+            Arc::new(Observer::default()),
+        );
+        let mut headers = HeaderMap::new();
+        let mut cookie = HeaderValue::from_static("z_c0=fixture");
+        cookie.set_sensitive(true);
+        headers.insert(header::COOKIE, cookie);
+        assert!(client
+            .execute(PreparedRequest {
+                method: Method::GET,
+                url: Url::parse("https://www.zhihu.com/api/v4/me").unwrap(),
+                headers,
+                body: None
+            })
+            .await
+            .is_err());
+        assert_eq!(client.transport.requests.lock().unwrap().len(), 1);
+    }
+}

@@ -47,6 +47,9 @@ fn pinned_client(
     remaining_deadline: Duration,
 ) -> Result<reqwest::Client, reqwest::Error> {
     reqwest::Client::builder()
+        // Explicit proxy routing belongs to PublicFetchTransport. Environment or
+        // system settings must never reroute credentialed direct requests.
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(connect_timeout)
         .timeout(remaining_deadline)

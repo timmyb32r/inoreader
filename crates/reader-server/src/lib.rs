@@ -47,6 +47,8 @@ mod ai;
 mod api_observability;
 mod glossary;
 mod opml;
+mod wiki;
+mod zhihu;
 
 #[async_trait::async_trait]
 pub trait FeedDiscovery: Send + Sync {
@@ -73,7 +75,9 @@ pub trait FeedDiscovery: Send + Sync {
 
 pub struct AppState<R> {
     ai: Option<Arc<reader_ai::AiService>>,
+    zhihu: Option<Arc<dyn reader_application::ZhihuProfilePort>>,
     glossary: Option<Arc<reader_glossary::GlossaryService>>,
+    wiki: Option<(Arc<dyn reader_wiki::Store>, reader_wiki::Limits)>,
     repository: Arc<R>,
     discovery: Arc<dyn FeedDiscovery>,
     reason_policy: ReasonPolicy,
@@ -86,7 +90,9 @@ impl<R> Clone for AppState<R> {
     fn clone(&self) -> Self {
         Self {
             ai: self.ai.clone(),
+            zhihu: self.zhihu.clone(),
             glossary: self.glossary.clone(),
+            wiki: self.wiki.clone(),
             repository: self.repository.clone(),
             discovery: self.discovery.clone(),
             reason_policy: self.reason_policy,
@@ -109,7 +115,9 @@ impl<R> AppState<R> {
     ) -> Self {
         Self {
             ai: None,
+            zhihu: None,
             glossary: None,
+            wiki: None,
             repository,
             discovery,
             reason_policy,
@@ -120,8 +128,20 @@ impl<R> AppState<R> {
         }
     }
 
+    pub fn with_wiki(
+        mut self,
+        store: Arc<dyn reader_wiki::Store>,
+        limits: reader_wiki::Limits,
+    ) -> Self {
+        self.wiki = Some((store, limits));
+        self
+    }
     pub fn with_glossary(mut self, glossary: Arc<reader_glossary::GlossaryService>) -> Self {
         self.glossary = Some(glossary);
+        self
+    }
+    pub fn with_zhihu(mut self, service: Arc<dyn reader_application::ZhihuProfilePort>) -> Self {
+        self.zhihu = Some(service);
         self
     }
     pub fn with_ai(mut self, ai: Arc<reader_ai::AiService>) -> Self {
@@ -236,6 +256,8 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         .route("/api/opml/export", get(export_opml::<R>))
         .merge(ai::routes::<R>())
         .merge(glossary::routes::<R>())
+        .merge(zhihu::routes::<R>())
+        .merge(wiki::routes::<R>())
         .with_state(state)
         .layer(middleware::from_fn(api_observability::observe))
 }

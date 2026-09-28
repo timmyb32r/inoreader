@@ -1,8 +1,12 @@
 //! PostgreSQL persistence boundary for the reader application.
 
 mod ai;
+mod wiki;
+pub use wiki::PostgresWikiStore;
 mod content_snapshot;
 mod glossary;
+mod zhihu;
+pub use zhihu::PostgresZhihuStore;
 mod ingest_store;
 mod publication_backfill;
 mod publication_dates;

@@ -15,6 +15,7 @@ mod publication;
 mod runtime;
 mod secure_fetch;
 mod web_feed;
+pub mod zhihu;
 
 pub use built_in_adapters::*;
 pub use cdp_browser::*;

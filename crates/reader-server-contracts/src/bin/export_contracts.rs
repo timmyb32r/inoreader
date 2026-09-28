@@ -2,6 +2,79 @@ use reader_server_contracts::*;
 fn main() {
     let mut schemas = serde_json::Map::new();
     schemas.insert(
+        "WikiRevision".into(),
+        serde_json::to_value(schemars::schema_for!(WikiRevision)).unwrap(),
+    );
+    schemas.insert(
+        "WikiLink".into(),
+        serde_json::to_value(schemars::schema_for!(WikiLink)).unwrap(),
+    );
+    schemas.insert(
+        "WikiDraftResponse".into(),
+        serde_json::to_value(schemars::schema_for!(WikiDraftResponse)).unwrap(),
+    );
+    schemas.insert(
+        "WikiBinding".into(),
+        serde_json::to_value(schemars::schema_for!(WikiBinding)).unwrap(),
+    );
+    schemas.insert(
+        "WikiDraft".into(),
+        serde_json::to_value(schemars::schema_for!(WikiDraft)).unwrap(),
+    );
+    schemas.insert(
+        "WikiLimits".into(),
+        serde_json::to_value(schemars::schema_for!(WikiLimits)).unwrap(),
+    );
+    schemas.insert(
+        "WikiMembers".into(),
+        serde_json::to_value(schemars::schema_for!(WikiMembers)).unwrap(),
+    );
+    schemas.insert(
+        "WikiNamespace".into(),
+        serde_json::to_value(schemars::schema_for!(WikiNamespace)).unwrap(),
+    );
+    schemas.insert(
+        "WikiNamespaces".into(),
+        serde_json::to_value(schemars::schema_for!(WikiNamespaces)).unwrap(),
+    );
+    schemas.insert(
+        "WikiPage".into(),
+        serde_json::to_value(schemars::schema_for!(WikiPage)).unwrap(),
+    );
+    schemas.insert(
+        "WikiPages".into(),
+        serde_json::to_value(schemars::schema_for!(WikiPages)).unwrap(),
+    );
+    schemas.insert(
+        "WikiHistory".into(),
+        serde_json::to_value(schemars::schema_for!(WikiHistory)).unwrap(),
+    );
+    schemas.insert(
+        "WikiWrite".into(),
+        serde_json::to_value(schemars::schema_for!(WikiWrite)).unwrap(),
+    );
+    schemas.insert(
+        "WikiCreateNamespace".into(),
+        serde_json::to_value(schemars::schema_for!(WikiCreateNamespace)).unwrap(),
+    );
+    schemas.insert(
+        "WikiMemberCommand".into(),
+        serde_json::to_value(schemars::schema_for!(WikiMemberCommand)).unwrap(),
+    );
+    schemas.insert(
+        "WikiBindCommand".into(),
+        serde_json::to_value(schemars::schema_for!(WikiBindCommand)).unwrap(),
+    );
+
+    schemas.insert(
+        "ZhihuProfileView".into(),
+        serde_json::to_value(schemars::schema_for!(ZhihuProfileView)).unwrap(),
+    );
+    schemas.insert(
+        "ZhihuSessionCommand".into(),
+        serde_json::to_value(schemars::schema_for!(ZhihuSessionCommand)).unwrap(),
+    );
+    schemas.insert(
         "PublicationHistoryView".into(),
         serde_json::to_value(schemars::schema_for!(PublicationHistoryView)).unwrap(),
     );

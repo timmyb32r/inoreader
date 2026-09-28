@@ -67,3 +67,14 @@ Completion pulses only color/shadow; reduced motion uses a static highlight.
 Source posts with no authored title keep an empty title in storage and the API.
 Lists show a separate “Untitled post” absence label in the existing heading slot;
 the caption remains the excerpt and is never promoted into a generated title.
+
+The Zhihu profile section uses a masked, autofill-resistant multiline editor for
+Cookie headers or DevTools cookie tables. Its action row, removal confirmation
+row and feedback region reserve fixed geometry before interaction. Save validates
+remotely before replacement; checking never mutates the saved session.
+
+Wiki is a full-page area with namespace navigation and an independent reading or
+editing panel. The editor reserves a 36px status row and a fixed-height two-pane
+workspace; narrow screens switch Write/Preview in that same space. Publication
+locks its fields and controls until the response, while private-draft saving
+leaves editing available. Namespace access never inherits Reader admin rights.

@@ -20,6 +20,7 @@ export function SubscriptionsPage({
   onRemoved,
   onEditRecipe,
   onDirtyNoteChange,
+  onOpenWiki,
 }: {
   client: ApiClient;
   workspaceId: string;
@@ -36,6 +37,7 @@ export function SubscriptionsPage({
   onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
   onDirtyNoteChange?: (dirty: boolean) => void;
+  onOpenWiki?: (path: string) => boolean;
 }) {
   const overlay = useRef<HTMLDivElement>(null);
   const close = useRef(onBack);
@@ -86,6 +88,7 @@ export function SubscriptionsPage({
         </button>
         {subscriptionId && (
           <SubscriptionDetails
+            onOpenWiki={onOpenWiki}
             key={`${subscriptionId}:${initialTab ?? "overview"}`}
             {...{
               client,

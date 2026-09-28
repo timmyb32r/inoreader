@@ -14,10 +14,12 @@ pub(super) async fn serve(
         pool.clone(),
         reason_policy,
         config.ingest.initial_feed_items,
+        config.subscriptions.attention_after_seconds,
     )?);
     repository.readiness().await?;
     let ai_service = ai::compose(config, pool.clone(), repository.clone())?;
     let glossary_service = glossary::compose(config, pool.clone())?;
+    let zhihu_service = zhihu::compose(config, pool.clone())?;
     // The transport exposes decoded response bytes, so both the wire/body
     // budget and decompressed budget constrain the same pre-parser boundary.
     let limits = OutboundLimits::try_from(RawOutboundLimits {
@@ -77,6 +79,7 @@ pub(super) async fn serve(
         static_feeds: StaticWebFeedCollector::new(fetcher.clone()),
         adapters: BuiltInAdapterCollector::new(browser_http),
         cdp,
+        zhihu: zhihu_service.clone(),
         max_pages: config.ingest.max_web_feed_pages,
         max_actions: config.browser.max_actions,
     });
@@ -102,6 +105,17 @@ pub(super) async fn serve(
     if let Some(glossary) = &glossary_service {
         server_state = server_state.with_glossary(glossary.clone());
     }
+    if let Some(zhihu) = zhihu_service {
+        server_state = server_state.with_zhihu(Arc::new(zhihu::Profile(zhihu)));
+    }
+    let wiki_limits = reader_wiki::Limits::try_from(config.wiki.clone())?;
+    server_state = server_state.with_wiki(
+        Arc::new(reader_storage_postgres::PostgresWikiStore::new(
+            pool.clone(),
+            wiki_limits.clone(),
+        )),
+        wiki_limits,
+    );
     let app = reader_server::router(server_state)
         .fallback(serve_ui)
         .layer(DefaultBodyLimit::max(config.server.max_request_body_bytes))

@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS subscription_icons (
 
 CREATE TABLE IF NOT EXISTS source_health (
     source_id TEXT PRIMARY KEY,
+    failure_since_ms BIGINT,
     document TEXT NOT NULL
 );
 
@@ -333,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 2;
-pub const RELEASE: &str = "subscription-removal-2026-09-28";
+pub const VERSION: i64 = 5;
+pub const RELEASE: &str = "private-wiki-2026-09-28";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -355,7 +356,10 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     }
     let valid: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='staged_content_chunks' AND column_name='bytes' AND data_type='bytea') OR (table_name='ai_chats' AND column_name IN ('inputs','public_view') AND data_type='text' AND is_nullable='NO') OR (table_name='ai_chats' AND column_name='public_revision' AND data_type='bigint'))").fetch_one(pool).await?;
     let provenance: bool = sqlx::query_scalar("SELECT to_regclass('removed_subscriptions') IS NOT NULL AND to_regclass('article_subscription_provenance') IS NOT NULL").fetch_one(pool).await?;
-    if !valid || !provenance {
+    let zhihu:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='zhihu_sessions' AND column_name='encrypted' AND data_type='bytea' AND is_nullable='NO')").fetch_one(pool).await?;
+    let attention: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='source_health' AND column_name='failure_since_ms' AND data_type='bigint')").fetch_one(pool).await?;
+    let wiki: bool = sqlx::query_scalar("SELECT count(*)=9 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('wiki_namespaces','wiki_members','wiki_pages','wiki_page_names','wiki_revisions','wiki_drafts','wiki_links','wiki_operations','subscription_wiki_links')").fetch_one(pool).await?;
+    if !valid || !provenance || !zhihu || !attention || !wiki {
         return Err(sqlx::Error::Protocol(
             "database schema differs from its recorded version".into(),
         ));
@@ -363,8 +367,8 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Explicit offline upgrade from release 1 or the preceding unversioned schema.
-/// Release 1 gains retained subscription provenance without rewriting user rows.
+/// Explicit offline upgrade from release 4 or the preceding unversioned schema.
+/// Release 4 gains private wiki tables without rewriting existing user rows.
 /// The unversioned upgrade also validates and converts binary content and AI views.
 pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
@@ -377,12 +381,14 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         )
         .fetch_one(&mut *transaction)
         .await?;
-        if previous != (1, "architecture-contracts-2026-09-27".into()) {
+        if previous != (4, "source-attention-2026-09-28".into()) {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
             ));
         }
-        install_subscription_provenance(&mut transaction).await?;
+        sqlx::raw_sql(crate::wiki::SCHEMA)
+            .execute(&mut *transaction)
+            .await?;
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
@@ -397,6 +403,15 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     upgrade::content_bytes(&mut transaction, batch).await?;
     crate::ai::backfill_public_views(&mut transaction, batch).await?;
     install_subscription_provenance(&mut transaction).await?;
+    sqlx::raw_sql(include_str!("schema/attention.sql"))
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::raw_sql(crate::wiki::SCHEMA)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::raw_sql(crate::zhihu::SCHEMA)
+        .execute(&mut *transaction)
+        .await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)
         .bind(RELEASE)
@@ -411,7 +426,13 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
         .execute(&mut **transaction)
         .await?;
     sqlx::query("CREATE UNIQUE INDEX subscriptions_by_workspace_exact_url ON subscriptions ((document::jsonb ->> 'workspace_id'), (document::jsonb ->> 'source_url'))").execute(&mut **transaction).await?;
+    sqlx::raw_sql(crate::zhihu::SCHEMA)
+        .execute(&mut **transaction)
+        .await?;
     sqlx::raw_sql(crate::ai::SCHEMA)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::raw_sql(crate::wiki::SCHEMA)
         .execute(&mut **transaction)
         .await?;
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)

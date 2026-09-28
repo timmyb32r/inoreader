@@ -77,6 +77,7 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
         type StatsRow = (
             String,
             Option<String>,
+            bool,
             Option<String>,
             bool,
             Option<String>,
@@ -86,10 +87,20 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
         let rows: Vec<StatsRow> = sqlx::query_as(include_str!("subscription_stats.sql"))
             .bind(&wanted_ids)
             .bind(workspace.as_uuid().to_string())
+            .bind((self.attention_after_seconds * 1000) as i64)
             .fetch_all(&self.pool)
             .await
             .map_err(storage)?;
-        for (id, health, definition, editable_web_feed, icon_data_url, count, unread_count) in rows
+        for (
+            id,
+            health,
+            needs_attention,
+            definition,
+            editable_web_feed,
+            icon_data_url,
+            count,
+            unread_count,
+        ) in rows
         {
             let health = health
                 .as_deref()
@@ -111,6 +122,7 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
             result.insert(
                 subscription_id,
                 SubscriptionStats {
+                    needs_attention,
                     article_count: usize::try_from(count).map_err(storage)?,
                     unread_count: usize::try_from(unread_count).map_err(storage)?,
                     last_success_at: health
