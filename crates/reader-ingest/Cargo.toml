@@ -12,6 +12,7 @@ chromiumoxide = "0.9.1"
 encoding_rs = "0.8"
 futures-util = "0.3"
 http.workspace = true
+httpdate = "1.0.3"
 reader-collectors = { path = "../reader-collectors" }
 reader-core = { path = "../reader-core" }
 reader-web-runtime = { path = "../reader-web-runtime" }

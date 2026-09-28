@@ -1,3 +1,4 @@
+import { useSubscriptionLifecycle } from "./useSubscriptionLifecycle";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
 import {
@@ -36,6 +37,7 @@ export function SubscriptionCatalog({
   onPause,
   onOpenDetail,
   onChanged,
+  onRemoved,
 }: {
   client: ApiClient;
   workspaceId: string;
@@ -46,6 +48,7 @@ export function SubscriptionCatalog({
   onPause: (id: string) => void;
   onOpenDetail?: (id: string) => void;
   onChanged?: (item: Subscription) => void;
+  onRemoved?: (id: string) => void;
 }) {
   const key = `reader.subscription-columns.${workspaceId}`;
   const initial = readLayout(key);
@@ -69,6 +72,23 @@ export function SubscriptionCatalog({
     [pauseOpen, setPauseOpen] = useState(false),
     [pauseReason, setPauseReason] = useState(""),
     [pauseError, setPauseError] = useState("");
+  const clearSelection = (id: string) =>
+    setSelected((items) => {
+      const next = new Set(items);
+      next.delete(id);
+      return next;
+    });
+  const lifecycle = useSubscriptionLifecycle(
+    client,
+    (item) => {
+      clearSelection(item.id);
+      onChanged?.(item);
+    },
+    (id) => {
+      clearSelection(id);
+      onRemoved?.(id);
+    },
+  );
   const pendingRef = useRef(false);
   useEffect(() => {
     const next = readLayout(key),
@@ -152,6 +172,7 @@ export function SubscriptionCatalog({
   };
   return (
     <section class="subscriptions-page">
+      {lifecycle.dialog}
       <header class="entity-header">
         <div>
           <button class="text-button" onClick={onBack}>
@@ -263,6 +284,28 @@ export function SubscriptionCatalog({
         >
           Pause
         </button>
+        <button
+          disabled={!selected.size || pending}
+          onClick={() =>
+            lifecycle.open(
+              view === "archived" ? "restore" : "archive",
+              rows.filter((item) => selected.has(item.id)),
+            )
+          }
+        >
+          {view === "archived" ? "Restore" : "Archive"}
+        </button>
+        <button
+          disabled={!selected.size || pending}
+          onClick={() =>
+            lifecycle.open(
+              "delete",
+              rows.filter((item) => selected.has(item.id)),
+            )
+          }
+        >
+          Delete
+        </button>
       </div>
       <div class="subscription-table-wrap">
         <table class="subscription-table">
@@ -271,7 +314,7 @@ export function SubscriptionCatalog({
             {layout.columns.map((c) => (
               <col style={`width:${layout.widths[c] ?? defaultWidths[c]}px`} />
             ))}
-            <col style="width:110px" />
+            <col style="width:270px" />
           </colgroup>
           <thead>
             <tr>
@@ -315,7 +358,7 @@ export function SubscriptionCatalog({
           </thead>
           <tbody>
             {rows.map((item) => (
-              <tr>
+              <tr key={item.id}>
                 <td>
                   <AutofillResistantField
                     type="checkbox"
@@ -337,17 +380,36 @@ export function SubscriptionCatalog({
                   </td>
                 ))}
                 <td class="row-link">
-                  <a
-                    href={`/subscriptions/${encodeURIComponent(item.id)}`}
-                    onClick={(e) => {
-                      if (onOpenDetail) {
-                        e.preventDefault();
-                        onOpenDetail(item.id);
+                  <div class="subscription-row-actions">
+                    <a
+                      href={`/subscriptions/${encodeURIComponent(item.id)}`}
+                      onClick={(e) => {
+                        if (onOpenDetail) {
+                          e.preventDefault();
+                          onOpenDetail(item.id);
+                        }
+                      }}
+                    >
+                      View details
+                    </a>
+                    <button
+                      aria-label={`${item.status === "archived" ? "Restore" : "Archive"} ${item.name}`}
+                      onClick={() =>
+                        lifecycle.open(
+                          item.status === "archived" ? "restore" : "archive",
+                          [item],
+                        )
                       }
-                    }}
-                  >
-                    View details
-                  </a>
+                    >
+                      {item.status === "archived" ? "Restore" : "Archive"}
+                    </button>
+                    <button
+                      aria-label={`Delete ${item.name}`}
+                      onClick={() => lifecycle.open("delete", [item])}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

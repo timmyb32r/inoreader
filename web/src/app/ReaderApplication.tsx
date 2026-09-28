@@ -492,6 +492,10 @@ export function ReaderApplication({
             setPauseTarget(id);
             setModal("pause");
           }}
+          onRemoved={(id) => {
+            setSubscriptions((items) => items.filter((item) => item.id !== id));
+            reader.forgetSubscription(id);
+          }}
           onChanged={(changed) =>
             setSubscriptions((items) =>
               items.map((item) => (item.id === changed.id ? changed : item)),

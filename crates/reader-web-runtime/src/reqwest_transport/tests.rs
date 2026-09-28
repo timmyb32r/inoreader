@@ -44,3 +44,35 @@ async fn pinned_client_decompresses_gzip_responses_before_ingestion() {
     assert_eq!(response.bytes().await.unwrap(), "<html>decoded</html>");
     server.join().unwrap();
 }
+
+#[tokio::test]
+async fn conditional_connection_closed_before_headers_has_narrow_typed_classification() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = [0_u8; 4096];
+        let count = stream.read(&mut request).unwrap();
+        let request = String::from_utf8_lossy(&request[..count]).to_ascii_lowercase();
+        assert!(request.contains("if-none-match:"));
+        // Reproduce DATAREON: close after a conditional GET, before any headers.
+    });
+    let client = pinned_client(
+        "example.test",
+        address,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    let error = client
+        .get(format!("http://example.test:{}", address.port()))
+        .header("If-None-Match", "\"known\"")
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(
+        super::classify_error(&error).kind,
+        "response_incomplete_before_headers"
+    );
+    server.join().unwrap();
+}

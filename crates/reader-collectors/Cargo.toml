@@ -7,8 +7,8 @@ license.workspace = true
 chrono.workspace = true
 feed-rs.workspace = true
 reader-core = { path = "../reader-core" }
+roxmltree = "0.20"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
-

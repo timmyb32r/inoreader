@@ -1,0 +1,1 @@
+Self-signed example.com certificate and public test-only private key for a hermetic CONNECT/TLS fixture. Never used by application clients or deployment. The success test explicitly trusts this certificate; production roots reject it.

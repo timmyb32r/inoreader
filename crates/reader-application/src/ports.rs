@@ -425,6 +425,9 @@ pub trait SubscriptionRepository: WorkspaceRepository {
         expected_revision: Option<u64>,
         value: Subscription,
     ) -> Result<(), RepositoryError>;
+    /// Remove only the subscription. Existing articles, exact origin provenance,
+    /// content and reading/AI state remain accessible; no restore is exposed.
+    async fn delete_subscription(&self, value: &Subscription) -> Result<(), RepositoryError>;
     async fn replace_subscription_source(
         &self,
         expected_revision: u64,

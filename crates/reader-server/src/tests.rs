@@ -668,7 +668,20 @@ async fn router_returns_not_found_for_cross_user_subscription_routes() {
     let (state, _, subscription) = route_fixture(AccountId::new(), None);
     let app = router(state);
     let id = subscription.id().as_uuid();
+    // A stale browser used DELETE for reversible archiving. Reject that obsolete
+    // route instead of interpreting it as a permanent deletion.
+    let obsolete = axum::http::Request::builder()
+        .method("DELETE")
+        .uri(format!("/api/subscriptions/{id}"))
+        .body(axum::body::Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(obsolete).await.unwrap().status(),
+        StatusCode::METHOD_NOT_ALLOWED
+    );
     for (method, uri, body) in [
+        ("POST", format!("/api/subscriptions/{id}/delete"), None),
+        ("POST", format!("/api/subscriptions/{id}/archive"), None),
         ("GET", format!("/api/subscriptions/{id}"), None),
         ("GET", format!("/api/subscriptions/{id}/activity"), None),
         (
@@ -931,6 +944,9 @@ impl reader_application::RuleRepository for RouteRepository {
 
 #[async_trait::async_trait]
 impl reader_application::SubscriptionRepository for RouteRepository {
+    async fn delete_subscription(&self, _: &Subscription) -> Result<(), RepositoryError> {
+        Err(RepositoryError::NotFound)
+    }
     async fn subscription(&self, id: SubscriptionId) -> Result<Subscription, RepositoryError> {
         if id == self.subscription.id() {
             Ok(self.subscription.clone())

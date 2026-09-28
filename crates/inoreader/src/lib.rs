@@ -60,13 +60,108 @@ pub struct Auth {
 #[serde(deny_unknown_fields)]
 pub struct Http {
     pub user_agent: String,
+
     pub connect_timeout_seconds: u64,
+
     pub request_timeout_seconds: u64,
+
     pub redirect_hops: u32,
+
     pub max_body_bytes: usize,
+
     pub max_decompressed_bytes: usize,
+
     pub allowed_plain_http_hosts: Vec<String>,
+
+    /// Explicit trust decisions for public, credential-free fetches only.
+    /// Empty/absent means direct. Each exact host belongs to at most one route;
+    /// different host groups may have different ordered endpoint pools.
+    #[serde(default, deserialize_with = "deserialize_public_proxy_routes")]
+    pub public_proxy_routes: Vec<PublicProxy>,
 }
+
+// YAML's generic Vec deserializer accepts explicit null as an empty sequence.
+// Only an omitted field has the authored direct-fetch default; a supplied route
+// configuration must be a sequence rather than silently disabling routing.
+fn deserialize_public_proxy_routes<'de, D>(deserializer: D) -> Result<Vec<PublicProxy>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct RoutesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for RoutesVisitor {
+        type Value = Vec<PublicProxy>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a sequence of public proxy routes")
+        }
+
+        fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut routes = Vec::new();
+            while let Some(route) = sequence.next_element()? {
+                routes.push(route);
+            }
+            Ok(routes)
+        }
+    }
+
+    deserializer.deserialize_any(RoutesVisitor)
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicProxy {
+    /// Exact destination hostnames; subdomains are not implicitly included.
+    pub target_hosts: Vec<String>,
+
+    /// Finite HTTP CONNECT proxy pool. Only public literal IP addresses allowed.
+    pub endpoints: Vec<SocketAddr>,
+
+    /// Maximum bytes read while receiving a CONNECT response header.
+    pub max_connect_header_bytes: usize,
+
+    /// One endpoint's full attempt, including its streamed response body.
+    /// Must be positive and no greater than the overall HTTP request deadline.
+    pub endpoint_attempt_timeout_ms: u64,
+
+    /// Failed host/endpoint pairs become eligible for one real-request recovery
+    /// probe after this positive interval. No background requests are generated.
+    pub quarantine_ms: u64,
+}
+impl Http {
+    /// Validate the explicit proxy trust boundary before any connection is made.
+    /// The returned transport is used only by public feeds, pages and icons.
+    pub fn public_fetch_transport(
+        &self,
+    ) -> Result<reader_web_runtime::PublicFetchTransport, ConfigError> {
+        let mut routes = Vec::with_capacity(self.public_proxy_routes.len());
+        for proxy in &self.public_proxy_routes {
+            let attempt_timeout =
+                std::time::Duration::from_millis(proxy.endpoint_attempt_timeout_ms);
+            if attempt_timeout > std::time::Duration::from_secs(self.request_timeout_seconds) {
+                return Err(ConfigError::Invalid(
+                    "http.public_proxy_routes.endpoint_attempt_timeout_ms",
+                ));
+            }
+            routes.push(
+                reader_web_runtime::PublicProxyRoute::new(
+                    proxy.target_hosts.clone(),
+                    proxy.endpoints.clone(),
+                    proxy.max_connect_header_bytes,
+                    attempt_timeout,
+                    std::time::Duration::from_millis(proxy.quarantine_ms),
+                )
+                .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))?,
+            );
+        }
+        reader_web_runtime::PublicFetchTransport::new(routes)
+            .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scheduler {
@@ -77,6 +172,11 @@ pub struct Scheduler {
     pub workers: usize,
     pub per_origin_concurrency: usize,
     pub retry_attempts: u32,
+    /// Minimum pause after HTTP 429, including responses without Retry-After.
+    pub rate_limit_retry_seconds: u64,
+    /// Stable per-job offset added to retry delays; zero disables staggering.
+    pub retry_jitter_seconds: u64,
+
     pub max_retry_age_seconds: u64,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -306,6 +406,10 @@ impl Config {
             ("scheduler.lease_seconds", self.scheduler.lease_seconds),
             ("scheduler.renew_seconds", self.scheduler.renew_seconds),
             (
+                "scheduler.rate_limit_retry_seconds",
+                self.scheduler.rate_limit_retry_seconds,
+            ),
+            (
                 "scheduler.max_retry_age_seconds",
                 self.scheduler.max_retry_age_seconds,
             ),
@@ -318,6 +422,51 @@ impl Config {
             if v == 0 {
                 return Err(ConfigError::Invalid(n));
             }
+        }
+        // Validate scheduler seconds before startup converts them to chrono
+        // durations or signed timestamps. Jitter alone may deliberately be zero.
+        for (name, seconds) in [
+            (
+                "scheduler.polling_interval_seconds",
+                self.scheduler.polling_interval_seconds,
+            ),
+            (
+                "scheduler.queue_poll_interval_seconds",
+                self.scheduler.queue_poll_interval_seconds,
+            ),
+            ("scheduler.lease_seconds", self.scheduler.lease_seconds),
+            ("scheduler.renew_seconds", self.scheduler.renew_seconds),
+            (
+                "scheduler.max_retry_age_seconds",
+                self.scheduler.max_retry_age_seconds,
+            ),
+            (
+                "scheduler.rate_limit_retry_seconds",
+                self.scheduler.rate_limit_retry_seconds,
+            ),
+            (
+                "scheduler.retry_jitter_seconds",
+                self.scheduler.retry_jitter_seconds,
+            ),
+        ] {
+            let duration = i64::try_from(seconds)
+                .ok()
+                .and_then(chrono::Duration::try_seconds)
+                .ok_or(ConfigError::Invalid(name))?;
+            if chrono::Utc::now().checked_add_signed(duration).is_none() {
+                return Err(ConfigError::Invalid(name));
+            }
+        }
+        let retry_total = self
+            .scheduler
+            .rate_limit_retry_seconds
+            .max(1024)
+            .checked_add(self.scheduler.retry_jitter_seconds)
+            .and_then(|value| i64::try_from(value).ok())
+            .and_then(chrono::Duration::try_seconds)
+            .and_then(|duration| chrono::Utc::now().checked_add_signed(duration));
+        if retry_total.is_none() {
+            return Err(ConfigError::Invalid("scheduler retry delay plus jitter"));
         }
         let sizes = [
             (
@@ -415,6 +564,7 @@ impl Config {
         if self.http.max_decompressed_bytes < self.http.max_body_bytes {
             return Err(ConfigError::Invalid("http.max_decompressed_bytes"));
         }
+        self.http.public_fetch_transport()?;
         let mut plain_http_hosts = std::collections::HashSet::new();
         for host in &self.http.allowed_plain_http_hosts {
             let parsed = url::Url::parse(&format!("http://{host}/"))

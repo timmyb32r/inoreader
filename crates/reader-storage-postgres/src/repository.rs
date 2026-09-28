@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 type PresentationRow = (
+    bool,
     String,
     String,
     String,
@@ -28,6 +29,7 @@ type PresentationRow = (
     Option<String>,
 );
 type PresentationOrigin = (
+    bool,
     String,
     Subscription,
     Option<reader_ingest::ContentManifestPointer>,

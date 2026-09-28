@@ -1,6 +1,7 @@
 use super::*;
 use crate::publication_dates::origin_publication;
 type OriginPresentationRow = (
+    bool,
     String,
     String,
     Option<String>,
@@ -16,7 +17,7 @@ impl PostgresRepository {
         include_content: bool,
     ) -> Result<ArticlePresentation, RepositoryError> {
         let rows: Vec<OriginPresentationRow> = sqlx::query_as(
-            "SELECT o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2",
+            "SELECT s.present,o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN article_subscription_provenance s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id=$2 ORDER BY s.present DESC,o.subscription_id",
         ).bind(workspace.as_uuid().to_string()).bind(article.id.as_uuid().to_string()).fetch_all(&self.pool).await.map_err(storage)?;
         let mut subscription_ids = Vec::new();
         let mut subscription_titles = Vec::new();
@@ -24,7 +25,7 @@ impl PostgresRepository {
         let mut failure_reason = None;
         let mut description_media_type = None;
         let mut publication = Vec::new();
-        for (record, subscription, manifest, failure, media_type, published) in rows {
+        for (present, record, subscription, manifest, failure, media_type, published) in rows {
             merge_media_type(&mut description_media_type, media_type)?;
             let subscription: Subscription =
                 serde_json::from_str(&subscription).map_err(storage)?;
@@ -32,7 +33,7 @@ impl PostgresRepository {
             if subscription.workspace_id() != workspace {
                 return Err(storage("article origin crosses workspace ownership"));
             }
-            if !subscription_ids.contains(&subscription.id()) {
+            if present && !subscription_ids.contains(&subscription.id()) {
                 subscription_ids.push(subscription.id());
             }
             if !subscription_titles
@@ -121,7 +122,7 @@ impl PostgresRepository {
             .map(|value| value.id.as_uuid().to_string())
             .collect();
         let rows: Vec<PresentationRow> = sqlx::query_as(
-            "SELECT o.article_id,o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2)",
+            "SELECT s.present,o.article_id,o.source_record_id,s.document,m.document,f.document,r.document::jsonb->>'description_media_type',r.document::jsonb->>'published_at' FROM library_origins o JOIN article_subscription_provenance s ON s.id=o.subscription_id LEFT JOIN source_records r ON r.id=o.source_record_id LEFT JOIN content_manifests m ON m.id=o.source_record_id LEFT JOIN content_refresh_state f ON f.id='failure/' || o.source_record_id WHERE o.workspace_id=$1 AND o.article_id = ANY($2) ORDER BY s.present DESC,o.subscription_id",
         )
         .bind(workspace.as_uuid().to_string())
         .bind(&ids)
@@ -129,7 +130,9 @@ impl PostgresRepository {
         .await
         .map_err(storage)?;
         let mut origins: HashMap<String, Vec<PresentationOrigin>> = HashMap::new();
-        for (article_id, record, subscription, manifest, failure, media_type, published) in rows {
+        for (present, article_id, record, subscription, manifest, failure, media_type, published) in
+            rows
+        {
             let subscription: Subscription =
                 serde_json::from_str(&subscription).map_err(storage)?;
             subscription.validate(self.reason_policy).map_err(storage)?;
@@ -149,6 +152,7 @@ impl PostgresRepository {
                         .map(str::to_owned)
                 });
             origins.entry(article_id).or_default().push((
+                present,
                 record,
                 subscription,
                 manifest,
@@ -169,10 +173,12 @@ impl PostgresRepository {
                 let mut failure_reason = None;
                 let mut description_media_type = None;
                 let mut publication = Vec::new();
-                for (record, subscription, manifest, failure, media_type, published) in rows {
+                for (present, record, subscription, manifest, failure, media_type, published) in
+                    rows
+                {
                     merge_media_type(&mut description_media_type, media_type)?;
                     publication.extend(origin_publication(published, manifest.as_ref())?);
-                    if !subscription_ids.contains(&subscription.id()) {
+                    if present && !subscription_ids.contains(&subscription.id()) {
                         subscription_ids.push(subscription.id());
                     }
                     if !subscription_titles

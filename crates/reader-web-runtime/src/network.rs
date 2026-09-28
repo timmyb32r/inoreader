@@ -126,7 +126,8 @@ impl ResolvedTarget {
 }
 
 /// Opaque proof passed to the transport. The adapter must connect to `address`
-/// directly while retaining the URL host for HTTP Host/SNI verification.
+/// directly, or request this literal destination through an explicitly trusted
+/// CONNECT route, while retaining the URL host for HTTP Host/SNI verification.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConnectionAuthorization {
     url: Url,

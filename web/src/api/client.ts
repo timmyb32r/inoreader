@@ -286,13 +286,17 @@ export class ApiClient {
       json("PATCH", { name }),
       "SubscriptionView",
     );
-  unsubscribe = (id: string) =>
+  archiveSubscription = (id: string) =>
     this.transport(
-      `/api/subscriptions/${enc(id)}`,
-      {
-        method: "DELETE",
-      },
+      `/api/subscriptions/${enc(id)}/archive`,
+      { method: "POST" },
       "SubscriptionView",
+    );
+  deleteSubscription = (id: string) =>
+    this.transport(
+      `/api/subscriptions/${enc(id)}/delete`,
+      { method: "POST" },
+      "empty",
     );
   restoreSubscription = (id: string) =>
     this.transport(

@@ -77,7 +77,11 @@ export function ArticleListPanel({
             <>
               <p class="eyebrow">{workspace}</p>
               <h1>
-                {view === "feed" ? `Feed (${unreadTotal})` : "Read later"}
+                {view === "feed"
+                  ? `Feed (${unreadTotal})`
+                  : view === "subscription"
+                    ? "Retained articles"
+                    : "Read later"}
               </h1>
             </>
           )}

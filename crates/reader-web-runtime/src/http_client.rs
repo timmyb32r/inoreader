@@ -30,12 +30,17 @@ pub trait ResponseBody: Send {
 pub struct TransportResponse {
     pub status: StatusCode,
     pub headers: HeaderMap,
+    /// Authorized origin endpoint. Direct transports verify the socket peer;
+    /// an explicitly configured CONNECT transport verifies its proxy socket,
+    /// tunnels to this literal IP and verifies the original origin's TLS name.
+    /// A proxy hostname or a proxy-resolved destination is never sufficient.
     pub connected_peer: IpAddr,
     pub body: Box<dyn ResponseBody>,
 }
 
 /// Low-level adapter contract. Implementations must disable automatic redirects,
-/// connect to `authorization.address()`, retain the URL host for Host/SNI, apply
+/// connect to `authorization.address()` directly or via an explicitly trusted
+/// public CONNECT route, retain the URL host for Host/SNI, apply
 /// `connect_timeout`, and stream the response body without an unbounded buffer.
 #[async_trait]
 pub trait OutboundTransport: Send + Sync {
@@ -201,8 +206,9 @@ where
         self.policy.validate_url(&request.url)?;
         let mut redirects =
             RedirectChain::new(&request.url, self.policy.limits().max_redirect_hops);
+        let mut recovered_cache_validation = false;
 
-        loop {
+        'request: loop {
             self.policy.validate_url(&request.url)?;
             let host = request.url.host_str().ok_or(OutboundError::MissingHost)?;
             let port = request
@@ -223,6 +229,7 @@ where
             for address in resolved.addresses() {
                 let authorization = resolved.connection(*address)?;
                 let remaining = deadline.remaining()?;
+                let attempt_started = Instant::now();
                 match self
                     .transport
                     .execute(
@@ -238,6 +245,26 @@ where
                         break;
                     }
                     Err(error) => {
+                        // Some origins close conditional requests before sending
+                        // headers. Cache validators are an optimization: retry a
+                        // body-free GET once without them, within this same
+                        // deadline/worker attempt. Re-enter URL/DNS validation;
+                        // never replay a response body or mutation precondition.
+                        if error.kind == "response_incomplete_before_headers"
+                            && !recovered_cache_validation
+                            && can_retry_cache_validation(request)
+                        {
+                            self.observer.completed(ExternalRequestCompletion {
+                                system: "public_web",
+                                operation: "conditional_cache_recovery",
+                                outcome: ExternalRequestOutcome::Failed,
+                                elapsed: attempt_started.elapsed(),
+                            });
+                            request.headers.remove(header::IF_NONE_MATCH);
+                            request.headers.remove(header::IF_MODIFIED_SINCE);
+                            recovered_cache_validation = true;
+                            continue 'request;
+                        }
                         if !matches!(request.method, Method::GET | Method::HEAD) {
                             return Err(OutboundError::Transport { kind: error.kind });
                         }
@@ -265,6 +292,21 @@ where
             return Ok(response);
         }
     }
+}
+
+fn can_retry_cache_validation(request: &PreparedRequest) -> bool {
+    request.method == Method::GET
+        && request.body.is_none()
+        && (request.headers.contains_key(header::IF_NONE_MATCH)
+            || request.headers.contains_key(header::IF_MODIFIED_SINCE))
+        && ![
+            header::RANGE,
+            header::IF_RANGE,
+            header::IF_MATCH,
+            header::IF_UNMODIFIED_SINCE,
+        ]
+        .iter()
+        .any(|name| request.headers.contains_key(name))
 }
 
 pub struct OutboundResponseStream<'a> {

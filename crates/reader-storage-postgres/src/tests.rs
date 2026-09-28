@@ -81,7 +81,7 @@ fn durable_job_ids_are_stable_and_include_the_complete_identity() {
 fn schema_has_one_concrete_source_of_truth() {
     assert_eq!(
         SCHEMA_SQL.matches("CREATE TABLE IF NOT EXISTS ").count(),
-        36
+        37
     );
     for obsolete in [
         "reader_documents",

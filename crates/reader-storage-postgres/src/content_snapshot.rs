@@ -18,7 +18,7 @@ pub(crate) async fn read(
 ) -> Result<Option<ContentSnapshot>, sqlx::Error> {
     let row: Option<SnapshotRow> = sqlx::query_as(
         "SELECT m.id,m.document,c.ordinals,c.chunks
-         FROM library_origins o JOIN subscriptions s ON s.id=o.subscription_id
+         FROM library_origins o JOIN article_subscription_provenance s ON s.id=o.subscription_id
          JOIN content_manifests m ON m.id=o.source_record_id
          LEFT JOIN LATERAL (SELECT array_agg(ordinal ORDER BY ordinal) AS ordinals, array_agg(bytes ORDER BY ordinal) AS chunks FROM staged_content_chunks WHERE record_id=m.id AND refresh_id=m.document::jsonb->>'refresh_id' AND representation='safe') c ON true
          WHERE o.workspace_id=$1 AND o.article_id=$2 AND s.document::jsonb->>'workspace_id'=$1

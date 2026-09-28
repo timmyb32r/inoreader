@@ -1,3 +1,7 @@
+#[path = "built_in_adapters/dropbox.rs"]
+pub(crate) mod dropbox;
+#[path = "built_in_adapters/telegram.rs"]
+mod telegram;
 use crate::{
     BrowserHttpClient, BuiltInAdapter, FetchError, SourceDefinition, SourceKind, SourceRecord,
 };
@@ -30,6 +34,8 @@ impl BuiltInAdapterCollector {
             BuiltInAdapter::Cloudera { listing_url } => self.cloudera(source, listing_url).await,
             BuiltInAdapter::Digoal { listing_url } => self.digoal(source, listing_url).await,
             BuiltInAdapter::Mirrorship => self.mirrorship(source).await,
+            BuiltInAdapter::Dropbox => self.dropbox(source).await,
+            BuiltInAdapter::Telegram { max_pages } => self.telegram(source, max_pages.get()).await,
             BuiltInAdapter::Pingkai { listing_url } => self.pingkai(source, listing_url).await,
             BuiltInAdapter::ModbNews => self.modb(source).await,
             BuiltInAdapter::InfoqBigdata => self.infoq(source).await,

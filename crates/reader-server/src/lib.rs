@@ -162,9 +162,15 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         )
         .route(
             "/api/subscriptions/{id}",
-            get(get_subscription::<R>)
-                .patch(rename_subscription::<R>)
-                .delete(unsubscribe::<R>),
+            get(get_subscription::<R>).patch(rename_subscription::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/delete",
+            post(delete_subscription::<R>),
+        )
+        .route(
+            "/api/subscriptions/{id}/archive",
+            post(archive_subscription::<R>),
         )
         .route(
             "/api/subscriptions/{id}/note",

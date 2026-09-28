@@ -1,0 +1,24 @@
+.subscription-lifecycle-summary {
+  min-height: 130px;
+}
+.subscription-lifecycle-summary p {
+  color: var(--text-muted);
+}
+.subscription-lifecycle-status {
+  height: 64px;
+  overflow: auto;
+  color: var(--text);
+}
+.subscription-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.subscription-row-actions button {
+  min-width: 70px;
+}
+.subscription-lifecycle-status + .modal-actions button {
+  position: relative;
+  min-width: 130px;
+  height: 40px;
+}

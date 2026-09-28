@@ -472,3 +472,5 @@ async fn credential_in_path_origin_restriction_checks_every_redirect_before_tran
         assert_eq!(observed[0].operation, "getUpdates");
     }
 }
+
+mod conditional;

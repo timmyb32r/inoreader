@@ -237,6 +237,9 @@ impl crate::RuleRepository for Repository {
 
 #[async_trait::async_trait]
 impl crate::SubscriptionRepository for Repository {
+    async fn delete_subscription(&self, _: &Subscription) -> Result<(), RepositoryError> {
+        Err(RepositoryError::NotFound)
+    }
     async fn subscription(&self, id: SubscriptionId) -> Result<Subscription, RepositoryError> {
         if id == self.subscription.id() {
             Ok(self.subscription.clone())

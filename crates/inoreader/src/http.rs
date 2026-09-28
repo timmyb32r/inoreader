@@ -12,4 +12,4 @@ impl ExternalRequestObserver for RequestObserver {
 }
 
 pub(super) type ProductionFetcher =
-    SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>;
+    SecureWebFetcher<TokioDnsResolver, PublicFetchTransport, RequestObserver>;

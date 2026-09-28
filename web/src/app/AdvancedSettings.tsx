@@ -49,14 +49,14 @@ export function AdvancedSettings({
     ),
     [username, setUsername] = useState(""),
     [pending, setPending] = useState(false),
-    [confirmUnsubscribe, setConfirmUnsubscribe] = useState(false),
+    [confirmArchive, setConfirmArchive] = useState(false),
     [message, setMessage] = useState("");
   const pendingRef = useRef(false);
   const selection = useRef(selectedSubscription?.id);
   selection.current = selectedSubscription?.id;
   useEffect(() => {
     setSubscriptionName(selectedSubscription?.name ?? "");
-    setConfirmUnsubscribe(false);
+    setConfirmArchive(false);
     setMessage("");
   }, [selectedSubscription?.id, selectedSubscription?.name]);
   const run = <T,>(work: () => Promise<T>, done: (value: T) => void) => {
@@ -255,26 +255,27 @@ export function AdvancedSettings({
                     class="settings-action"
                     disabled={pending}
                     onClick={() => {
-                      if (!confirmUnsubscribe) {
-                        setConfirmUnsubscribe(true);
+                      if (!confirmArchive) {
+                        setConfirmArchive(true);
                         setMessage(
-                          "Choose Unsubscribe again to confirm. Existing articles and full text stay in your library.",
+                          "Choose Archive again to confirm. Existing articles and full text stay in your library.",
                         );
                         return;
                       }
                       run(
-                        () => client.unsubscribe(selectedSubscription.id),
+                        () =>
+                          client.archiveSubscription(selectedSubscription.id),
                         (value) => {
                           onSubscription(value);
                           setMessage(
-                            "Unsubscribed. Existing articles and full text remain available.",
+                            "Archived. Existing articles and full text remain available.",
                           );
                         },
                       );
                     }}
                   >
                     <Icon name="archive" />
-                    {confirmUnsubscribe ? "Confirm unsubscribe" : "Unsubscribe"}
+                    {confirmArchive ? "Confirm archive" : "Archive"}
                   </button>
                 </>
               )}

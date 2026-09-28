@@ -119,8 +119,22 @@ impl PostgresIngestStore {
         let Some(row) = row else {
             return Err(StoreError::StaleLease);
         };
+        let item: WorkItem = decode(row.try_get("item").map_err(storage)?)?;
+        // Retry exhaustion ends this attempt cycle, not the subscription's
+        // periodic collection. Retain its diagnostic until a successful fetch.
+        if status == "failed" && is_recurring(&item) {
+            let next_run = millis(Utc::now() + self.poll_interval).max(run_at.unwrap_or(i64::MIN));
+            sqlx::query(
+                "UPDATE ingest_jobs SET status='ready',run_at_ms=$2,first_attempt_ms=$2,
+                 attempt=0,lease_token=NULL,lease_deadline_ms=NULL WHERE id=$1",
+            )
+            .bind(job.as_uuid().to_string())
+            .bind(next_run)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage)?;
+        }
         if let Some(diagnostic) = diagnostic {
-            let item: WorkItem = decode(row.try_get("item").map_err(storage)?)?;
             if let Some(source) = work_source(&item) {
                 record_source_failure(&mut tx, source, diagnostic).await?;
             }
@@ -590,8 +604,9 @@ impl IngestStore for PostgresIngestStore {
         job: JobId,
         token: LeaseToken,
         diagnostic: &str,
+        not_before: Option<DateTime<Utc>>,
     ) -> Result<(), StoreError> {
-        queue::fail(self, job, token, diagnostic).await
+        queue::fail(self, job, token, diagnostic, not_before).await
     }
 
     async fn source(&self, id: SourceId) -> Result<SourceDefinition, StoreError> {

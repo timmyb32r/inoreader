@@ -57,7 +57,11 @@ export function LatestArticles({
                 class="recent-article-link"
                 onClick={() => onOpenArticles(subscriptionId, article.id)}
               >
-                <strong>{article.title}</strong>
+                <strong>
+                  {article.title || (
+                    <span aria-label="Post has no title">Untitled post</span>
+                  )}
+                </strong>
                 <span>
                   <ArticleDates article={article} />
                   <span> · {article.read ? "Read" : "Unread"}</span>

@@ -82,7 +82,7 @@ it("exposes every account password flow with closed payloads", async () => {
   ]);
 });
 
-it("uses explicit reversible subscription lifecycle routes", async () => {
+it("uses explicit subscription lifecycle routes", async () => {
   const calls: { path: string; method?: string; body: unknown }[] = [];
   const transport: Transport = async <C extends ResponseContract>(
     path: string,
@@ -97,16 +97,18 @@ it("uses explicit reversible subscription lifecycle routes", async () => {
   };
   const client = new ApiClient(transport);
   await client.renameSubscription("sub", "\u6211\u7684\u8ba2\u9605");
-  await client.unsubscribe("sub");
+  await client.archiveSubscription("sub");
   await client.restoreSubscription("sub");
+  await client.deleteSubscription("sub");
   expect(calls).toEqual([
     {
       path: "/api/subscriptions/sub",
       method: "PATCH",
       body: { name: "\u6211\u7684\u8ba2\u9605" },
     },
-    { path: "/api/subscriptions/sub", method: "DELETE", body: undefined },
+    { path: "/api/subscriptions/sub/archive", method: "POST", body: undefined },
     { path: "/api/subscriptions/sub/restore", method: "POST", body: undefined },
+    { path: "/api/subscriptions/sub/delete", method: "POST", body: undefined },
   ]);
 });
 

@@ -19,6 +19,12 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/manual_refresh.rs"]
+mod manual_refresh;
+
+#[path = "support/recurring_recovery.rs"]
+mod recurring_recovery;
+
 #[path = "support/schema_contracts.rs"]
 mod schema_contracts;
 #[path = "support/schema_upgrade.rs"]
@@ -41,6 +47,8 @@ mod bulk_read;
 mod publication;
 #[path = "support/read_projection.rs"]
 mod read_projection;
+#[path = "support/subscription_deletion.rs"]
+mod subscription_deletion;
 
 const POSTGRES_IMAGE: &str =
     "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
@@ -206,7 +214,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 48); // Includes channel raw events and glossary projections.
+    assert_eq!(table_count, 49); // Includes retained subscription provenance.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -267,6 +275,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
         "revision constraint must reject negative values"
     );
 
+    recurring_recovery::verify(&pool).await;
     verify_lease_fencing(&pool).await;
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
@@ -275,6 +284,8 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     glossary_tests::verify(&pool).await;
     bulk_read::verify(&pool).await;
     article_delivery::verify(&pool).await;
+    subscription_deletion::verify(&pool).await;
+    schema_contracts::subscription_upgrade(&pool).await;
     admission::verify(&pool).await;
     browser_tests::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
@@ -419,6 +430,8 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .save_subscription(None, subscription_b.clone())
         .await
         .expect("create second subscription to shared source");
+
+    manual_refresh::verify(pool, &repository, &subscription_a, &subscription_b).await;
 
     verify_publication_history(
         pool,

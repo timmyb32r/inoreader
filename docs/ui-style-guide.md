@@ -63,3 +63,7 @@ The session countdown reserves a fixed-width digital display and two fixed
 control slots in the top bar. Running, paused and finished states never resize
 these slots. Duration editing uses a modal with a reserved validation region.
 Completion pulses only color/shadow; reduced motion uses a static highlight.
+
+Source posts with no authored title keep an empty title in storage and the API.
+Lists show a separate “Untitled post” absence label in the existing heading slot;
+the caption remains the excerpt and is never promoted into a generated title.

@@ -2710,6 +2710,7 @@ dependencies = [
  "chrono",
  "feed-rs",
  "reader-core",
+ "roxmltree",
  "serde",
  "serde_json",
  "thiserror",
@@ -2763,6 +2764,7 @@ dependencies = [
  "encoding_rs",
  "futures-util",
  "http",
+ "httpdate",
  "reader-collectors",
  "reader-core",
  "reader-web-runtime",
@@ -2864,16 +2866,24 @@ name = "reader-web-runtime"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "async-compression",
  "async-trait",
  "bytes",
  "futures-util",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "reqwest 0.12.28",
+ "rustls",
  "scraper",
  "thiserror",
  "tokio",
+ "tokio-rustls",
+ "tokio-util",
  "url",
  "uuid",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]

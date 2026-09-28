@@ -24,7 +24,11 @@ export function ArticleRow({
           {article.sources?.join(" · ") ?? article.source}
         </span>
         <ArticleDates article={article} />
-        <h2>{article.title}</h2>
+        <h2>
+          {article.title || (
+            <span aria-label="Post has no title">Untitled post</span>
+          )}
+        </h2>
         <p>{article.excerpt}</p>
         <span class={`fulltext fulltext--${article.fullText}`}>
           {article.fullText === "pending" && (

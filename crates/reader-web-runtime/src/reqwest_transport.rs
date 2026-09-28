@@ -104,17 +104,10 @@ impl OutboundTransport for ReqwestPinnedTransport {
         if let Some(body) = &request.body {
             builder = builder.body(body.clone());
         }
-        let response = builder.send().await.map_err(|error| TransportError {
-            kind: if error.is_timeout() {
-                "request_timeout"
-            } else if error.is_connect() {
-                "connect"
-            } else if error.is_body() {
-                "request_body"
-            } else {
-                "request"
-            },
-        })?;
+        let response = builder
+            .send()
+            .await
+            .map_err(|error| classify_error(&error))?;
         let connected_peer = response
             .remote_addr()
             .ok_or(TransportError {
@@ -136,6 +129,34 @@ impl OutboundTransport for ReqwestPinnedTransport {
                 stream: Box::pin(response.bytes_stream()),
             }),
         })
+    }
+}
+
+/// Only used before response headers have been returned to the caller. An
+/// incomplete response body is classified separately and is never replayed.
+fn classify_error(error: &reqwest::Error) -> TransportError {
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if cause
+            .downcast_ref::<hyper::Error>()
+            .is_some_and(hyper::Error::is_incomplete_message)
+        {
+            return TransportError {
+                kind: "response_incomplete_before_headers",
+            };
+        }
+        source = cause.source();
+    }
+    TransportError {
+        kind: if error.is_timeout() {
+            "request_timeout"
+        } else if error.is_connect() {
+            "connect"
+        } else if error.is_body() {
+            "request_body"
+        } else {
+            "request"
+        },
     }
 }
 

@@ -49,13 +49,26 @@ impl Default for LeaseToken {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltInAdapter {
-    Cloudera { listing_url: Url },
-    Digoal { listing_url: Url },
+    Cloudera {
+        listing_url: Url,
+    },
+    Digoal {
+        listing_url: Url,
+    },
     Mirrorship,
-    Pingkai { listing_url: Url },
+    Dropbox,
+    /// Public Telegram history window; empty source title is preserved.
+    Telegram {
+        max_pages: std::num::NonZeroUsize,
+    },
+    Pingkai {
+        listing_url: Url,
+    },
     ModbNews,
     InfoqBigdata,
-    Highgo { max_pages: usize },
+    Highgo {
+        max_pages: usize,
+    },
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 // Recipes are configuration objects, and boxing this branch would complicate
@@ -64,6 +77,9 @@ pub enum BuiltInAdapter {
 pub enum SourceKind {
     Auto,
     XmlFeed,
+    /// Operator-selected RSS policy; only byte-identical repeated items coalesce.
+    /// Never selected by URL discovery or used as the default feed kind.
+    RssCoalesceIdentical,
     JsonFeed,
     WebPage(WebFeedRecipe),
     BuiltIn(BuiltInAdapter),
@@ -75,16 +91,52 @@ pub use reader_core::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "SourceDefinitionDraft")]
 pub struct SourceDefinition {
     id: SourceId,
     url: Url,
     kind: SourceKind,
     revision: u64,
 }
+#[derive(Deserialize)]
+struct SourceDefinitionDraft {
+    id: SourceId,
+
+    url: Url,
+
+    kind: SourceKind,
+
+    revision: u64,
+}
+impl TryFrom<SourceDefinitionDraft> for SourceDefinition {
+    type Error = ModelError;
+    fn try_from(raw: SourceDefinitionDraft) -> Result<Self, Self::Error> {
+        let mut source = Self::new(raw.id, raw.url, raw.kind)?;
+        source.revision = raw.revision;
+        Ok(source)
+    }
+}
 impl SourceDefinition {
     pub fn new(id: SourceId, url: Url, kind: SourceKind) -> Result<Self, ModelError> {
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
             return Err(ModelError::InvalidSourceUrl);
+        }
+        if matches!(kind, SourceKind::BuiltIn(BuiltInAdapter::Telegram { .. })) {
+            let channel = url.path().trim_matches('/');
+            if url.scheme() != "https"
+                || url.host_str() != Some("t.me")
+                || channel.is_empty()
+                || !channel
+                    .bytes()
+                    .all(|v| v.is_ascii_alphanumeric() || v == b'_')
+                || url.query().is_some()
+                || url.fragment().is_some()
+                || url.port().is_some()
+                || !url.username().is_empty()
+                || url.password().is_some()
+            {
+                return Err(ModelError::InvalidSourceUrl);
+            }
         }
         Ok(Self {
             id,
@@ -215,6 +267,32 @@ impl SourceRecord {
             record: next,
             effect,
         })
+    }
+
+    /// Explicit Dropbox archive update: listing HTML supplies title and a day,
+    /// not RSS description/body or timestamp precision. Retain those existing
+    /// fields verbatim. Missing old dates may be filled by the authored day;
+    /// contradictory days fail before any record is committed. Other adapters
+    /// continue using complete replacement through `revise_from_record`.
+    pub(crate) fn revise_from_dropbox_listing(
+        &self,
+        mut value: SourceRecord,
+    ) -> Result<RecordRevision, ModelError> {
+        if self
+            .published_at
+            .as_ref()
+            .zip(value.published_at.as_ref())
+            .is_some_and(|(old, new)| old.day() != new.day())
+        {
+            return Err(ModelError::DropboxPublicationDayConflict);
+        }
+        value.key.description = self.key.description.clone();
+        value.description_media_type = self.description_media_type.clone();
+        value.feed_content_html = self.feed_content_html.clone();
+        if self.published_at.is_some() {
+            value.published_at = self.published_at.clone();
+        }
+        self.revise_from_record(value)
     }
 
     /// Reconciles collector output by stable upstream identity. Web collectors
@@ -451,6 +529,8 @@ pub enum BrowserCapability {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ModelError {
+    #[error("Dropbox archive day conflicts with the retained publication date")]
+    DropboxPublicationDayConflict,
     #[error("source URL must be an absolute HTTP(S) URL")]
     InvalidSourceUrl,
     #[error("upstream identity must not be empty")]

@@ -49,16 +49,28 @@ pub(super) async fn claim(
         let id: String = row.try_get("id").map_err(storage)?;
         let first_attempt_ms: i64 = row.try_get("first_attempt_ms").map_err(storage)?;
         if retry_age_exceeded(first_attempt_ms, oldest_ms) {
+            let item: WorkItem = decode(row.try_get("item").map_err(storage)?)?;
+            let recurring = is_recurring(&item);
+            let next_run = millis(now + store.poll_interval);
             sqlx::query(
                 "UPDATE ingest_jobs
-                     SET status = 'failed', lease_token = NULL, lease_deadline_ms = NULL,
-                         diagnostic = 'maximum retry age exceeded', revision = revision + 1
-                     WHERE id = $1",
+                 SET status=$2,lease_token=NULL,lease_deadline_ms=NULL,
+                     diagnostic='maximum retry age exceeded',revision=revision+1,
+                     run_at_ms=CASE WHEN $3 THEN $4 ELSE run_at_ms END,
+                     first_attempt_ms=CASE WHEN $3 THEN $4 ELSE first_attempt_ms END,
+                     attempt=CASE WHEN $3 THEN 0 ELSE attempt END
+                 WHERE id=$1",
             )
-            .bind(id)
+            .bind(&id)
+            .bind(if recurring { "ready" } else { "failed" })
+            .bind(recurring)
+            .bind(next_run)
             .execute(&mut *tx)
             .await
             .map_err(storage)?;
+            if let Some(source) = work_source(&item) {
+                record_source_failure(&mut tx, source, "maximum retry age exceeded").await?;
+            }
             continue;
         }
         let origin: String = row.try_get("origin_key").map_err(storage)?;
@@ -156,8 +168,16 @@ pub(super) async fn fail(
     job: JobId,
     token: LeaseToken,
     diagnostic: &str,
+    not_before: Option<DateTime<Utc>>,
 ) -> Result<(), StoreError> {
     store
-        .lease_update(job, token, "failed", None, None, Some(diagnostic))
+        .lease_update(
+            job,
+            token,
+            "failed",
+            None,
+            not_before.map(millis),
+            Some(diagnostic),
+        )
         .await
 }

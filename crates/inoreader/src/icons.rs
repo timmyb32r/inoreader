@@ -3,7 +3,7 @@ use super::*;
 
 pub(super) async fn refresh(
     pool: sqlx::PgPool,
-    fetcher: Arc<SecureWebFetcher<TokioDnsResolver, ReqwestPinnedTransport, RequestObserver>>,
+    fetcher: Arc<ProductionFetcher>,
     concurrency: usize,
     batch: usize,
     stop: &mut reader_runtime::Shutdown,

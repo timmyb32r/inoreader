@@ -17,6 +17,7 @@ export function SubscriptionsPage({
   onRefresh,
   onPause,
   onChanged,
+  onRemoved,
   onEditRecipe,
   onDirtyNoteChange,
 }: {
@@ -32,6 +33,7 @@ export function SubscriptionsPage({
   onRefresh: (id: string) => Promise<void>;
   onPause: (id: string) => void;
   onChanged?: (item: Subscription) => void;
+  onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
   onDirtyNoteChange?: (dirty: boolean) => void;
 }) {
@@ -97,6 +99,7 @@ export function SubscriptionsPage({
               onRefresh,
               onPause,
               onChanged,
+              onRemoved,
               onEditRecipe,
               onDirtyNoteChange,
             }}
@@ -115,6 +118,7 @@ export function SubscriptionsPage({
                 onPause,
                 onOpenDetail,
                 onChanged,
+                onRemoved,
               }}
             />
           </div>

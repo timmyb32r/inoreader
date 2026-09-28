@@ -107,7 +107,19 @@ async fn fetch<R: DnsResolver, T: OutboundTransport, O: ExternalRequestObserver>
         .map_err(|error| FetchError::Rejected(error.to_string()))?;
     let not_modified = response.status == http::StatusCode::NOT_MODIFIED;
     if !response.status.is_success() && !not_modified {
-        return Err(FetchError::Http(response.status.as_u16()));
+        let status = response.status.as_u16();
+        if matches!(status, 429 | 503) {
+            if let Some(value) = response.headers.get(header::RETRY_AFTER) {
+                let value = value
+                    .to_str()
+                    .map_err(|_| FetchError::Rejected("invalid_retry_after".into()))?;
+                return Err(FetchError::RetryAfter {
+                    status,
+                    not_before: retry_after(value, chrono::Utc::now())?,
+                });
+            }
+        }
+        return Err(FetchError::Http(status));
     }
     let content_type = response
         .headers
@@ -134,3 +146,25 @@ async fn fetch<R: DnsResolver, T: OutboundTransport, O: ExternalRequestObserver>
         not_modified,
     })
 }
+
+/// A valid server cooldown is never shortened, including across attempt exhaustion.
+/// Reject unrepresentable values rather than overflowing or silently capping them.
+fn retry_after(
+    value: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<chrono::DateTime<chrono::Utc>, FetchError> {
+    let invalid = || FetchError::Rejected("invalid_retry_after".into());
+    if value.bytes().all(|v| v.is_ascii_digit()) && !value.is_empty() {
+        let seconds = value.parse::<i64>().map_err(|_| invalid())?;
+        let delay = chrono::Duration::try_seconds(seconds).ok_or_else(invalid)?;
+        now.checked_add_signed(delay).ok_or_else(invalid)
+    } else {
+        httpdate::parse_http_date(value)
+            .map(chrono::DateTime::<chrono::Utc>::from)
+            .map_err(|_| invalid())
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/retry_after.rs"]
+mod retry_after_tests;

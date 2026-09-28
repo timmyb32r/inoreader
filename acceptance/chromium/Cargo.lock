@@ -790,6 +790,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hyper"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1493,6 +1499,7 @@ dependencies = [
  "chrono",
  "feed-rs",
  "reader-core",
+ "roxmltree",
  "serde",
  "serde_json",
  "thiserror",
@@ -1523,6 +1530,7 @@ dependencies = [
  "encoding_rs",
  "futures-util",
  "http",
+ "httpdate",
  "reader-collectors",
  "reader-core",
  "reader-web-runtime",
@@ -1541,16 +1549,24 @@ name = "reader-web-runtime"
 version = "0.1.0"
 dependencies = [
  "ammonia",
+ "async-compression",
  "async-trait",
  "bytes",
  "futures-util",
  "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "reqwest 0.12.28",
+ "rustls",
  "scraper",
  "thiserror",
  "tokio",
+ "tokio-rustls",
+ "tokio-util",
  "url",
  "uuid",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1674,6 +1690,12 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rustc-hash"

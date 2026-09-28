@@ -1,3 +1,4 @@
+import { useSubscriptionLifecycle } from "./useSubscriptionLifecycle";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type {
   ApiClient,
@@ -30,6 +31,7 @@ export function SubscriptionDetails({
   onRefresh,
   onPause,
   onChanged,
+  onRemoved,
   onEditRecipe,
   onDirtyNoteChange,
 }: {
@@ -44,6 +46,7 @@ export function SubscriptionDetails({
   onRefresh: (id: string) => Promise<void>;
   onPause: (id: string) => void;
   onChanged?: (item: Subscription) => void;
+  onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
   onDirtyNoteChange?: (dirty: boolean) => void;
 }) {
@@ -56,7 +59,6 @@ export function SubscriptionDetails({
     [savedNote, setSavedNote] = useState(summary?.personalNote ?? ""),
     [saving, setSaving] = useState(false),
     [refreshing, setRefreshing] = useState(false),
-    [restoring, setRestoring] = useState(false),
     [error, setError] = useState(""),
     [activity, setActivity] = useState<SubscriptionActivity[] | null>(null),
     [activityLoading, setActivityLoading] = useState(false),
@@ -71,6 +73,15 @@ export function SubscriptionDetails({
     [newUrl, setNewUrl] = useState(summary?.sourceUrl ?? ""),
     [urlPreview, setUrlPreview] = useState<SourceUrlPreview | null>(null),
     [urlPending, setUrlPending] = useState(false);
+  const lifecycle = useSubscriptionLifecycle(
+    client,
+    (item) => {
+      setDetail((old) => (old ? { ...old, ...item } : item));
+      onChanged?.(item);
+    },
+    onRemoved,
+    onBack,
+  );
   const noteEdited = useRef(false);
   const dirty = note !== savedNote;
   useEffect(() => {
@@ -178,6 +189,7 @@ export function SubscriptionDetails({
   };
   return (
     <section class="subscriptions-page detail-page">
+      {lifecycle.dialog}
       <header class="entity-header">
         <div>
           <button class="text-button" onClick={onBack}>
@@ -194,23 +206,10 @@ export function SubscriptionDetails({
         <div class="entity-actions">
           {detail.status === "archived" ? (
             <button
-              class="primary-button"
-              disabled={restoring}
-              aria-busy={restoring}
-              onClick={() => {
-                if (restoring) return;
-                setRestoring(true);
-                client
-                  .restoreSubscription(detail.id)
-                  .then((item) => {
-                    setDetail((old) => (old ? { ...old, ...item } : old));
-                    onChanged?.(item);
-                  })
-                  .catch((e) => setError(e.message))
-                  .finally(() => setRestoring(false));
-              }}
+              class="secondary-button"
+              onClick={() => lifecycle.open("restore", [detail])}
             >
-              {restoring ? "Restoring…" : "Restore subscription"}
+              Restore subscription
             </button>
           ) : (
             <>
@@ -232,6 +231,20 @@ export function SubscriptionDetails({
               </button>
             </>
           )}
+          {detail.status !== "archived" && (
+            <button
+              class="secondary-button"
+              onClick={() => lifecycle.open("archive", [detail])}
+            >
+              Archive
+            </button>
+          )}
+          <button
+            class="secondary-button"
+            onClick={() => lifecycle.open("delete", [detail])}
+          >
+            Delete
+          </button>
         </div>
       </header>
       <nav class="entity-tabs" aria-label="Subscription details">

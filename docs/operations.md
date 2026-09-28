@@ -33,7 +33,7 @@ journal is `schema_releases`; `prepare-schema` never upgrades an occupied databa
 
 For this release, add a positive `ai.recovery_batch` (example: 32) to configurations
 with AI enabled. Build and validate the candidate first. Before upgrading an existing
-unversioned installation, stop/drain the application, retain its image/config/master
+installation (unversioned or release 1), stop/drain the application, retain its image/config/master
 key, create a fresh backup, and restore it to a separate database. Run the candidate's
 `upgrade-schema` against that restored database and compare counts, exact content
 bytes, and original AI document/input strings. Only after that rehearsal succeeds,
@@ -43,7 +43,9 @@ run the same explicit command against production and start the matching image:
 docker compose run --rm --no-deps app --config /etc/inoreader/config.yaml upgrade-schema
 ```
 
-The command converts JSON byte arrays to BYTEA and builds validated public chat
+For release 1, the command adds `removed_subscriptions` and the article provenance
+view, then records release 2; existing rows are not rewritten. For unversioned
+installations, the command also converts JSON byte arrays to BYTEA and builds validated public chat
 projections in one transaction. It refuses a second upgrade or invalid historical
 data. Failed conversion leaves the old schema/data intact. Do not run the underlying
 SQL file standalone: the native command owns the full atomic upgrade. Rollback
@@ -174,3 +176,151 @@ set before upgrading. Configure `server.graceful_shutdown_seconds: 700` and
 `CONTAINER_STOP_GRACE_SECONDS=720` (Compose default); startup rejects insufficient
 budgets for admitted two-stage AI work. Larger configured AI leases require larger
 application and container budgets too.
+
+### Source collection recovery
+
+`retry_attempts` and `max_retry_age_seconds` bound one collection attempt cycle.
+Exhausting either budget on a recurring `PollSource` or `CollectWebFeed` schedules
+a fresh cycle after `scheduler.polling_interval_seconds`, resetting its attempt
+counter and cycle age. The failed diagnostic and source health remain visible
+until a successful collection. One-shot work (including manual refresh, full-text
+extraction and deliveries) still becomes failed on exhaustion; it is not silently
+replayed forever. A paused source is not fetched even when its periodic job wakes.
+
+HTTP backoff starts when the failed request finishes, rather than when its queue
+lease was claimed. For HTTP 429/503, the shared secure fetcher retains `Retry-After`
+(delta seconds or HTTP date). Both retries and the next recurring cycle respect
+that minimum time. Invalid or unrepresentable cooldowns fail explicitly; there is
+no silent cap. Browser navigation errors currently do not expose response headers
+through their collector contract, so this header handling applies to the direct
+secure HTTP fetch path.
+
+Existing failed recurring jobs need an explicit recovery/requeue after deploying
+this fix. Scope that operation to the intended user's subscriptions and sources;
+do not reset unrelated users' jobs or clear source health to make errors disappear.
+For each recovered source, verify a successful collection and a future scheduled
+job, not just an HTTP 200 response. XML/HTML parsing and card identity validation
+can still fail after a successful HTTP fetch.
+
+### Explicit public-fetch proxy routes
+
+`http.public_proxy_routes` is an empty list by default (also when omitted): public
+requests stay direct. Each route groups exact destination hosts with its own ordered
+HTTP CONNECT endpoint pool. Configure only tested public literal proxy IP/ports:
+
+```yaml
+http:
+  # Other required HTTP settings remain unchanged.
+  public_proxy_routes:
+    - target_hosts: [aws.amazon.com, medium.com]
+      endpoints: ["35.207.254.58:8899"]
+      max_connect_header_bytes: 8192
+      endpoint_attempt_timeout_ms: 8000
+      quarantine_ms: 60000
+    - target_hosts: [dbconvert.com]
+      endpoints: ["193.37.71.46:10808", "37.114.41.103:3128"]
+      max_connect_header_bytes: 8192
+      endpoint_attempt_timeout_ms: 15000
+      quarantine_ms: 60000
+```
+
+These endpoints are diagnostic examples, not guaranteed services. Revalidate them
+from the deployed server before enabling them. A host may appear in only one route;
+the same endpoint may serve several disjoint host groups. Separate pools allow an
+operator to exclude endpoints known to reject one publisher without changing other
+hosts or treating HTTP errors as a reason to rotate. Public proxies can
+observe target IPs and traffic timing; HTTPS certificate verification remains
+mandatory and protects response content. Proxy configuration is an explicit trust
+decision, restricted to the named public destinations. Subdomains and redirect
+hosts are not implicitly included. Do not send account cookies or credentials.
+
+Configuration validation rejects empty route entries, duplicate/invalid hostnames
+within or across routes, non-public proxy addresses, zero ports, and invalid CONNECT
+header limits before
+network I/O. The public transport is shared by feed/full-text fetches, browser
+page requests and icons. AI and Telegram Bot API requests keep their separate
+direct transport. Per-hop URL/DNS/IP validation and original-host TLS validation
+remain active through the proxy; the remote proxy is not trusted to resolve the
+original hostname. Sensitive/custom headers and bodies are not forwarded through
+this route. The endpoint attempt timeout must be positive and no greater than the overall
+HTTP request timeout. The quarantine interval must also be positive; both fields
+are required whenever a proxy pool is enabled. Duplicate endpoints are rejected.
+The attempt budget includes CONNECT, TLS, HTTP headers and the complete streamed
+body; the original overall deadline still bounds all endpoints and redirects.
+
+Transport failures quarantine only the failing **target host + endpoint** pair.
+Other hosts can continue using that endpoint. Healthy endpoints are preferred to
+untested ones, and active quarantines are skipped. After `quarantine_ms`, the next
+real request may claim one recovery probe; concurrent requests cannot claim the
+same probe. If it fails, a healthy endpoint is tried before other expired
+quarantines. Normal recurring source polls provide periodic recovery opportunities;
+there is no synthetic background traffic and the configured pool never grows.
+Each endpoint is attempted at most once per authorized destination-IP attempt.
+Health is shared by feed, browser and icon transport clones in this process and
+is reset on restart. An entirely quarantined pool fails explicitly without
+connecting; later scheduled work retries after eligibility returns.
+
+Any origin HTTP status, including 403, 429, 503 and Retry-After, is returned directly;
+it never causes proxy rotation. A body failure remains visible to the caller and
+never splices or replays content from another endpoint. An interrupted successful
+body quarantines its pair; an HTTP error body's failure does not turn the received
+status into evidence against the endpoint. Caller cancellation releases a recovery
+probe without manufacturing a transport failure. TLS, DNS/IP checks and redirect
+policy stay unchanged. No implicit direct fallback or proxy discovery is enabled.
+
+Shared external-request diagnostics use system `public_proxy` with operations
+`quarantine_probe`, `endpoint_quarantined` and `endpoint_attempt`. They contain
+stable classifications/timings only, never source URLs, headers or secret data.
+The enclosing HTTP request continues reporting its complete logical duration.
+
+### Explicit identical RSS repeats
+
+`SourceKind::RssCoalesceIdentical` is an operator-selected policy, never inferred
+from a URL and never the default. It applies to UTF-8 RSS with one channel.
+Complete original `<item>` bytes (including metadata outside the reader's field
+projection) must match for repeated upstream IDs. The first occurrence and original
+order are retained; differing repeats reject the entire poll before writes. The
+`feed_identical_repeats` diagnostic records the source ID and number coalesced.
+Existing upstream IDs, article IDs, read state and content are not rewritten.
+The user approved this policy specifically for their Yandex Cloud subscription;
+other subscriptions retain strict duplicate rejection.
+
+Lease renewal and collection commits must be polled concurrently. A commit holds
+its leased queue row while publishing source records; renewal can block on that
+row from another connection. Awaiting renewal inside a selected heartbeat branch
+suspends the very commit needed to release its lock. The worker therefore selects
+between the entire renewal loop and the entire work future, dropping the other
+future when either finishes. SQLx transaction drop rolls back cancelled work.
+An `idle in transaction` application session after `INSERT source_records` with a
+renewal waiting on the same queue row is a diagnostic signature of this deadlock.
+
+### Public Telegram post adapter
+
+`BuiltIn.telegram.max_pages` explicitly selects a bounded public-history window
+(positive page count). The source URL must be exactly an HTTPS `t.me/<channel>`
+URL. The adapter fetches `/s/<channel>` and follows only that channel's numeric
+`before` cursor. Message permalinks are identities; edits preserve the identity.
+
+Telegram posts do not have authored article titles. This adapter deliberately
+persists an empty title and keeps the full caption in description/body. Photo-only
+posts are retained. Original message-bubble markup is retained; the selected
+adapter explicitly adds `img` elements for Telegram's CSS-background photos and
+exact media-URL links for audio/video tags that the shared safe renderer omits.
+Raw content remains stored separately from sanitized display content. Unsupported
+Telegram labels are preserved, never filtered away as empty posts.
+
+Full-text jobs for this adapter publish the stored post body for the exact source
+revision. They never fetch the public permalink's Telegram application landing
+page and never run article readability extraction over a social post. Other
+providers retain their existing full-text-fetch behavior. Existing subscriptions
+keep their IDs when an operator selects this adapter.
+
+For rate-limited public sources, `scheduler.rate_limit_retry_seconds` sets a
+positive minimum delay for HTTP 429 (example:300 seconds).
+`scheduler.retry_jitter_seconds` spreads jobs within `[0, configured value)` using
+stable job-ID offsets; zero explicitly disables jitter. The delay starts after
+the response. A longer server `Retry-After` wins. Attempt exhaustion passes the
+same minimum timestamp to recurring recovery, so starting a fresh cycle cannot
+shorten the cooldown. Scheduler duration ranges and the combined retry/jitter
+budget are validated before startup conversions; unsupported values fail rather
+than wrapping signed seconds or panicking in chrono.

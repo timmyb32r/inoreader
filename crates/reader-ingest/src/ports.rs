@@ -26,6 +26,11 @@ pub enum FetchError {
     Rejected(String),
     #[error("remote server returned HTTP {0}")]
     Http(u16),
+    #[error("remote server returned HTTP {status}; retry after {not_before}")]
+    RetryAfter {
+        status: u16,
+        not_before: DateTime<Utc>,
+    },
 }
 
 #[async_trait]
@@ -107,8 +112,13 @@ pub trait IngestStore: Send + Sync {
         run_at: DateTime<Utc>,
         diagnostic: &str,
     ) -> Result<(), StoreError>;
-    async fn fail(&self, job: JobId, token: LeaseToken, diagnostic: &str)
-        -> Result<(), StoreError>;
+    async fn fail(
+        &self,
+        job: JobId,
+        token: LeaseToken,
+        diagnostic: &str,
+        not_before: Option<DateTime<Utc>>,
+    ) -> Result<(), StoreError>;
     async fn source(&self, id: SourceId) -> Result<SourceDefinition, StoreError>;
     async fn has_committed_poll(&self, source: SourceId) -> Result<bool, StoreError>;
     async fn source_validators(&self, source: SourceId) -> Result<CacheValidators, StoreError>;

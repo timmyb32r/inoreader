@@ -56,13 +56,26 @@ pub(super) async fn deliver(
     let workspace_id = commit.target.workspace_id;
     let workspace = workspace_id.as_uuid().to_string();
     let subscription = commit.target.subscription_id.as_uuid().to_string();
-    let sub_document: String =
-        sqlx::query_scalar("SELECT document FROM subscriptions WHERE id = $1 FOR UPDATE")
+    let sub_document: Option<String> =
+        sqlx::query_scalar("SELECT document FROM subscriptions WHERE id=$1 FOR UPDATE")
             .bind(&subscription)
             .fetch_optional(&mut *tx)
             .await
-            .map_err(storage)?
-            .ok_or(StoreError::NotFound)?;
+            .map_err(storage)?;
+    let Some(sub_document) = sub_document else {
+        let removed: Option<String> =
+            sqlx::query_scalar("SELECT document FROM removed_subscriptions WHERE id=$1")
+                .bind(&subscription)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage)?;
+        let removed: Subscription = decode(&removed.ok_or(StoreError::NotFound)?)?;
+        if removed.workspace_id() != workspace_id {
+            return Err(StoreError::NotFound);
+        }
+        tx.commit().await.map_err(storage)?;
+        return Ok(DeliveryResult::SkippedInactive);
+    };
     let sub_value: Subscription = decode(&sub_document)?;
     let workspace_document: String =
         sqlx::query_scalar("SELECT document FROM workspaces WHERE id = $1 FOR UPDATE")

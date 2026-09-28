@@ -114,3 +114,42 @@ current article identity/history, durable backfill, atomic content snapshots,
 typed recipe/transport boundaries, graceful AI drain and bounded maintenance work.
 
 See [current execution/storage contracts](architecture/contracts-2026-09-27.md) for bounded recovery, schema versions, binary chunks, public AI projections, command ownership and graph guards.
+
+### Conditional GET recovery
+
+A body-free GET with `If-None-Match` or `If-Modified-Since` may retry once without
+those cache validators if the transport positively classifies an incomplete HTTP
+response **before response headers are returned**. This handles origins such as
+DATAREON that close conditional requests without replying. The retry stays inside
+the original overall request deadline and worker attempt, repeats URL/DNS/public
+address validation, and retains the existing redirect protections. Range requests,
+mutation preconditions (`If-Match`, `If-Unmodified-Since`), request bodies and other
+methods do not qualify. Other transport errors, received HTTP statuses (including
+304, 429 and 503), and incomplete response bodies never trigger this recovery.
+
+The shared external-request observer records the failed conditional attempt as
+`public_web / conditional_cache_recovery`, without URLs, headers or error text.
+The normal completion still reports the entire logical request. No stored cache
+validator or article changes during this transport retry: ingestion commits the
+full successful response under its existing transaction contract. A failed retry
+leaves those records intact for the existing bounded job retry policy. Payload
+bytes, source identity, dates and article ordering are unchanged.
+
+### Subscription lifecycle and retained articles
+
+`POST /api/subscriptions/{id}/archive` archives; `POST .../restore` resumes it.
+`POST /api/subscriptions/{id}/delete` permanently removes only the subscription. A
+transaction locks the current subscription and checks its exact revision/document,
+moves its unchanged document into `removed_subscriptions`, and removes live URL
+reservations and delivery mappings. Articles, origins, source content, reading
+state and AI history are untouched. `article_subscription_provenance` unifies live
+and removed metadata for article rendering; removed IDs are never navigation
+targets or collection subscriptions. In-flight deliveries to removed subscriptions
+are explicitly skipped. Shared sources and other subscribers remain intact.
+
+The confirmation dialog remains open after completion, so disappearing rows cannot
+put another action beneath the pointer. Its status and actions have fixed geometry;
+pending operations lock synchronously and partial retries skip completed items.
+
+The obsolete DELETE route is rejected (405). A stale browser that used DELETE
+for reversible archiving cannot accidentally trigger permanent subscription removal.

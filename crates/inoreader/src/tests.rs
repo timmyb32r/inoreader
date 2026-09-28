@@ -240,3 +240,159 @@ fn recovery_batch_is_required_in_raw_configuration() {
         .remove(serde_yaml::Value::String("recovery_batch".into()));
     assert!(serde_yaml::from_value::<Config>(raw).is_err());
 }
+
+#[test]
+fn public_proxy_routes_default_to_direct_and_validate_before_io() {
+    let config = example();
+    assert!(config.http.public_proxy_routes.is_empty());
+    config.http.public_fetch_transport().unwrap();
+    let route = PublicProxy {
+        target_hosts: vec!["aws.amazon.com".into()],
+        endpoints: vec!["35.207.254.58:8899".parse().unwrap()],
+        max_connect_header_bytes: 8192,
+        endpoint_attempt_timeout_ms: 8000,
+        quarantine_ms: 60000,
+    };
+    let mut config = example();
+    config.http.public_proxy_routes = vec![route.clone()];
+    config.validate().unwrap();
+    for endpoints in [
+        vec![],
+        vec!["127.0.0.1:8080".parse().unwrap()],
+        vec!["35.207.254.58:0".parse().unwrap()],
+        vec!["8.8.8.8:80".parse().unwrap(); 2],
+    ] {
+        config.http.public_proxy_routes = vec![PublicProxy {
+            endpoints,
+            ..route.clone()
+        }];
+        assert!(config.validate().is_err());
+    }
+    for target_hosts in [
+        vec![],
+        vec!["*.amazon.com".into()],
+        vec!["aws.amazon.com/path".into()],
+        vec!["aws.amazon.com".into(), "aws.amazon.com".into()],
+    ] {
+        config.http.public_proxy_routes = vec![PublicProxy {
+            target_hosts,
+            ..route.clone()
+        }];
+        assert!(config.validate().is_err());
+    }
+    config.http.public_proxy_routes = vec![PublicProxy {
+        max_connect_header_bytes: 0,
+        ..route.clone()
+    }];
+    assert!(config.validate().is_err());
+    for (endpoint_attempt_timeout_ms, quarantine_ms) in [
+        (0, 60000),
+        (8000, 0),
+        (config.http.request_timeout_seconds * 1000 + 1, 60000),
+    ] {
+        config.http.public_proxy_routes = vec![
+            route.clone(),
+            PublicProxy {
+                target_hosts: vec!["medium.com".into()],
+                endpoint_attempt_timeout_ms,
+                quarantine_ms,
+                ..route.clone()
+            },
+        ];
+        assert!(config.http.public_fetch_transport().is_err());
+        assert!(config.validate().is_err());
+    }
+}
+
+#[test]
+fn public_proxy_routes_have_disjoint_hosts_and_independent_pools() {
+    let mut config = example();
+    let route = PublicProxy {
+        target_hosts: vec!["aws.amazon.com".into()],
+        endpoints: vec!["8.8.8.8:8080".parse().unwrap()],
+        max_connect_header_bytes: 8192,
+        endpoint_attempt_timeout_ms: 8000,
+        quarantine_ms: 60000,
+    };
+    config.http.public_proxy_routes = vec![
+        route.clone(),
+        PublicProxy {
+            target_hosts: vec!["medium.com".into()],
+            endpoints: vec!["1.1.1.1:3128".parse().unwrap()],
+            ..route.clone()
+        },
+    ];
+    config.validate().unwrap();
+    config.http.public_proxy_routes[1].endpoints = route.endpoints.clone();
+    config.validate().unwrap(); // Shared endpoints are legal; host ownership is not.
+    config.http.public_proxy_routes[1]
+        .target_hosts
+        .push("aws.amazon.com".into());
+    assert!(config.http.public_fetch_transport().is_err());
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn public_proxy_route_wire_configuration_rejects_unknown_or_malformed_fields() {
+    let mut raw: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['user:password@proxy.example:8080']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000").unwrap();
+    assert!(serde_yaml::from_value::<Config>(raw.clone()).is_err());
+    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['35.207.254.58:8899']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000\n  forward_credentials: true").unwrap();
+    assert!(serde_yaml::from_value::<Config>(raw).is_err());
+}
+
+#[test]
+fn omitted_public_proxy_routes_are_direct_but_non_sequences_are_rejected() {
+    let mut raw: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    raw["http"]
+        .as_mapping_mut()
+        .unwrap()
+        .remove(serde_yaml::Value::String("public_proxy_routes".into()));
+    let config: Config = serde_yaml::from_value(raw.clone()).unwrap();
+    assert!(config.http.public_proxy_routes.is_empty());
+    config.validate().unwrap();
+    for value in ["null", "{}", "false", "0", "''"] {
+        raw["http"]["public_proxy_routes"] = serde_yaml::from_str(value).unwrap();
+        assert!(serde_yaml::from_value::<Config>(raw.clone()).is_err());
+    }
+}
+
+#[test]
+fn enabled_public_proxy_routes_require_explicit_health_intervals() {
+    let raw: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+    let proxy: serde_yaml::Value = serde_yaml::from_str("target_hosts: [example.com]\nendpoints: ['8.8.8.8:80']\nmax_connect_header_bytes: 8192\nendpoint_attempt_timeout_ms: 8000\nquarantine_ms: 60000").unwrap();
+    for missing in ["endpoint_attempt_timeout_ms", "quarantine_ms"] {
+        let mut document = raw.clone();
+        let mut incomplete = proxy.clone();
+        incomplete
+            .as_mapping_mut()
+            .unwrap()
+            .remove(serde_yaml::Value::String(missing.into()));
+        document["http"]["public_proxy_routes"] = serde_yaml::Value::Sequence(vec![incomplete]);
+        assert!(serde_yaml::from_value::<Config>(document).is_err());
+    }
+}
+
+#[test]
+fn retry_pacing_seconds_reject_overflow_before_startup_conversions() {
+    for value in [u64::MAX, i64::MAX as u64, 9_000_000_000_000] {
+        let mut config = example();
+        config.scheduler.rate_limit_retry_seconds = value;
+        assert!(config.validate().is_err());
+        let mut config = example();
+        config.scheduler.retry_jitter_seconds = value;
+        assert!(config.validate().is_err());
+        let mut config = example();
+        config.scheduler.lease_seconds = value;
+        assert!(config.validate().is_err());
+    }
+    let mut config = example();
+    config.scheduler.rate_limit_retry_seconds = 0;
+    assert!(config.validate().is_err());
+    let mut config = example();
+    config.scheduler.retry_jitter_seconds = 0;
+    config.validate().unwrap();
+}

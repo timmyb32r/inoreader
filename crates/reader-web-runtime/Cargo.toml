@@ -8,14 +8,22 @@ license.workspace = true
 scraper = "0.24"
 ammonia = "4"
 async-trait = "0.1"
+async-compression = { version = "0.4", features = ["tokio", "gzip", "brotli", "zlib", "zstd"] }
 bytes = "1"
 futures-util = "0.3"
 http = "1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "gzip", "brotli", "deflate", "zstd"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 thiserror = "2"
-tokio = { version = "1", features = ["net", "time"] }
+tokio = { version = "1", features = ["net", "time", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-util = { version = "0.7", features = ["io"] }
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+webpki-roots = "1"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "net"] }

@@ -297,7 +297,7 @@ pub(super) async fn commit_subscription_source_url<R: ReaderRepository + 'static
     let stats = subscription_stats_for(s.repository.as_ref(), &subscription).await?;
     Ok(Json(subscription_view(&subscription, &stats)))
 }
-pub(super) async fn unsubscribe<R: ReaderRepository + 'static>(
+pub(super) async fn archive_subscription<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
@@ -310,4 +310,16 @@ pub(super) async fn unsubscribe<R: ReaderRepository + 'static>(
         .await?;
     let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
     Ok(Json(subscription_view(&value, &stats)))
+}
+
+pub(super) async fn delete_subscription<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, ApiFailure> {
+    csrf(&s, &headers)?;
+    let actor = auth(&s, &headers).await?;
+    let value = owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
+    s.repository.delete_subscription(&value).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -36,11 +36,15 @@ pub(super) async fn serve(
     let observer = RequestObserver {
         format: config.observability.log_format,
     };
+    let public_transport = config
+        .http
+        .public_fetch_transport()?
+        .with_observer(observer);
     let fetcher = Arc::new(SecureWebFetcher::new(
         OutboundHttpClient::new(
             outbound_policy.clone(),
             TokioDnsResolver,
-            ReqwestPinnedTransport,
+            public_transport.clone(),
             observer,
         )
         .with_user_agent(&config.http.user_agent)?,
@@ -54,7 +58,7 @@ pub(super) async fn serve(
         OutboundHttpClient::new(
             outbound_policy,
             TokioDnsResolver,
-            ReqwestPinnedTransport,
+            public_transport,
             observer,
         )
         .with_user_agent(&config.http.user_agent)?,
@@ -130,6 +134,8 @@ pub(super) async fn serve(
         .with_runtime_policy(
             chrono::Duration::seconds(config.scheduler.renew_seconds as i64),
             config.scheduler.retry_attempts,
+            chrono::Duration::seconds(config.scheduler.rate_limit_retry_seconds as i64),
+            chrono::Duration::seconds(config.scheduler.retry_jitter_seconds as i64),
         )?,
     );
     let listener = tokio::net::TcpListener::bind(&config.server.bind).await?;

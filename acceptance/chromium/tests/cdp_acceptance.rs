@@ -52,6 +52,9 @@ impl BrowserHttpClient for FixtureHttp {
                 return Err(FetchError::Rejected("ssrf_destination_blocked".into()));
             }
         }
+        if request.url.path() == "/never-finishes.png" {
+            std::future::pending::<()>().await;
+        }
         let body = self
             .pages
             .get(request.url.host_str().unwrap_or_default())
@@ -242,4 +245,28 @@ async fn long_lived_collector_recovers_after_the_same_container_returns() {
             .len(),
         3
     );
+}
+
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn collection_reads_xpath_dom_without_waiting_for_unrelated_image() {
+    let http = Arc::new(FixtureHttp {
+        requested: Mutex::new(Vec::new()),
+        pages: HashMap::from([("slow-image.test", r#"<!doctype html><html><body>
+          <img src="/never-finishes.png"><a class="card" href="/article/one">One</a>
+          <a class="card" href="/article/two">Two</a></body></html>"#)]),
+    });
+    let recipe = WebFeedRecipe::configured(
+        WebSelector::new(SelectorLanguage::XPath, "//a[@class='card']".into()).unwrap(),
+        WebLoading::Browser,
+        WebFeedActions::new(WebViewport::Desktop, vec![], vec![], None, None, 0, 0, 1, 1).unwrap(),
+        WebExtraction::new(None, None, None, None, None, None, None).unwrap(),
+        1,
+    ).unwrap();
+    let source = SourceDefinition::new(SourceId::new(), Url::parse("https://slow-image.test/").unwrap(), SourceKind::WebPage(recipe)).unwrap();
+    let collector = CdpBrowserCollector::probe(endpoint(), http.clone(), 1, Duration::from_secs(3), 1).await.unwrap();
+    let records = collector.collect(&source).await.expect("DOM collection must not wait for the image load event");
+    assert_eq!(records.len(), 2);
+    assert!(records.iter().any(|record| record.key().title == "One"));
+    assert!(records.iter().any(|record| record.key().title == "Two"));
 }

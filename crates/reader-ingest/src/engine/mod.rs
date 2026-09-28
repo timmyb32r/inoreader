@@ -24,6 +24,8 @@ pub enum IngestError {
     BrowserDegraded,
     #[error("lease duration must be positive")]
     InvalidLeaseDuration,
+    #[error("retry policy durations must be representable, positive delay and nonnegative jitter")]
+    InvalidRetryPolicy,
 }
 
 pub struct IngestWorker<S, F, X, B> {
@@ -35,6 +37,8 @@ pub struct IngestWorker<S, F, X, B> {
     lease_duration: Duration,
     renew_interval: Duration,
     retry_attempts: u32,
+    rate_limit_delay: Duration,
+    retry_jitter: Duration,
 }
 
 impl<S, F, X, B> IngestWorker<S, F, X, B>
@@ -64,12 +68,16 @@ where
             lease_duration,
             renew_interval: lease_duration / 3,
             retry_attempts: u32::MAX,
+            rate_limit_delay: Duration::zero(),
+            retry_jitter: Duration::zero(),
         })
     }
     pub fn with_runtime_policy(
         mut self,
         renew_interval: Duration,
         retry_attempts: u32,
+        rate_limit_delay: Duration,
+        retry_jitter: Duration,
     ) -> Result<Self, IngestError> {
         if renew_interval <= Duration::zero()
             || renew_interval >= self.lease_duration
@@ -77,8 +85,20 @@ where
         {
             return Err(IngestError::InvalidLeaseDuration);
         }
+        if rate_limit_delay <= Duration::zero()
+            || retry_jitter < Duration::zero()
+            || rate_limit_delay
+                .max(Duration::seconds(1024))
+                .checked_add(&retry_jitter)
+                .and_then(|delay| Utc::now().checked_add_signed(delay))
+                .is_none()
+        {
+            return Err(IngestError::InvalidRetryPolicy);
+        }
         self.renew_interval = renew_interval;
         self.retry_attempts = retry_attempts;
+        self.rate_limit_delay = rate_limit_delay;
+        self.retry_jitter = retry_jitter;
         Ok(self)
     }
 
@@ -100,18 +120,61 @@ where
             }
             Err(error) => {
                 let diagnostic = error.diagnostic();
+                let not_before = match &error {
+                    IngestError::Fetch(FetchError::RetryAfter { not_before, .. }) => {
+                        Some(*not_before)
+                    }
+                    _ => None,
+                };
+                let rate_limited = matches!(
+                    &error,
+                    IngestError::Fetch(
+                        FetchError::Http(429) | FetchError::RetryAfter { status: 429, .. }
+                    )
+                );
+                let delay_seconds = 1_i64.checked_shl(lease.attempt.min(10)).unwrap_or(1024);
+                let delay = Duration::seconds(delay_seconds).max(if rate_limited {
+                    self.rate_limit_delay
+                } else {
+                    Duration::zero()
+                });
+                // UUIDs are already random. Use their exact low bits for a stable
+                // per-job offset; no hash or source identity transformation.
+                let spread = self.retry_jitter.num_milliseconds();
+                let jitter = if spread > 0 {
+                    Duration::milliseconds(
+                        (lease.job_id.as_uuid().as_u128() % spread as u128) as i64,
+                    )
+                } else {
+                    Duration::zero()
+                };
+                let retry_at = Utc::now()
+                    .max(now)
+                    .checked_add_signed(delay)
+                    .and_then(|at| at.checked_add_signed(jitter))
+                    .ok_or(IngestError::InvalidLeaseDuration)?
+                    .max(not_before.unwrap_or(now));
                 if lease.attempt.saturating_add(1) >= self.retry_attempts {
                     self.store
-                        .fail(lease.job_id, lease.token, &diagnostic)
+                        .fail(
+                            lease.job_id,
+                            lease.token,
+                            &diagnostic,
+                            if rate_limited {
+                                Some(retry_at)
+                            } else {
+                                not_before
+                            },
+                        )
                         .await?;
                     return Err(error);
                 }
-                let delay_seconds = 1_i64.checked_shl(lease.attempt.min(10)).unwrap_or(1024);
                 self.store
                     .retry(
                         lease.job_id,
                         lease.token,
-                        now + Duration::seconds(delay_seconds),
+                        // Backoff starts after the failed request, not its claim.
+                        retry_at,
                         &diagnostic,
                     )
                     .await?;
@@ -127,14 +190,25 @@ where
             .map_err(|_| IngestError::InvalidLeaseDuration)?;
         let start = tokio::time::Instant::now() + renew_every;
         let mut heartbeat = tokio::time::interval_at(start, renew_every);
-        let mut work = Box::pin(self.handle(lease, Utc::now()));
-        loop {
-            tokio::select! {
-                result = &mut work => return result,
-                _ = heartbeat.tick() => {
-                    self.store.renew(lease.job_id, lease.token, Utc::now() + self.lease_duration).await?;
+        let work = self.handle(lease, Utc::now());
+        // Commit operations hold the leased job row while publishing records.
+        // Renewal can wait on that same row; keep polling the commit future
+        // concurrently, otherwise renewal and commit deadlock each other.
+        let renewals = async {
+            loop {
+                heartbeat.tick().await;
+                if let Err(error) = self
+                    .store
+                    .renew(lease.job_id, lease.token, Utc::now() + self.lease_duration)
+                    .await
+                {
+                    return Err::<(), IngestError>(error.into());
                 }
             }
+        };
+        tokio::select! {
+            result = work => result,
+            result = renewals => result,
         }
     }
 
@@ -255,6 +329,17 @@ where
             return Ok(());
         }
         let parsed = match source.kind() {
+            SourceKind::RssCoalesceIdentical => {
+                reader_collectors::parse_rss_coalescing_identical(&page.body, &page.final_url).map(
+                    |(records, repeated)| {
+                        eprintln!(
+                            "feed_identical_repeats source_id={} coalesced={repeated}",
+                            source_id.as_uuid()
+                        );
+                        records
+                    },
+                )
+            }
             SourceKind::XmlFeed => reader_collectors::parse_xml(&page.body, &page.final_url),
             SourceKind::JsonFeed => reader_collectors::parse_json(&page.body, &page.final_url),
             SourceKind::Auto
@@ -386,7 +471,31 @@ where
         now: DateTime<Utc>,
     ) -> Result<(), IngestError> {
         let result = async {
-            let page = self.fulltext.extract(url).await?;
+            let record = self.store.record(record_id).await?;
+            let definition = self.store.source(record.source_id()).await?;
+            let telegram = matches!(
+                definition.kind(),
+                SourceKind::BuiltIn(crate::BuiltInAdapter::Telegram { .. })
+            );
+            let page = if telegram {
+                if record.revision() != source_revision {
+                    return Err(IngestError::Parse(
+                        "telegram_content_revision_changed".into(),
+                    ));
+                }
+                let html = record
+                    .feed_content_html()
+                    .ok_or_else(|| IngestError::Parse("telegram_stored_body_missing".into()))?;
+                crate::FetchedPage {
+                    final_url: url.clone(),
+                    content_type: Some("text/html; charset=utf-8".into()),
+                    body: html.as_bytes().to_vec(),
+                    validators: crate::CacheValidators::default(),
+                    not_modified: false,
+                }
+            } else {
+                self.fulltext.extract(url).await?
+            };
             if page.body.len() > self.limits.max_input_bytes() {
                 return Err(IngestError::Parse(
                     "fulltext response exceeds configured max_input_bytes".into(),
@@ -398,7 +507,12 @@ where
             // instead of inserting replacement characters into user data.
             let source = crate::web_feed::decode_html(&page.body, page.content_type.as_deref())
                 .map_err(|error| IngestError::Parse(error.to_string()))?;
-            let readable = crate::web_feed::readable_fragment(&source);
+            let publication = crate::extract_publication(&source, &page.final_url);
+            let readable = if telegram {
+                source
+            } else {
+                crate::web_feed::readable_fragment(&source)
+            };
             if readable.len() > self.limits.max_extracted_bytes() {
                 return Err(IngestError::Parse(
                     "extracted content exceeds configured max_extracted_bytes".into(),
@@ -410,7 +524,7 @@ where
                 .publish_content(
                     lease,
                     ContentRevision {
-                        publication: crate::extract_publication(&source, &page.final_url),
+                        publication,
                         record_id,
                         source_revision,
                         refresh_id: Uuid::new_v4(),
@@ -487,9 +601,13 @@ where
                 .await?
             {
                 Some(existing) => {
-                    let revision = existing
-                        .revise_from_record(proposed)
-                        .map_err(|error| IngestError::Parse(error.to_string()))?;
+                    let revision = match source.kind() {
+                        SourceKind::BuiltIn(crate::BuiltInAdapter::Dropbox) => {
+                            existing.revise_from_dropbox_listing(proposed)
+                        }
+                        _ => existing.revise_from_record(proposed),
+                    }
+                    .map_err(|error| IngestError::Parse(error.to_string()))?;
                     match revision.effect {
                         RecordRevisionEffect::Unchanged => continue,
                         RecordRevisionEffect::RefreshContent => PolledRecord {
@@ -540,6 +658,9 @@ impl IngestError {
     fn diagnostic(&self) -> String {
         match self {
             Self::Store(error) => format!("storage: {error}"),
+            Self::Fetch(FetchError::RetryAfter { status, not_before }) => {
+                format!("remote_http_status: {status}; retry_after: {not_before}")
+            }
             Self::Fetch(FetchError::Http(status)) => format!("remote_http_status: {status}"),
             Self::Fetch(FetchError::Rejected(reason)) => {
                 format!("outbound_rejected: {reason}")
@@ -548,6 +669,7 @@ impl IngestError {
             Self::Parse(reason) => format!("feed_parse: {reason}"),
             Self::BrowserDegraded => "browser_degraded".into(),
             Self::InvalidLeaseDuration => "invalid_lease_duration".into(),
+            Self::InvalidRetryPolicy => "invalid_retry_policy".into(),
         }
     }
 }

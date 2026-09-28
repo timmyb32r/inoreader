@@ -21,7 +21,8 @@ pub async fn verify(pool: &PgPool) {
         prepare_schema(pool).await.is_err(),
         "initialization must not overwrite another release"
     );
-    sqlx::query("UPDATE schema_releases SET version=1")
+    sqlx::query("UPDATE schema_releases SET version=$1")
+        .bind(reader_storage_postgres::schema::VERSION)
         .execute(pool)
         .await
         .unwrap();
@@ -58,7 +59,7 @@ pub async fn upgrade_roundtrip(pool: &PgPool) {
         .connect_with((*pool.connect_options()).clone())
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+    sqlx::raw_sql("CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
         .execute(&isolated).await.unwrap();
     let value = ai_tests::record(
         Uuid::new_v4(),
@@ -175,7 +176,7 @@ async fn binary_roundtrip(pool: &PgPool) {
         .connect_with((*pool.connect_options()).clone())
         .await
         .unwrap();
-    sqlx::raw_sql("CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
+    sqlx::raw_sql("CREATE TABLE subscriptions(id TEXT PRIMARY KEY,revision BIGINT NOT NULL,document TEXT NOT NULL); CREATE TABLE staged_content_chunks(record_id TEXT NOT NULL,refresh_id TEXT NOT NULL,representation TEXT NOT NULL,ordinal BIGINT NOT NULL,bytes TEXT NOT NULL,PRIMARY KEY(record_id,refresh_id,representation,ordinal)); CREATE TABLE ai_chats(id UUID PRIMARY KEY,owner UUID,workspace UUID,article UUID,document TEXT NOT NULL,inputs TEXT NOT NULL);")
         .execute(&isolated).await.unwrap();
     let source: Vec<u8> = (0..262144).map(|i| (i % 256) as u8).collect();
     let old = serde_json::to_string(&source).unwrap();
@@ -246,6 +247,51 @@ async fn binary_roundtrip(pool: &PgPool) {
     assert!(old.len() > source.len() * 3);
     isolated.close().await;
     sqlx::query("DROP SCHEMA binary_fixture CASCADE")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+pub async fn subscription_upgrade(pool: &PgPool) {
+    sqlx::query("CREATE SCHEMA subscription_upgrade_fixture")
+        .execute(pool)
+        .await
+        .unwrap();
+    let isolated = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("SET search_path TO subscription_upgrade_fixture")
+                    .execute(connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect_with((*pool.connect_options()).clone())
+        .await
+        .unwrap();
+    prepare_schema(&isolated).await.unwrap();
+    sqlx::raw_sql("DROP VIEW article_subscription_provenance; DROP TABLE removed_subscriptions; UPDATE schema_releases SET version=1,release='architecture-contracts-2026-09-27'; INSERT INTO subscriptions VALUES('exact',0,' { \"title\": \"原文\" } ');").execute(&isolated).await.unwrap();
+    assert!(reader_storage_postgres::verify_schema(&isolated)
+        .await
+        .is_err());
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    let exact: String =
+        sqlx::query_scalar("SELECT document FROM article_subscription_provenance WHERE id='exact'")
+            .fetch_one(&isolated)
+            .await
+            .unwrap();
+    assert_eq!(exact, " { \"title\": \"原文\" } ");
+    assert!(reader_storage_postgres::upgrade_schema(
+        &isolated,
+        std::num::NonZeroU32::new(1).unwrap()
+    )
+    .await
+    .is_err());
+    isolated.close().await;
+    sqlx::query("DROP SCHEMA subscription_upgrade_fixture CASCADE")
         .execute(pool)
         .await
         .unwrap();

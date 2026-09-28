@@ -2,6 +2,41 @@ use super::*;
 
 #[async_trait::async_trait]
 impl reader_application::SubscriptionRepository for PostgresRepository {
+    async fn delete_subscription(&self, value: &Subscription) -> Result<(), RepositoryError> {
+        let mut tx = self.pool.begin().await.map_err(storage)?;
+        let id = value.id().as_uuid().to_string();
+        let document: String =
+            sqlx::query_scalar("SELECT document FROM subscriptions WHERE id=$1 FOR UPDATE")
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage)?
+                .ok_or(RepositoryError::NotFound)?;
+        let current: Subscription = serde_json::from_str(&document).map_err(storage)?;
+        if &current != value {
+            return Err(RepositoryError::Conflict);
+        }
+        // Keep the exact last source metadata for retained article provenance.
+        // This is not a restorable subscription and is never a delivery target.
+        sqlx::query("INSERT INTO removed_subscriptions(id,revision,document) SELECT id,revision,document FROM subscriptions WHERE id=$1")
+            .bind(&id).execute(&mut *tx).await.map_err(storage)?;
+        sqlx::query("DELETE FROM subscription_sources WHERE subscription_id=$1")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage)?;
+        sqlx::query("DELETE FROM workspace_feed_urls WHERE subscription_id=$1")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage)?;
+        sqlx::query("DELETE FROM subscriptions WHERE id=$1")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(storage)?;
+        tx.commit().await.map_err(storage)
+    }
     async fn subscription(&self, id: SubscriptionId) -> Result<Subscription, RepositoryError> {
         let v: Subscription = self.read("subscriptions", id.as_uuid().to_string()).await?;
         v.validate(self.reason_policy).map_err(storage)?;
@@ -325,14 +360,44 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
         value: &Subscription,
     ) -> Result<(), RepositoryError> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
+        // Serialize explicit refreshes at the subscription boundary. A pending
+        // request is reusable; a completed/failed request is history, not a
+        // permanent idempotency key for every future click at this revision.
+        let document: String =
+            sqlx::query_scalar("SELECT document FROM subscriptions WHERE id=$1 FOR UPDATE")
+                .bind(value.id().as_uuid().to_string())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage)?
+                .ok_or(RepositoryError::NotFound)?;
+        let current: Subscription = serde_json::from_str(&document).map_err(storage)?;
+        if current.workspace_id() != value.workspace_id() || current.revision() != value.revision()
+        {
+            return Err(RepositoryError::Conflict);
+        }
         let source = source_for_subscription(&mut tx, value.id()).await?;
-        let identity = format!("manual-poll/{}/{}", value.id().as_uuid(), value.revision());
-        enqueue_work_tx(
-            &mut tx,
-            Uuid::new_v5(&Uuid::NAMESPACE_OID, identity.as_bytes()),
-            &WorkItem::RefreshSource { source_id: source },
+        // Older subscriptions can reference the same source. Serialize the
+        // source-scoped pending predicate as well as a single UI control.
+        sqlx::query("SELECT id FROM sources WHERE id=$1 FOR UPDATE")
+            .bind(source.as_uuid().to_string())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(storage)?;
+        let pending: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM ingest_jobs WHERE status IN ('ready','leased') AND item::jsonb#>>'{RefreshSource,source_id}'=$1)",
         )
-        .await?;
+        .bind(source.as_uuid().to_string())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(storage)?;
+        if !pending {
+            enqueue_work_tx(
+                &mut tx,
+                Uuid::new_v4(),
+                &WorkItem::RefreshSource { source_id: source },
+            )
+            .await?;
+        }
         tx.commit().await.map_err(storage)
     }
     async fn save_web_feed_subscription(

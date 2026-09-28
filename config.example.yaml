@@ -30,6 +30,15 @@ http:
   max_body_bytes: 16777216
   max_decompressed_bytes: 67108864
   allowed_plain_http_hosts: []
+  # Public-only HTTP CONNECT routes. AI/Telegram Bot credentials never use them.
+  # Exact, nonoverlapping host groups; each has its own ordered endpoint pool.
+  # public_proxy_routes:
+  #   - target_hosts: [aws.amazon.com]
+  #     endpoints: ["203.0.113.10:3128"] # Documentation address: replace before enabling.
+  #     max_connect_header_bytes: 8192
+  #     endpoint_attempt_timeout_ms: 8000
+  #     quarantine_ms: 60000
+  public_proxy_routes: []
 scheduler:
   polling_interval_seconds: 1800
   queue_poll_interval_seconds: 5
@@ -37,7 +46,11 @@ scheduler:
   renew_seconds: 40
   workers: 8
   per_origin_concurrency: 2
+  # Bounded attempts per cycle. Recurring source jobs start a fresh cycle after
+  # polling_interval_seconds; diagnostics persist until a successful collection.
   retry_attempts: 5
+  rate_limit_retry_seconds: 300
+  retry_jitter_seconds: 60
   max_retry_age_seconds: 86400
 subscriptions:
   pause_reason_max_bytes: 4096

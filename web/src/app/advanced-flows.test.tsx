@@ -352,7 +352,7 @@ describe("subscription lifecycle", () => {
           ...bootstrap.subscriptions[0],
           name: "Renamed",
         } as unknown as ResponseValue<C>;
-      if (path === "/api/subscriptions/sub" && init?.method === "DELETE")
+      if (path === "/api/subscriptions/sub/archive" && init?.method === "POST")
         return {
           ...bootstrap.subscriptions[0],
           name: "Renamed",
@@ -381,18 +381,16 @@ describe("subscription lifecycle", () => {
       screen.getByRole("button", { name: "Rename subscription" }),
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Unsubscribe" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Archive" })).toBeEnabled(),
     );
-    await user.click(screen.getByRole("button", { name: "Unsubscribe" }));
-    await user.click(
-      screen.getByRole("button", { name: "Confirm unsubscribe" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Archive" }));
+    await user.click(screen.getByRole("button", { name: "Confirm archive" }));
     await waitFor(() =>
       expect(
         calls.some(
           (call) =>
-            call.path === "/api/subscriptions/sub" &&
-            call.init?.method === "DELETE",
+            call.path === "/api/subscriptions/sub/archive" &&
+            call.init?.method === "POST",
         ),
       ).toBe(true),
     );

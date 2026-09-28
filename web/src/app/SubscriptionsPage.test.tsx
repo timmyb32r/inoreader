@@ -476,6 +476,7 @@ describe("subscription details", () => {
     await user.click(
       await screen.findByRole("button", { name: "Restore subscription" }),
     );
+    await user.click(screen.getByRole("button", { name: "Confirm restore" }));
     await waitFor(() =>
       expect(calls).toContain("POST /api/subscriptions/old/restore"),
     );

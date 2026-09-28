@@ -392,6 +392,16 @@ export function useReaderController(
     writeArticlePagePosition("feed", null);
   };
   return {
+    forgetSubscription(id: string) {
+      setArticles((items) =>
+        items.map((item) => ({
+          ...item,
+          subscriptionIds: item.subscriptionIds?.filter(
+            (value) => value !== id,
+          ),
+        })),
+      );
+    },
     workspaceId,
     view,
     articles,

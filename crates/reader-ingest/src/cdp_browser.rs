@@ -6,7 +6,9 @@ use crate::{
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat;
+use chromiumoxide::cdp::browser_protocol::page::{
+    CaptureScreenshotFormat, EventDomContentEventFired,
+};
 use chromiumoxide::cdp::browser_protocol::{
     browser::{SetDownloadBehaviorBehavior, SetDownloadBehaviorParams},
     emulation::SetDeviceMetricsOverrideParams,
@@ -312,8 +314,11 @@ impl CdpBrowserCollector {
                 .await
                 .map_err(|_| FetchError::Rejected("browser_viewport_failed".into()))?;
             }
-            match tokio::time::timeout(self.navigation_timeout, page.goto(source.url().as_str()))
-                .await
+            match tokio::time::timeout(
+                self.navigation_timeout,
+                navigate_until_dom_ready(&page, source.url()),
+            )
+            .await
             {
                 Ok(Ok(_)) => {}
                 Ok(Err(_)) => return Err(FetchError::Rejected("browser_navigation_failed".into())),
@@ -504,6 +509,36 @@ impl BrowserCollector for CdpBrowserCollector {
         records.retain(|record| seen.insert(record.upstream_id().to_owned()));
         Ok(records)
     }
+}
+
+/// Collection needs the parsed DOM, not completion of unrelated images, media
+/// and analytics. chromiumoxide's Page.navigate future waits for the full load
+/// event; issue navigation through the runtime and subscribe before starting it.
+/// Every resulting request still goes through the same Fetch interception.
+async fn navigate_until_dom_ready(page: &Page, url: &Url) -> Result<(), FetchError> {
+    let mut ready = page
+        .event_listener::<EventDomContentEventFired>()
+        .await
+        .map_err(|_| FetchError::Rejected("browser_navigation_listener_failed".into()))?;
+    let url = serde_json::to_string(url.as_str())
+        .map_err(|_| FetchError::Rejected("invalid_browser_navigation_url".into()))?;
+    page.evaluate(format!("setTimeout(()=>location.assign({url}),0);true"))
+        .await
+        .map_err(|_| FetchError::Rejected("browser_navigation_failed".into()))?;
+    ready
+        .next()
+        .await
+        .ok_or_else(|| FetchError::Rejected("browser_navigation_stream_closed".into()))?;
+    let error_page: bool = page
+        .evaluate("document.documentURI.startsWith('chrome-error:')")
+        .await
+        .map_err(|_| FetchError::Rejected("browser_navigation_failed".into()))?
+        .into_value()
+        .map_err(|_| FetchError::Rejected("browser_navigation_failed".into()))?;
+    if error_page {
+        return Err(FetchError::Rejected("browser_navigation_failed".into()));
+    }
+    Ok(())
 }
 
 async fn intercept(
