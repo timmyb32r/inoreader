@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
-import { ArticleDates } from "./ArticleDates";
+import { ArticleDates } from "../ui/ArticleDates";
 import type { Article } from "../api/viewModels";
 import "./latest-articles.css";
 

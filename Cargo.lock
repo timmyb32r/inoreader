@@ -2695,6 +2695,7 @@ dependencies = [
  "chrono",
  "rand 0.8.8",
  "reader-core",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
  "sha2",
@@ -2819,6 +2820,7 @@ name = "reader-server-contracts"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "reader-application",
  "reader-core",
  "reader-wiki",
  "schemars 1.2.2",

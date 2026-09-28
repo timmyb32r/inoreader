@@ -23,7 +23,7 @@ ALLOWED: dict[str, set[str]] = {
     "reader-glossary": {"reader-web-runtime", "reader-runtime"},
     "reader-ai": {"reader-web-runtime", "reader-glossary", "reader-runtime"},
     "reader-ingest": {"reader-core", "reader-collectors", "reader-web-runtime"},
-    "reader-server-contracts": {"reader-core", "reader-wiki"},
+    "reader-server-contracts": {"reader-core", "reader-wiki", "reader-application"},
     "reader-server": {"reader-wiki", "reader-runtime","reader-core", "reader-application", "reader-server-contracts", "reader-web-runtime", "reader-ai", "reader-glossary"},
     "reader-server-ui": set(),
     "reader-storage-postgres": {"reader-wiki", "reader-runtime", "reader-core", "reader-application", "reader-ingest", "reader-ai", "reader-glossary"},

@@ -1,6 +1,8 @@
 //! PostgreSQL persistence boundary for the reader application.
 
 mod ai;
+mod search;
+pub use search::PostgresSearchStore;
 mod wiki;
 pub use wiki::PostgresWikiStore;
 mod content_snapshot;

@@ -1,3 +1,5 @@
+import { SearchField } from "../ui/SearchField";
+import "../search/search.css";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { WikiClient } from "../api/wiki";
 import { ApiError } from "../api/client";
@@ -96,7 +98,6 @@ export function NamespaceWorkspace({
         if (token !== generation.current) return;
         setList(list);
         setPage(p);
-        setSearch("");
         setOffset(0);
         setStatus("");
       })
@@ -166,22 +167,39 @@ export function NamespaceWorkspace({
         <button onClick={() => navigate("/wiki")}>← Namespaces</button>
         <h2>{ns?.name ?? "Wiki"}</h2>
         <div class="wiki-search">
-          <Field
-            aria-label="Search wiki pages"
-            placeholder="Search pages…"
-            value={search}
-            onInput={(e) => setSearch(e.currentTarget.value)}
-          />
-          <AsyncButton
-            onError={report}
-            onPress={async () => {
-              if (new TextEncoder().encode(search).length > limits.search_bytes)
-                throw new Error("Search exceeds configured byte limit");
-              await loadList(0);
-            }}
-          >
-            Search
-          </AsyncButton>
+          {trash ? (
+            <>
+              <Field
+                aria-label="Filter deleted pages"
+                value={search}
+                onInput={(e) => setSearch(e.currentTarget.value)}
+              />
+              <AsyncButton
+                onError={report}
+                onPress={async () => {
+                  if (
+                    new TextEncoder().encode(search).length >
+                    limits.search_bytes
+                  )
+                    throw new Error("Search exceeds configured byte limit");
+                  await loadList(0);
+                }}
+              >
+                Search
+              </AsyncButton>
+            </>
+          ) : (
+            <SearchField
+              value={search}
+              onInput={setSearch}
+              label="Search this wiki"
+              onSubmit={() =>
+                navigate(
+                  `/search?${new URLSearchParams({ q: search, kind: "wiki", namespace })}`,
+                )
+              }
+            />
+          )}
         </div>
         <button
           disabled={!canEdit}

@@ -1,7 +1,9 @@
-//! Explicit public-source routing. CONNECT carries the already-authorized IP;
+//! Shared HTTPS CONNECT routing. CONNECT carries the already-authorized IP;
 //! the proxy never resolves the destination. TLS verifies the original URL host.
 
 mod health;
+mod telegram;
+use telegram::telegram_headers;
 
 use std::{
     collections::HashSet,
@@ -15,7 +17,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::TryStreamExt;
 use http::{header, HeaderMap, Method};
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
 use rustls::{pki_types::ServerName, ClientConfig, RootCertStore};
 use thiserror::Error;
@@ -51,7 +53,7 @@ pub enum PublicProxyConfigError {
     InvalidTlsProvider,
 }
 
-/// An explicit operator trust decision for public, unauthenticated HTTPS only.
+/// An explicit operator trust decision for HTTPS CONNECT destinations.
 /// Hosts are exact, canonical DNS names, without ports or wildcards. Endpoints
 /// are public numeric IPs: neither endpoint nor destination uses proxy-side DNS.
 /// The finite endpoint list is tried once per authorized destination address;
@@ -129,18 +131,19 @@ impl PublicProxyRoute {
     }
 }
 
-/// Public collector transport only. Credentialed integrations must retain their
-/// dedicated direct transport. Unknown/sensitive headers are rejected before
-/// connecting; the route never forwards cookies, authorization or request bodies.
+/// Shared HTTPS CONNECT transport. Public mode rejects credentials/bodies; the
+/// explicit Telegram capability only permits replay-safe Bot API operations.
+/// Origin request bytes are written only after successful certificate validation.
 #[derive(Clone)]
-pub struct PublicFetchTransport {
+pub struct ProxyTransport {
     routes: Vec<PublicProxyRoute>,
     direct: Arc<dyn OutboundTransport>,
     tls: Arc<ClientConfig>,
     observer: Option<Arc<dyn ExternalRequestObserver>>,
+    telegram_bot_api: bool,
 }
 
-impl PublicFetchTransport {
+impl ProxyTransport {
     pub fn new(routes: Vec<PublicProxyRoute>) -> Result<Self, PublicProxyConfigError> {
         let mut hosts = HashSet::new();
         for route in &routes {
@@ -162,7 +165,16 @@ impl PublicFetchTransport {
             direct: Arc::new(ReqwestPinnedTransport),
             tls: Arc::new(tls),
             observer: None,
+            telegram_bot_api: false,
         })
+    }
+
+    /// Narrow, replay-safe Bot API capability. Shares endpoint health with all
+    /// clones; accepts only the five read/ack methods used by the glossary.
+    /// HTTPS, pinned destination IP and verified origin TLS remain mandatory.
+    pub fn for_telegram_bot_api(mut self) -> Self {
+        self.telegram_bot_api = true;
+        self
     }
 
     /// Uses the application's shared external-request instrumentation; no URL,
@@ -212,7 +224,7 @@ fn public_headers(headers: &HeaderMap) -> Result<HeaderMap, TransportError> {
 }
 
 #[async_trait]
-impl OutboundTransport for PublicFetchTransport {
+impl OutboundTransport for ProxyTransport {
     async fn execute(
         &self,
         request: &PreparedRequest,
@@ -220,6 +232,12 @@ impl OutboundTransport for PublicFetchTransport {
         connect_timeout: Duration,
         remaining_deadline: Duration,
     ) -> Result<TransportResponse, TransportError> {
+        // Validate before ANY route lookup/direct fallback or socket connection.
+        let telegram_headers = if self.telegram_bot_api {
+            Some(telegram_headers(request)?)
+        } else {
+            None
+        };
         let route = self.routes.iter().find(|route| {
             request
                 .url
@@ -234,12 +252,16 @@ impl OutboundTransport for PublicFetchTransport {
         };
         if request.url != *authorization.url()
             || request.url.scheme() != "https"
-            || !matches!(request.method, Method::GET | Method::HEAD)
-            || request.body.is_some()
+            || (!self.telegram_bot_api
+                && (!matches!(request.method, Method::GET | Method::HEAD)
+                    || request.body.is_some()))
         {
             return Err(failure("proxy_public_https_get_required"));
         }
-        let headers = public_headers(&request.headers)?;
+        let headers = match telegram_headers {
+            Some(headers) => headers,
+            None => public_headers(&request.headers)?,
+        };
         let started = Instant::now();
         if route.direct_first {
             let budget = remaining_deadline.min(route.endpoint_attempt_timeout);
@@ -337,7 +359,7 @@ impl OutboundTransport for PublicFetchTransport {
     }
 }
 
-impl PublicFetchTransport {
+impl ProxyTransport {
     #[allow(clippy::too_many_arguments)]
     async fn via_proxy(
         &self,
@@ -397,7 +419,9 @@ impl PublicFetchTransport {
         let mut outgoing = http::Request::builder()
             .method(request.method.clone())
             .uri(path)
-            .body(Empty::<Bytes>::new())
+            .body(Full::new(Bytes::from(
+                request.body.clone().unwrap_or_default(),
+            )))
             .map_err(|_| failure("proxy_http_request"))?;
         *outgoing.headers_mut() = headers;
         let response = sender

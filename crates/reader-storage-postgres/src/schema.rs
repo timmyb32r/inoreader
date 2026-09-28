@@ -334,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 5;
-pub const RELEASE: &str = "private-wiki-2026-09-28";
+pub const VERSION: i64 = 6;
+pub const RELEASE: &str = "unified-search-2026-09-28";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -359,7 +359,10 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let zhihu:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='zhihu_sessions' AND column_name='encrypted' AND data_type='bytea' AND is_nullable='NO')").fetch_one(pool).await?;
     let attention: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='source_health' AND column_name='failure_since_ms' AND data_type='bigint')").fetch_one(pool).await?;
     let wiki: bool = sqlx::query_scalar("SELECT count(*)=9 FROM information_schema.tables WHERE table_schema=current_schema() AND table_name IN ('wiki_namespaces','wiki_members','wiki_pages','wiki_page_names','wiki_revisions','wiki_drafts','wiki_links','wiki_operations','subscription_wiki_links')").fetch_one(pool).await?;
-    if !valid || !provenance || !zhihu || !attention || !wiki {
+    let search: bool = sqlx::query_scalar("SELECT to_regclass('search_content') IS NOT NULL")
+        .fetch_one(pool)
+        .await?;
+    if !valid || !provenance || !zhihu || !attention || !wiki || !search {
         return Err(sqlx::Error::Protocol(
             "database schema differs from its recorded version".into(),
         ));
@@ -367,8 +370,8 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Explicit offline upgrade from release 4 or the preceding unversioned schema.
-/// Release 4 gains private wiki tables without rewriting existing user rows.
+/// Explicit offline upgrade from release 5 or the preceding unversioned schema.
+/// Release 5 gains a rebuildable search projection without rewriting source rows.
 /// The unversioned upgrade also validates and converts binary content and AI views.
 pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Result<(), sqlx::Error> {
     let mut transaction = pool.begin().await?;
@@ -381,14 +384,14 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         )
         .fetch_one(&mut *transaction)
         .await?;
-        if previous != (4, "source-attention-2026-09-28".into()) {
+        if previous != (5, "private-wiki-2026-09-28".into()) {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
             ));
         }
-        sqlx::raw_sql(crate::wiki::SCHEMA)
-            .execute(&mut *transaction)
-            .await?;
+        install_search_table(&mut transaction).await?;
+        crate::search::projection::backfill(&mut transaction, batch).await?;
+        install_search_indexes(&mut transaction).await?;
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
@@ -412,6 +415,9 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     sqlx::raw_sql(crate::zhihu::SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    install_search_table(&mut transaction).await?;
+    crate::search::projection::backfill(&mut transaction, batch).await?;
+    install_search_indexes(&mut transaction).await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)
         .bind(RELEASE)
@@ -435,6 +441,8 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     sqlx::raw_sql(crate::wiki::SCHEMA)
         .execute(&mut **transaction)
         .await?;
+    install_search_table(transaction).await?;
+    install_search_indexes(transaction).await?;
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)
         .execute(&mut **transaction)
         .await?;
@@ -445,5 +453,18 @@ async fn install_subscription_provenance(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<(), sqlx::Error> {
     sqlx::raw_sql("CREATE TABLE removed_subscriptions (id TEXT PRIMARY KEY,revision BIGINT NOT NULL CHECK(revision>=0),document TEXT NOT NULL); CREATE VIEW article_subscription_provenance AS SELECT id,document,true AS present FROM subscriptions UNION ALL SELECT id,document,false AS present FROM removed_subscriptions;").execute(&mut **tx).await?;
+    Ok(())
+}
+
+async fn install_search_table(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("search/schema.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+async fn install_search_indexes(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("search/indexes.sql"))
+        .execute(&mut **tx)
+        .await?;
     Ok(())
 }

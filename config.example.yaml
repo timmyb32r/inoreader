@@ -30,16 +30,18 @@ http:
   max_body_bytes: 16777216
   max_decompressed_bytes: 67108864
   allowed_plain_http_hosts: []
-  # Public-only HTTP CONNECT routes. AI/Telegram Bot credentials never use them.
-  # Exact, nonoverlapping host groups; each has its own ordered endpoint pool.
-  # public_proxy_routes:
-  #   - target_hosts: [aws.amazon.com]
-  #     endpoints: ["203.0.113.10:3128"] # Documentation address: replace before enabling.
-  #     max_connect_header_bytes: 8192
-  #     endpoint_attempt_timeout_ms: 8000
-  #     quarantine_ms: 60000
+  # One HTTPS CONNECT pool shared by feeds, public history and Telegram Bot API.
+  # TLS verifies the destination certificate; CONNECT itself carries only IP:port.
+  # proxy_pool:
+  #   endpoints: ["203.0.113.10:3128"] # Replace documentation address before use.
+  #   max_connect_header_bytes: 8192
+  #   endpoint_attempt_timeout_ms: 8000
+  #   quarantine_ms: 60000
+  # proxy_routes:
+  #   - target_hosts: [api.telegram.org, t.me, aws.amazon.com]
   #     direct_first: false
-  public_proxy_routes: []
+  proxy_pool: null
+  proxy_routes: []
 scheduler:
   polling_interval_seconds: 1800
   queue_poll_interval_seconds: 5
@@ -148,3 +150,8 @@ wiki:
   search_excerpt_characters: 200
   page_size: 50
   draft_save_delay_ms: 1000
+
+search:
+  query_bytes: 512
+  page_size: 25
+  excerpt_characters: 220

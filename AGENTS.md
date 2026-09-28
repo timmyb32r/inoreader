@@ -290,10 +290,13 @@ data or deploying unrelated projects or to other destinations.
   and request bodies. Never put origin secrets in CONNECT headers or diagnostics.
   If proxy authentication is introduced, its credentials also require TLS to the
   proxy itself: CONNECT does not encrypt the proxy handshake.
-- Public/free proxy pools have a stricter contract: **no secrets at all**, even
-  over HTTPS. DeepSeek, Telegram Bot and Zhihu credentials use dedicated direct
-  transports. A credentialed trusted-proxy integration requires an explicit trust
-  decision and regression coverage before it can be introduced.
+- User-approved exception: Telegram Bot API shares the public proxy pool, but
+  only through the explicit Telegram transport capability, for its replay-safe
+  getMe/getWebhookInfo/getChat/getChatMember/getUpdates operations. The token path
+  and JSON body are sent only after end-to-end origin TLS verification. HTTPS
+  downgrades, other origins, publishing methods and arbitrary headers fail closed.
+  Public feed/history mode still rejects credentials and bodies. DeepSeek and
+  Zhihu keep dedicated direct transports. Shared pool retries never publish posts.
 - Direct clients must explicitly disable automatic system/environment proxy
   discovery (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, including lowercase forms).
   Only the reviewed, explicit proxy transport may select a proxy. Verify this with

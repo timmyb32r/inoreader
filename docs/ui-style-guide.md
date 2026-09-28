@@ -78,3 +78,9 @@ editing panel. The editor reserves a 36px status row and a fixed-height two-pane
 workspace; narrow screens switch Write/Preview in that same space. Publication
 locks its fields and controls until the response, while private-draft saving
 leaves editing available. Namespace access never inherits Reader admin rights.
+
+Unified search uses a full page with a shared SearchField, All/News/Wiki controls,
+a fixed-height status row, independent result/preview scroll areas and fixed
+pagination. Query, scope and selection are URL-addressable. At narrow widths the
+same two panes stack with explicit fixed viewport fractions. Trigram matches are
+highlighted with the semantic accent tokens; server text never becomes markup.

@@ -42,6 +42,6 @@ cannot starve across short-deadline requests. At most one recovery probe per pai
 runs concurrently. No claim is made that every endpoint fits into one request.
 The runtime does not discover arbitrary new proxies automatically.
 
-All proxy traffic is unauthenticated public HTTPS; cookies, authorization and
-request bodies are rejected. Zhihu, DeepSeek and Telegram Bot credentials keep
+Public fetch mode rejects cookies, authorization and bodies. Telegram Bot API
+uses a narrow HTTPS-only capability over the same pool; Zhihu and DeepSeek keep
 separate direct transports. TLS and per-hop destination validation remain enabled.

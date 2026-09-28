@@ -241,140 +241,128 @@ fn recovery_batch_is_required_in_raw_configuration() {
     assert!(serde_yaml::from_value::<Config>(raw).is_err());
 }
 
-#[test]
-fn public_proxy_routes_default_to_direct_and_validate_before_io() {
-    let config = example();
-    assert!(config.http.public_proxy_routes.is_empty());
-    config.http.public_fetch_transport().unwrap();
-    let route = PublicProxy {
-        target_hosts: vec!["aws.amazon.com".into()],
-        endpoints: vec!["35.207.254.58:8899".parse().unwrap()],
-        max_connect_header_bytes: 8192,
-        endpoint_attempt_timeout_ms: 8000,
-        quarantine_ms: 60000,
-        direct_first: false,
-    };
+fn proxy_config() -> Config {
     let mut config = example();
-    config.http.public_proxy_routes = vec![route.clone()];
-    config.validate().unwrap();
-    for endpoints in [
-        vec![],
-        vec!["127.0.0.1:8080".parse().unwrap()],
-        vec!["35.207.254.58:0".parse().unwrap()],
-        vec!["8.8.8.8:80".parse().unwrap(); 2],
-    ] {
-        config.http.public_proxy_routes = vec![PublicProxy {
-            endpoints,
-            ..route.clone()
-        }];
-        assert!(config.validate().is_err());
-    }
-    for target_hosts in [
-        vec![],
-        vec!["*.amazon.com".into()],
-        vec!["aws.amazon.com/path".into()],
-        vec!["aws.amazon.com".into(), "aws.amazon.com".into()],
-    ] {
-        config.http.public_proxy_routes = vec![PublicProxy {
-            target_hosts,
-            ..route.clone()
-        }];
-        assert!(config.validate().is_err());
-    }
-    config.http.public_proxy_routes = vec![PublicProxy {
-        max_connect_header_bytes: 0,
-        ..route.clone()
-    }];
-    assert!(config.validate().is_err());
-    for (endpoint_attempt_timeout_ms, quarantine_ms) in [
-        (0, 60000),
-        (8000, 0),
-        (config.http.request_timeout_seconds * 1000 + 1, 60000),
-    ] {
-        config.http.public_proxy_routes = vec![
-            route.clone(),
-            PublicProxy {
-                target_hosts: vec!["medium.com".into()],
-                endpoint_attempt_timeout_ms,
-                quarantine_ms,
-                ..route.clone()
-            },
-        ];
-        assert!(config.http.public_fetch_transport().is_err());
-        assert!(config.validate().is_err());
-    }
-}
-
-#[test]
-fn public_proxy_routes_have_disjoint_hosts_and_independent_pools() {
-    let mut config = example();
-    let route = PublicProxy {
-        target_hosts: vec!["aws.amazon.com".into()],
+    config.http.proxy_pool = Some(ProxyPool {
         endpoints: vec!["8.8.8.8:8080".parse().unwrap()],
         max_connect_header_bytes: 8192,
         endpoint_attempt_timeout_ms: 8000,
         quarantine_ms: 60000,
+    });
+    config.http.proxy_routes = vec![ProxyRoute {
+        target_hosts: vec!["example.com".into()],
         direct_first: false,
-    };
-    config.http.public_proxy_routes = vec![
-        route.clone(),
-        PublicProxy {
-            target_hosts: vec!["medium.com".into()],
-            endpoints: vec!["1.1.1.1:3128".parse().unwrap()],
-            ..route.clone()
-        },
-    ];
-    config.validate().unwrap();
-    config.http.public_proxy_routes[1].endpoints = route.endpoints.clone();
-    config.validate().unwrap(); // Shared endpoints are legal; host ownership is not.
-    config.http.public_proxy_routes[1]
+    }];
+    config
+}
+
+#[test]
+fn shared_proxy_pool_validates_before_io() {
+    example().http.proxy_transport().unwrap();
+    proxy_config().validate().unwrap();
+    for endpoints in [
+        vec![],
+        vec!["127.0.0.1:8080".parse().unwrap()],
+        vec!["8.8.8.8:0".parse().unwrap()],
+        vec!["8.8.8.8:80".parse().unwrap(); 2],
+    ] {
+        let mut c = proxy_config();
+        c.http.proxy_pool.as_mut().unwrap().endpoints = endpoints;
+        assert!(c.validate().is_err());
+    }
+    for hosts in [
+        vec![],
+        vec!["*.example.com".into()],
+        vec!["example.com/path".into()],
+        vec!["example.com".into(); 2],
+    ] {
+        let mut c = proxy_config();
+        c.http.proxy_routes[0].target_hosts = hosts;
+        assert!(c.validate().is_err());
+    }
+    for (header, timeout, quarantine) in [
+        (0, 8000, 60000),
+        (8192, 0, 60000),
+        (8192, 8000, 0),
+        (8192, 999999999, 60000),
+    ] {
+        let mut c = proxy_config();
+        let p = c.http.proxy_pool.as_mut().unwrap();
+        p.max_connect_header_bytes = header;
+        p.endpoint_attempt_timeout_ms = timeout;
+        p.quarantine_ms = quarantine;
+        assert!(c.validate().is_err());
+    }
+    let mut c = proxy_config();
+    c.http.proxy_pool = None;
+    assert!(c.validate().is_err());
+    let mut c = proxy_config();
+    c.http.proxy_routes.clear();
+    assert!(c.validate().is_err());
+}
+
+#[test]
+fn shared_proxy_routes_are_disjoint_and_cannot_override_pool() {
+    let mut c = proxy_config();
+    c.http.proxy_routes.push(ProxyRoute {
+        target_hosts: vec!["api.telegram.org".into()],
+        direct_first: false,
+    });
+    c.http
+        .proxy_pool
+        .as_mut()
+        .unwrap()
+        .endpoint_attempt_timeout_ms = 35000;
+    c.validate().unwrap();
+    c.http.proxy_routes[1]
         .target_hosts
-        .push("aws.amazon.com".into());
-    assert!(config.http.public_fetch_transport().is_err());
-    assert!(config.validate().is_err());
-}
-
-#[test]
-fn public_proxy_route_wire_configuration_rejects_unknown_or_malformed_fields() {
-    let mut raw: serde_yaml::Value =
+        .push("example.com".into());
+    assert!(c.validate().is_err());
+    let raw: serde_yaml::Value =
         serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
-    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['user:password@proxy.example:8080']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000\n  direct_first: false").unwrap();
-    assert!(serde_yaml::from_value::<Config>(raw.clone()).is_err());
-    raw["http"]["public_proxy_routes"] = serde_yaml::from_str("- target_hosts: [aws.amazon.com]\n  endpoints: ['35.207.254.58:8899']\n  max_connect_header_bytes: 8192\n  endpoint_attempt_timeout_ms: 8000\n  quarantine_ms: 60000\n  forward_credentials: true").unwrap();
-    assert!(serde_yaml::from_value::<Config>(raw).is_err());
+    for key in ["endpoints", "forward_credentials"] {
+        let mut v = raw.clone();
+        v["http"]["proxy_routes"] = serde_yaml::from_str(&format!(
+            "- target_hosts: [example.com]\n  direct_first: false\n  {key}: true"
+        ))
+        .unwrap();
+        assert!(serde_yaml::from_value::<Config>(v).is_err());
+    }
+    for field in [
+        "endpoint_attempt_timeout_ms",
+        "quarantine_ms",
+        "endpoints",
+        "max_connect_header_bytes",
+    ] {
+        let mut v = raw.clone();
+        let mut pool:serde_yaml::Value=serde_yaml::from_str("endpoints: ['8.8.8.8:8080']\nmax_connect_header_bytes: 8192\nendpoint_attempt_timeout_ms: 8000\nquarantine_ms: 60000").unwrap();
+        pool.as_mapping_mut()
+            .unwrap()
+            .remove(serde_yaml::Value::String(field.into()));
+        v["http"]["proxy_pool"] = pool;
+        assert!(serde_yaml::from_value::<Config>(v).is_err());
+    }
+    let mut v = raw.clone();
+    v["http"]["public_proxy_routes"] = serde_yaml::Value::Sequence(vec![]);
+    assert!(serde_yaml::from_value::<Config>(v).is_err());
 }
 
 #[test]
-fn omitted_public_proxy_routes_are_direct_but_non_sequences_are_rejected() {
+fn absent_proxy_routes_are_direct_but_malformed_routes_are_rejected() {
     let mut raw: serde_yaml::Value =
         serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
     raw["http"]
         .as_mapping_mut()
         .unwrap()
-        .remove(serde_yaml::Value::String("public_proxy_routes".into()));
-    let config: Config = serde_yaml::from_value(raw.clone()).unwrap();
-    assert!(config.http.public_proxy_routes.is_empty());
-    config.validate().unwrap();
+        .remove(serde_yaml::Value::String("proxy_routes".into()));
+    serde_yaml::from_value::<Config>(raw.clone())
+        .unwrap()
+        .validate()
+        .unwrap();
     for value in ["null", "{}", "false", "0", "''"] {
-        raw["http"]["public_proxy_routes"] = serde_yaml::from_str(value).unwrap();
-        assert!(serde_yaml::from_value::<Config>(raw.clone()).is_err());
-    }
-}
-
-#[test]
-fn enabled_public_proxy_routes_require_explicit_health_intervals() {
-    let raw: serde_yaml::Value =
-        serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
-    let proxy: serde_yaml::Value = serde_yaml::from_str("target_hosts: [example.com]\nendpoints: ['8.8.8.8:80']\nmax_connect_header_bytes: 8192\nendpoint_attempt_timeout_ms: 8000\nquarantine_ms: 60000\ndirect_first: false").unwrap();
-    for missing in ["endpoint_attempt_timeout_ms", "quarantine_ms"] {
-        let mut document = raw.clone();
-        let mut incomplete = proxy.clone();
-        incomplete
-            .as_mapping_mut()
-            .unwrap()
-            .remove(serde_yaml::Value::String(missing.into()));
-        document["http"]["public_proxy_routes"] = serde_yaml::Value::Sequence(vec![incomplete]);
-        assert!(serde_yaml::from_value::<Config>(document).is_err());
+        let mut v = raw.clone();
+        v["http"]["proxy_routes"] = serde_yaml::from_str(value).unwrap();
+        assert!(serde_yaml::from_value::<Config>(v).is_err());
     }
 }
 
@@ -409,4 +397,24 @@ fn attention_duration_is_explicit_positive_and_lossless() {
     let missing = include_str!("../../../config.example.yaml")
         .replace("  attention_after_seconds: 86400\n", "");
     assert!(serde_yaml::from_str::<Config>(&missing).is_err());
+}
+
+#[test]
+fn telegram_long_poll_must_fit_shared_attempt_and_request_deadline() {
+    let mut c = proxy_config();
+    c.http.proxy_routes[0].target_hosts = vec!["api.telegram.org".into()];
+    for timeout in [1, 25000, 46000] {
+        c.http
+            .proxy_pool
+            .as_mut()
+            .unwrap()
+            .endpoint_attempt_timeout_ms = timeout;
+        assert!(c.validate().is_err());
+    }
+    c.http
+        .proxy_pool
+        .as_mut()
+        .unwrap()
+        .endpoint_attempt_timeout_ms = 35000;
+    c.validate().unwrap();
 }

@@ -2,6 +2,14 @@ use reader_server_contracts::*;
 fn main() {
     let mut schemas = serde_json::Map::new();
     schemas.insert(
+        "SearchPage".into(),
+        serde_json::to_value(schemars::schema_for!(SearchPage)).unwrap(),
+    );
+    schemas.insert(
+        "SearchLimitsView".into(),
+        serde_json::to_value(schemars::schema_for!(SearchLimitsView)).unwrap(),
+    );
+    schemas.insert(
         "WikiRevision".into(),
         serde_json::to_value(schemars::schema_for!(WikiRevision)).unwrap(),
     );

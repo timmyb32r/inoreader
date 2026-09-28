@@ -14,3 +14,6 @@ pub use article_query::*;
 
 mod source_session;
 pub use source_session::ZhihuProfilePort;
+
+mod search;
+pub use search::*;

@@ -6,6 +6,8 @@ use thiserror::Error;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    pub search: reader_application::SearchLimitsInput,
+
     pub wiki: reader_wiki::LimitsInput,
     pub ai: Option<reader_ai::AiConfig>,
     pub glossary: Option<reader_glossary::GlossaryConfig>,
@@ -74,24 +76,25 @@ pub struct Http {
 
     pub allowed_plain_http_hosts: Vec<String>,
 
-    /// Explicit trust decisions for public, credential-free fetches only.
-    /// Empty/absent means direct. Each exact host belongs to at most one route;
-    /// different host groups may have different ordered endpoint pools.
-    #[serde(default, deserialize_with = "deserialize_public_proxy_routes")]
-    pub public_proxy_routes: Vec<PublicProxy>,
+    /// One endpoint list and retry/health policy for all routed integrations.
+    pub proxy_pool: Option<ProxyPool>,
+
+    /// Exact, disjoint destination groups. Empty/absent routes mean direct.
+    #[serde(default, deserialize_with = "deserialize_proxy_routes")]
+    pub proxy_routes: Vec<ProxyRoute>,
 }
 
 // YAML's generic Vec deserializer accepts explicit null as an empty sequence.
 // Only an omitted field has the authored direct-fetch default; a supplied route
 // configuration must be a sequence rather than silently disabling routing.
-fn deserialize_public_proxy_routes<'de, D>(deserializer: D) -> Result<Vec<PublicProxy>, D::Error>
+fn deserialize_proxy_routes<'de, D>(deserializer: D) -> Result<Vec<ProxyRoute>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     struct RoutesVisitor;
 
     impl<'de> serde::de::Visitor<'de> for RoutesVisitor {
-        type Value = Vec<PublicProxy>;
+        type Value = Vec<ProxyRoute>;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str("a sequence of public proxy routes")
@@ -114,12 +117,16 @@ where
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct PublicProxy {
+pub struct ProxyRoute {
     /// Try direct first; fall back on transport failure, never on HTTP 429.
     pub direct_first: bool,
     /// Exact destination hostnames; subdomains are not implicitly included.
     pub target_hosts: Vec<String>,
+}
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProxyPool {
     /// Finite HTTP CONNECT proxy pool. Only public literal IP addresses allowed.
     pub endpoints: Vec<SocketAddr>,
 
@@ -136,33 +143,41 @@ pub struct PublicProxy {
 }
 impl Http {
     /// Validate the explicit proxy trust boundary before any connection is made.
-    /// The returned transport is used only by public feeds, pages and icons.
-    pub fn public_fetch_transport(
-        &self,
-    ) -> Result<reader_web_runtime::PublicFetchTransport, ConfigError> {
-        let mut routes = Vec::with_capacity(self.public_proxy_routes.len());
-        for proxy in &self.public_proxy_routes {
+    /// All clients clone this transport to share per-host endpoint health.
+    pub fn proxy_transport(&self) -> Result<reader_web_runtime::ProxyTransport, ConfigError> {
+        let mut routes = Vec::with_capacity(self.proxy_routes.len());
+        let Some(pool) = &self.proxy_pool else {
+            if !self.proxy_routes.is_empty() {
+                return Err(ConfigError::Invalid("http.proxy_pool"));
+            }
+            return reader_web_runtime::ProxyTransport::new(routes)
+                .map_err(|_| ConfigError::Invalid("http.proxy_routes"));
+        };
+        if self.proxy_routes.is_empty() {
+            return Err(ConfigError::Invalid("http.proxy_routes"));
+        }
+        for proxy in &self.proxy_routes {
             let attempt_timeout =
-                std::time::Duration::from_millis(proxy.endpoint_attempt_timeout_ms);
+                std::time::Duration::from_millis(pool.endpoint_attempt_timeout_ms);
             if attempt_timeout > std::time::Duration::from_secs(self.request_timeout_seconds) {
                 return Err(ConfigError::Invalid(
-                    "http.public_proxy_routes.endpoint_attempt_timeout_ms",
+                    "http.proxy_pool.endpoint_attempt_timeout_ms",
                 ));
             }
             routes.push(
                 reader_web_runtime::PublicProxyRoute::new(
                     proxy.target_hosts.clone(),
-                    proxy.endpoints.clone(),
-                    proxy.max_connect_header_bytes,
+                    pool.endpoints.clone(),
+                    pool.max_connect_header_bytes,
                     attempt_timeout,
-                    std::time::Duration::from_millis(proxy.quarantine_ms),
+                    std::time::Duration::from_millis(pool.quarantine_ms),
                 )
-                .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))?
+                .map_err(|_| ConfigError::Invalid("http.proxy_routes"))?
                 .with_direct_first(proxy.direct_first),
             );
         }
-        reader_web_runtime::PublicFetchTransport::new(routes)
-            .map_err(|_| ConfigError::Invalid("http.public_proxy_routes"))
+        reader_web_runtime::ProxyTransport::new(routes)
+            .map_err(|_| ConfigError::Invalid("http.proxy_routes"))
     }
 }
 
@@ -579,7 +594,23 @@ impl Config {
         if self.http.max_decompressed_bytes < self.http.max_body_bytes {
             return Err(ConfigError::Invalid("http.max_decompressed_bytes"));
         }
-        self.http.public_fetch_transport()?;
+        reader_application::SearchLimits::new(self.search.clone()).map_err(ConfigError::Invalid)?;
+        self.http.proxy_transport()?;
+        if self
+            .http
+            .proxy_routes
+            .iter()
+            .any(|r| r.target_hosts.iter().any(|h| h == "api.telegram.org"))
+        {
+            if let (Some(pool), Some(glossary)) = (&self.http.proxy_pool, &self.glossary) {
+                let timeout = std::time::Duration::from_millis(pool.endpoint_attempt_timeout_ms);
+                if timeout <= std::time::Duration::from_secs(glossary.polling_timeout_seconds)
+                    || timeout > std::time::Duration::from_secs(glossary.request_timeout_seconds)
+                {
+                    return Err(ConfigError::Invalid("http.proxy_pool.endpoint_attempt_timeout_ms must exceed Telegram polling timeout and fit its request deadline"));
+                }
+            }
+        }
         let mut plain_http_hosts = std::collections::HashSet::new();
         for host in &self.http.allowed_plain_http_hosts {
             let parsed = url::Url::parse(&format!("http://{host}/"))

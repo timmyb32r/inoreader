@@ -124,6 +124,20 @@ pub async fn verify(pool: &PgPool) {
         )),
         wiki_limits,
     );
+    let search_limits =
+        reader_application::SearchLimits::new(reader_application::SearchLimitsInput {
+            query_bytes: 512,
+            page_size: 25,
+            excerpt_characters: 220,
+        })
+        .unwrap();
+    let state = state.with_search(
+        Arc::new(reader_storage_postgres::PostgresSearchStore::new(
+            pool.clone(),
+            search_limits.clone(),
+        )),
+        search_limits,
+    );
     let app = reader_server::router(state).fallback(|uri: axum::http::Uri| async move {
         match reader_server_ui::asset(uri.path()).or_else(|| {
             (!uri.path().starts_with("/api/"))

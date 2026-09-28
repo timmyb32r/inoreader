@@ -31,26 +31,23 @@ Startup is read-only with respect to schema. A missing, incompatible or physical
 drifted critical schema contract fails before listeners/workers start. The release
 journal is `schema_releases`; `prepare-schema` never upgrades an occupied database.
 
-For this release, add a positive `ai.recovery_batch` (example: 32) to configurations
-with AI enabled. Build and validate the candidate first. Before upgrading an existing
-installation (unversioned or release 1), stop/drain the application, retain its image/config/master
-key, create a fresh backup, and restore it to a separate database. Run the candidate's
-`upgrade-schema` against that restored database and compare counts, exact content
-bytes, and original AI document/input strings. Only after that rehearsal succeeds,
-run the same explicit command against production and start the matching image:
+For release 6, add required `search.query_bytes`, `search.page_size`, and
+`search.excerpt_characters` (example: 512, 25, 220). See [search contracts](search.md).
+Build and validate the candidate first. Before upgrading release 5, stop/drain the
+application, retain its image/config/master key, create a fresh backup, and restore
+it to a separate database. Run the candidate's `upgrade-schema` against that restored
+database and compare all preexisting table counts and source content. Only after the
+rehearsal succeeds, run the same command against production and start the matching image:
 
 ```sh
 docker compose run --rm --no-deps app --config /etc/inoreader/config.yaml upgrade-schema
 ```
 
-For release 1, the command adds `removed_subscriptions` and the article provenance
-view, then records release 2; existing rows are not rewritten. For unversioned
-installations, the command also converts JSON byte arrays to BYTEA and builds validated public chat
-projections in one transaction. It refuses a second upgrade or invalid historical
-data. Failed conversion leaves the old schema/data intact. Do not run the underlying
-SQL file standalone: the native command owns the full atomic upgrade. Rollback
-requires the old image and its matching pre-upgrade backup; never restore over
-newer user activity without preserving and reconciling that activity.
+The command adds the search projection and trigram indices, validates source chunks,
+and backfills visible article text in one transaction. Source rows are not rewritten.
+It refuses a second upgrade or invalid historical content. Failed conversion leaves
+the previous schema/data intact. Rollback requires the old image and matching backup;
+never restore over newer user activity without preserving and reconciling it.
 
 ## Incremental container builds
 
@@ -202,51 +199,50 @@ For each recovered source, verify a successful collection and a future scheduled
 job, not just an HTTP 200 response. XML/HTML parsing and card identity validation
 can still fail after a successful HTTP fetch.
 
-### Explicit public-fetch proxy routes
+### Shared HTTPS proxy pool
 
-`http.public_proxy_routes` is an empty list by default (also when omitted): public
-requests stay direct. Each route groups exact destination hosts with its own ordered
-HTTP CONNECT endpoint pool. Configure only tested public literal proxy IP/ports:
+`http.proxy_pool` declares the single ordered endpoint list and retry settings.
+`http.proxy_routes` assigns disjoint exact hosts to that pool, with per-route
+`direct_first`. Both feeds and Telegram clone the same transport and share its
+per-host health. With no pool and no routes, requests remain direct. A configured
+pool without routes, or routes without a pool, fails configuration validation.
 
 ```yaml
 http:
   # Other required HTTP settings remain unchanged.
-  public_proxy_routes:
-    - target_hosts: [aws.amazon.com, medium.com]
-      endpoints: ["35.207.254.58:8899"]
-      max_connect_header_bytes: 8192
-      endpoint_attempt_timeout_ms: 8000
-      quarantine_ms: 60000
-    - target_hosts: [dbconvert.com]
-      endpoints: ["193.37.71.46:10808", "37.114.41.103:3128"]
-      max_connect_header_bytes: 8192
-      endpoint_attempt_timeout_ms: 15000
-      quarantine_ms: 60000
+  proxy_pool:
+    endpoints: ["45.147.179.118:3129", "90.156.196.230:3128"]
+    max_connect_header_bytes: 8192
+    endpoint_attempt_timeout_ms: 35000
+    quarantine_ms: 60000
+  proxy_routes:
+    - target_hosts: [api.telegram.org, t.me, medium.com]
+      direct_first: false
+    - target_hosts: [www.youtube.com]
+      direct_first: true
 ```
 
-These endpoints are diagnostic examples, not guaranteed services. Revalidate them
-from the deployed server before enabling them. A host may appear in only one route;
-the same endpoint may serve several disjoint host groups. Separate pools allow an
-operator to exclude endpoints known to reject one publisher without changing other
-hosts or treating HTTP errors as a reason to rotate. Public proxies can
-observe target IPs and traffic timing; HTTPS certificate verification remains
-mandatory and protects response content. Proxy configuration is an explicit trust
-decision, restricted to the named public destinations. Subdomains and redirect
-hosts are not implicitly included. Do not send account cookies or credentials.
+Endpoint addresses are examples, not guaranteed services. Preserve every configured
+endpoint for recovery, even when presently unhealthy. The attempt budget includes
+CONNECT, TLS, headers and the streamed body. It must fit the HTTP deadline and,
+when Telegram is routed, exceed the Bot API long-poll timeout and fit its deadline.
+The client's connect timeout bounds each CONNECT/TLS phase separately. All limits
+are explicit configuration, validated before I/O.
 
-Configuration validation rejects empty route entries, duplicate/invalid hostnames
-within or across routes, non-public proxy addresses, zero ports, and invalid CONNECT
-header limits before
-network I/O. The public transport is shared by feed/full-text fetches, browser
-page requests and icons. AI and Telegram Bot API requests keep their separate
-direct transport. Per-hop URL/DNS/IP validation and original-host TLS validation
-remain active through the proxy; the remote proxy is not trusted to resolve the
-original hostname. Sensitive/custom headers and bodies are not forwarded through
-this route. The endpoint attempt timeout must be positive and no greater than the overall
-HTTP request timeout. The quarantine interval must also be positive; both fields
-are required whenever a proxy pool is enabled. Duplicate endpoints are rejected.
-The attempt budget includes CONNECT, TLS, HTTP headers and the complete streamed
-body; the original overall deadline still bounds all endpoints and redirects.
+CONNECT contains only an authorized public destination IP and port. Origin paths,
+headers and bodies are written **after** certificate and hostname validation inside
+end-to-end TLS. HTTP destinations fail before connecting. Redirects revalidate
+scheme, origin and DNS/IP; the Bot API client is restricted to api.telegram.org.
+Proxy authentication is unsupported. Neither plaintext origin requests nor TLS
+verification bypasses are allowed. Direct clients ignore ambient proxy variables.
+
+Public mode still rejects cookies, authorization, arbitrary headers and bodies.
+The user explicitly authorized Telegram credentials through this same free pool:
+a separate narrow capability accepts only HTTPS POST to getMe/getWebhookInfo/
+getChat/getChatMember/getUpdates on api.telegram.org. These operations are replay-safe
+with the identical parameters; getUpdates acknowledges only the already committed
+offset. sendMessage and other mutating methods fail closed. DeepSeek and Zhihu
+remain direct. Public history uses the pool without this credential capability.
 
 Transport failures quarantine only the failing **target host + endpoint** pair.
 Other hosts can continue using that endpoint. Healthy endpoints are preferred to
@@ -256,7 +252,7 @@ same probe. If it fails, a healthy endpoint is tried before other expired
 quarantines. Normal recurring source polls provide periodic recovery opportunities;
 there is no synthetic background traffic and the configured pool never grows.
 Each endpoint is attempted at most once per authorized destination-IP attempt.
-Health is shared by feed, browser and icon transport clones in this process and
+Health is shared by feed, browser, icon and Telegram transport clones in this process and
 is reset on restart. An entirely quarantined pool fails explicitly without
 connecting; later scheduled work retries after eligibility returns.
 

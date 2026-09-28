@@ -70,11 +70,17 @@ test("theme and responsive panels remain usable", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("search is an inert placeholder", async ({ page }) => {
+test("keyboard shortcut opens the unified search page", async ({ page }) => {
+  await page.route("**/api/search/limits", (r) =>
+    r.fulfill({
+      json: { query_bytes: 512, page_size: 25, excerpt_characters: 220 },
+    }),
+  );
   await page.goto("/reader");
   await expect(
-    page.getByRole("button", { name: /Search/ }).first(),
-  ).toBeDisabled();
-  await expect(page.getByRole("searchbox")).toHaveCount(0);
-  await expect(page).not.toHaveURL(/search/);
+    page.getByRole("button", { name: "Search news and wiki", exact: true }),
+  ).toBeEnabled();
+  await page.keyboard.press("Control+k");
+  await expect(page).toHaveURL(/\/search$/);
+  await expect(page.getByRole("searchbox")).toBeVisible();
 });

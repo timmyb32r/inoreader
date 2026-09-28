@@ -1,4 +1,5 @@
 mod error;
+mod search;
 use error::ApiFailure;
 mod presentation;
 use presentation::*;
@@ -77,6 +78,10 @@ pub struct AppState<R> {
     ai: Option<Arc<reader_ai::AiService>>,
     zhihu: Option<Arc<dyn reader_application::ZhihuProfilePort>>,
     glossary: Option<Arc<reader_glossary::GlossaryService>>,
+    search: Option<(
+        Arc<dyn reader_application::SearchPort>,
+        reader_application::SearchLimits,
+    )>,
     wiki: Option<(Arc<dyn reader_wiki::Store>, reader_wiki::Limits)>,
     repository: Arc<R>,
     discovery: Arc<dyn FeedDiscovery>,
@@ -93,6 +98,7 @@ impl<R> Clone for AppState<R> {
             zhihu: self.zhihu.clone(),
             glossary: self.glossary.clone(),
             wiki: self.wiki.clone(),
+            search: self.search.clone(),
             repository: self.repository.clone(),
             discovery: self.discovery.clone(),
             reason_policy: self.reason_policy,
@@ -118,6 +124,7 @@ impl<R> AppState<R> {
             zhihu: None,
             glossary: None,
             wiki: None,
+            search: None,
             repository,
             discovery,
             reason_policy,
@@ -128,6 +135,14 @@ impl<R> AppState<R> {
         }
     }
 
+    pub fn with_search(
+        mut self,
+        store: Arc<dyn reader_application::SearchPort>,
+        limits: reader_application::SearchLimits,
+    ) -> Self {
+        self.search = Some((store, limits));
+        self
+    }
     pub fn with_wiki(
         mut self,
         store: Arc<dyn reader_wiki::Store>,
@@ -258,6 +273,7 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
         .merge(glossary::routes::<R>())
         .merge(zhihu::routes::<R>())
         .merge(wiki::routes::<R>())
+        .merge(search::routes::<R>())
         .with_state(state)
         .layer(middleware::from_fn(api_observability::observe))
 }

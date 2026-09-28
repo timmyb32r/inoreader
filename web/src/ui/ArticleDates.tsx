@@ -1,8 +1,13 @@
-import type { Article } from "../api/viewModels";
+type ArticleDatesInput = {
+  savedAt: string;
+  publishedAt?: string | null;
+  publicationStatus?: string;
+  publicationSources?: string[];
+};
 import { formatArticleDate } from "../ui/formatArticleDate";
 import "./article-dates.css";
 
-export function ArticleDates({ article }: { article: Article }) {
+export function ArticleDates({ article }: { article: ArticleDatesInput }) {
   const missing =
     article.publicationStatus === "conflicting"
       ? "Conflicting dates"

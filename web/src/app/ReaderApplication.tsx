@@ -1,3 +1,4 @@
+import { SearchApplication } from "../search/SearchApplication";
 import { CountdownTimer } from "./timer/CountdownTimer";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { ArticleChatWidget } from "../ai/ArticleChatWidget";
@@ -107,9 +108,22 @@ export function ReaderApplication({
   } = usePopupNavigation(confirmDiscard);
   const navigate = (path: string) => {
     const moved = rawNavigate(path);
-    if (moved && path.startsWith("/wiki")) setMobilePanel("list");
+    if (moved && (path.startsWith("/wiki") || path.startsWith("/search")))
+      setMobilePanel("list");
     return moved;
   };
+  const searchNavigation = useRef(navigate);
+  searchNavigation.current = navigate;
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchNavigation.current("/search");
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
   const readerPath = locationPath.startsWith("/subscriptions")
     ? backgroundPath
     : locationPath;
@@ -243,6 +257,14 @@ export function ReaderApplication({
   updateRef.current = update;
   useLayoutEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
+      if (
+        location.pathname !== "/reader" ||
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey
+      )
+        return;
       if (document.querySelector('[role="dialog"]')) return;
       if (
         event.target instanceof Element &&
@@ -296,16 +318,13 @@ export function ReaderApplication({
         <CountdownTimer accountId={bootstrap.account.id} />
         <button
           class="search-stub"
-          disabled
-          aria-describedby="search-description"
+          onClick={() => navigate("/search")}
+          aria-label="Search news and wiki"
         >
           <Icon name="search" />
           <span>Search</span>
-          <kbd>Coming later</kbd>
+          <kbd>⌘ K</kbd>
         </button>
-        <span id="search-description" class="sr-only">
-          Search is not available in this version.
-        </span>
         <button
           class="icon-button"
           aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
@@ -365,7 +384,7 @@ export function ReaderApplication({
         </div>
       </header>
       <main
-        class={`reader-grid${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
+        class={`reader-grid${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
       >
         <>
           <ReaderSidebar
@@ -408,7 +427,14 @@ export function ReaderApplication({
             }}
             onRefresh={subscriptionCommands.refresh}
           />
-          {readerPath.startsWith("/wiki") ? (
+          {readerPath === "/search" ? (
+            <SearchApplication
+              key={account.id}
+              client={client}
+              url={location.pathname + location.search}
+              navigate={navigate}
+            />
+          ) : readerPath.startsWith("/wiki") ? (
             <WikiApplication
               key={account.id}
               client={client.wiki}

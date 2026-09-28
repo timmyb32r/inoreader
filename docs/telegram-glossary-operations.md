@@ -33,7 +33,9 @@ master key and are never returned by GET routes or printed in request logs.
 Raw Bot API response and cursor commit in one PostgreSQL transaction. The next
 poll acknowledges only that committed offset. A separate projector handles
 supported events. Unknown formatting stays explicitly unindexed and replayable.
-Public `t.me/s` history runs without a proxy or third-party relay. It attempts
+Public `t.me/s` history and Bot API use the shared configured HTTPS CONNECT pool
+when their exact hosts appear in `http.proxy_routes`. Bot credentials travel only
+inside verified origin TLS; see [proxy operations](operations.md#shared-https-proxy-pool). It attempts
 archive-to-bot catch-up and recovery after outages, but cannot prove completeness
 or recover deletions; the coverage note remains visible. Bot API retention is
 24 hours, and long downtime can leave irrecoverable gaps. See the official

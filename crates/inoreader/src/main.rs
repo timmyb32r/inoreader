@@ -37,8 +37,7 @@ use reader_server_contracts::{
 use reader_storage_postgres::{prepare_schema, PostgresIngestStore, PostgresRepository};
 use reader_web_runtime::{
     ExternalRequestCompletion, ExternalRequestObserver, OutboundHttpClient, OutboundLimits,
-    OutboundPolicy, PublicFetchTransport, RawOutboundLimits, ReqwestPinnedTransport,
-    TokioDnsResolver,
+    OutboundPolicy, ProxyTransport, RawOutboundLimits, ReqwestPinnedTransport, TokioDnsResolver,
 };
 use seed::*;
 use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};

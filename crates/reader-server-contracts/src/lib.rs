@@ -465,3 +465,5 @@ pub struct ZhihuSessionCommand {
 
 mod wiki;
 pub use wiki::*;
+
+pub use reader_application::{SearchLimitsInput as SearchLimitsView, SearchPage};

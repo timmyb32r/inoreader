@@ -57,6 +57,7 @@ const layers = new Set([
   "glossary",
   "profile",
   "wiki",
+  "search",
 ]);
 const layer = (path: string) =>
   layers.has(path.split("/")[0]) ? path.split("/")[0] : "shared";
@@ -67,6 +68,7 @@ const allowed: Record<string, string[]> = {
   ai: ["ai", "api", "ui", "shared"],
   translation: ["translation", "api", "ui", "shared"],
   glossary: ["glossary", "api", "ui", "shared"],
+  search: ["search", "api", "ui", "wiki", "translation", "shared"],
   wiki: ["wiki", "api", "ui", "shared"],
   profile: ["profile", "api", "ui", "shared"],
   shared: ["shared"],

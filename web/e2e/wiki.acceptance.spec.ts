@@ -194,3 +194,106 @@ test("private wiki persists exact Markdown, rejects stale writes, and has stable
     page.getByRole("dialog", { name: "Subscription details" }),
   ).toHaveCount(0);
 });
+
+test("unified search uses real API authorization and namespace-scoped wiki entry", async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  const token = process.env.READER_ACCEPTANCE_TOKEN;
+  if (!token || !baseURL) throw new Error("Missing hermetic fixture");
+  await context.addCookies([
+    {
+      name: "reader_session",
+      value: token,
+      url: baseURL,
+      httpOnly: true,
+      sameSite: "Strict",
+    },
+  ]);
+  const headers = { Origin: baseURL, "Content-Type": "application/json" };
+  const namespace = crypto.randomUUID(),
+    id = crypto.randomUUID();
+  expect(
+    (
+      await context.request.post("/api/wiki/namespaces", {
+        headers,
+        data: { id: namespace, name: "Search acceptance" },
+      })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await context.request.post(`/api/wiki/${namespace}/pages`, {
+        headers,
+        data: {
+          operation: crypto.randomUUID(),
+          page: id,
+          expected_revision: null,
+          change: {
+            action: "save",
+            name: "SearchToken 页面",
+            markdown: "Only this published text is searchable",
+          },
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const response = await context.request.get(
+    "/api/search?q=SearchToken&kind=all",
+  );
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  const results = await response.json();
+  expect(
+    results.items.some(
+      (hit: { target: { page?: string } }) => hit.target.page === id,
+    ),
+  ).toBe(true);
+  expect(
+    (
+      await context.request.get(
+        `/api/search?q=SearchToken&kind=wiki&namespace=${crypto.randomUUID()}`,
+      )
+    ).status(),
+  ).toBe(404);
+  expect(
+    (
+      await context.request.get(
+        `/api/search?q=SearchToken&kind=news&namespace=${namespace}`,
+      )
+    ).status(),
+  ).toBe(422);
+  let releaseListing!: () => void;
+  const listingGate = new Promise<void>((resolve) => {
+    releaseListing = resolve;
+  });
+  await page.route(`**/api/wiki/${namespace}/pages?*`, async (route) => {
+    await listingGate;
+    await route.continue();
+  });
+  await page.goto(`/wiki/${namespace}`);
+  await page
+    .getByRole("searchbox", { name: "Search this wiki" })
+    .fill("SearchToken");
+  releaseListing();
+  await expect(
+    page
+      .locator(".wiki-page-list")
+      .getByRole("button", { name: /SearchToken/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("searchbox", { name: "Search this wiki" }),
+  ).toHaveValue("SearchToken");
+  await page
+    .getByRole("button", { name: "Search", exact: true })
+    .last()
+    .click();
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/search");
+  expect(new URL(page.url()).searchParams.get("namespace")).toBe(namespace);
+  expect(new URL(page.url()).searchParams.get("q")).toBe("SearchToken");
+  await page.getByRole("button", { name: /SearchToken 页面/ }).click();
+  await expect(page.getByLabel("Search preview")).toContainText(
+    "Only this published text is searchable",
+  );
+});

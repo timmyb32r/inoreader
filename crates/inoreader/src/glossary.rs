@@ -23,6 +23,7 @@ impl GlossaryVault for Vault {
 pub(super) fn compose(
     config: &Config,
     pool: sqlx::PgPool,
+    transport: ProxyTransport,
 ) -> Result<Option<Arc<GlossaryService>>, Box<dyn std::error::Error>> {
     let Some(raw) = &config.glossary else {
         return Ok(None);
@@ -36,7 +37,7 @@ pub(super) fn compose(
         .map_err(|_| "Encryption key file environment is unavailable")?;
     let master = std::fs::read(path).map_err(|_| "Encryption key file is unavailable")?;
     let vault = Vault(reader_ai::CredentialCipher::new(&master)?);
-    let http = || -> Result<_, Box<dyn std::error::Error>> {
+    let http = |transport: ProxyTransport| -> Result<_, Box<dyn std::error::Error>> {
         let limits = OutboundLimits::try_from(RawOutboundLimits {
             connect_timeout_ms: raw
                 .connect_timeout_seconds
@@ -52,13 +53,17 @@ pub(super) fn compose(
         Ok(OutboundHttpClient::new(
             OutboundPolicy::for_plain_http_hosts([], limits),
             TokioDnsResolver,
-            ReqwestPinnedTransport,
+            transport,
             RequestObserver {
                 format: config.observability.log_format,
             },
         ))
     };
-    let gateway = TelegramClient::new(http()?, http()?, policy.clone())?;
+    let gateway = TelegramClient::new(
+        http(transport.clone().for_telegram_bot_api())?,
+        http(transport)?,
+        policy.clone(),
+    )?;
     Ok(Some(Arc::new(GlossaryService::new(
         Arc::new(PostgresGlossaryStore::new(pool)),
         Arc::new(gateway),

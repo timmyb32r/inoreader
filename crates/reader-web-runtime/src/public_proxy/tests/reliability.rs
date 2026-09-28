@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::Mutex;
 
-fn trusted_transport(endpoints: Vec<SocketAddr>, timeout: Duration) -> PublicFetchTransport {
+fn trusted_transport(endpoints: Vec<SocketAddr>, timeout: Duration) -> ProxyTransport {
     // White-box local wire fixture: production constructors still reject private
     // proxies. Only socket coordinates are replaced; public target authorization,
     // original-host TLS validation, CONNECT and HTTP code are unchanged.
@@ -18,7 +18,7 @@ fn trusted_transport(endpoints: Vec<SocketAddr>, timeout: Duration) -> PublicFet
     )
     .unwrap();
     route.endpoints = endpoints;
-    let mut transport = PublicFetchTransport::new(vec![route]).unwrap();
+    let mut transport = ProxyTransport::new(vec![route]).unwrap();
     let mut roots = RootCertStore::empty();
     roots
         .add(rustls::pki_types::CertificateDer::from(

@@ -129,13 +129,12 @@ export function ReaderSidebar({
           </button>
         ))}
         <button
-          class="nav-item nav-item--disabled"
-          disabled
-          title="Search is coming later"
+          class={`nav-item${readerPath === "/search" ? " active" : ""}`}
+          onClick={() => navigate("/search")}
+          title="Search"
         >
           <Icon name="search" />
           <span>Search</span>
-          <small>Later</small>
         </button>
       </nav>
       <div class="sidebar__section-title">

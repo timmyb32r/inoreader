@@ -442,12 +442,12 @@ describe("reader application", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows a disabled search stub and never renders an input", async () => {
+  it("exposes two enabled entries to unified search", async () => {
     renderApp();
     const search = await screen.findAllByRole("button", { name: /Search/ });
     expect(search).toHaveLength(2);
-    search.forEach((item) => expect(item).toBeDisabled());
-    expect(screen.getByText("Coming later")).toBeVisible();
+    search.forEach((item) => expect(item).toBeEnabled());
+    expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
   });
 

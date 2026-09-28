@@ -60,6 +60,9 @@ pub(super) async fn publish_content(
     .execute(&mut *tx)
     .await
     .map_err(storage)?;
+    crate::search::projection::publish(&mut tx, &revision)
+        .await
+        .map_err(storage)?;
     sqlx::query("DELETE FROM content_refresh_state WHERE id = $1")
         .bind(format!("failure/{record}"))
         .execute(&mut *tx)

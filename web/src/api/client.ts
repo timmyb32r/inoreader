@@ -1,5 +1,6 @@
 import type { Article, Subscription, Workspace } from "../api/viewModels";
 import { reportApiRequest } from "../performanceDiagnostics";
+import { SearchClient } from "./search";
 import { WikiClient } from "./wiki";
 import { ZhihuClient } from "./zhihu";
 import { AiClient } from "./ai";
@@ -101,11 +102,13 @@ export class ApiClient {
   readonly glossary: GlossaryClient;
   readonly zhihu: ZhihuClient;
   readonly wiki: WikiClient;
+  readonly search: SearchClient;
   constructor(private readonly transport: Transport) {
     this.ai = new AiClient(transport);
     this.glossary = new GlossaryClient(transport);
     this.zhihu = new ZhihuClient(transport);
     this.wiki = new WikiClient(transport);
+    this.search = new SearchClient(transport);
   }
   bootstrap = (position?: ArticlePagePosition): Promise<Bootstrap> =>
     this.transport(

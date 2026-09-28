@@ -18,7 +18,6 @@ pub(super) async fn serve(
     )?);
     repository.readiness().await?;
     let ai_service = ai::compose(config, pool.clone(), repository.clone())?;
-    let glossary_service = glossary::compose(config, pool.clone())?;
     let zhihu_service = zhihu::compose(config, pool.clone())?;
     // The transport exposes decoded response bytes, so both the wire/body
     // budget and decompressed budget constrain the same pre-parser boundary.
@@ -38,10 +37,8 @@ pub(super) async fn serve(
     let observer = RequestObserver {
         format: config.observability.log_format,
     };
-    let public_transport = config
-        .http
-        .public_fetch_transport()?
-        .with_observer(observer);
+    let public_transport = config.http.proxy_transport()?.with_observer(observer);
+    let glossary_service = glossary::compose(config, pool.clone(), public_transport.clone())?;
     let fetcher = Arc::new(SecureWebFetcher::new(
         OutboundHttpClient::new(
             outbound_policy.clone(),
@@ -115,6 +112,14 @@ pub(super) async fn serve(
             wiki_limits.clone(),
         )),
         wiki_limits,
+    );
+    let search_limits = reader_application::SearchLimits::new(config.search.clone())?;
+    server_state = server_state.with_search(
+        Arc::new(reader_storage_postgres::PostgresSearchStore::new(
+            pool.clone(),
+            search_limits.clone(),
+        )),
+        search_limits,
     );
     let app = reader_server::router(server_state)
         .fallback(serve_ui)

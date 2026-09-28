@@ -19,6 +19,12 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/search_content.rs"]
+mod search_content;
+
+#[path = "support/search.rs"]
+mod search;
+
 #[path = "support/wiki.rs"]
 mod wiki;
 
@@ -185,6 +191,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
         .await
         .expect("prepare PostgreSQL schema a second time");
 
+    search::verify(&pool).await;
     zhihu::verify(&pool).await;
     read_projection::verify(&pool).await;
     schema_upgrade::verify(&pool).await;
@@ -223,7 +230,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 59); // Includes account-owned encrypted Zhihu sessions.
+    assert_eq!(table_count, 60); // Includes account-owned encrypted Zhihu sessions.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -937,6 +944,7 @@ async fn verify_database_backup_restore(container: &PostgresContainer, pool: &Pg
         "restore includes every application table"
     );
     let required_nonempty = [
+        "search_content",
         "accounts",
         "workspaces",
         "subscriptions",

@@ -1,4 +1,4 @@
-import { ArticleDates } from "./ArticleDates";
+import { ArticleDates } from "../ui/ArticleDates";
 import { Icon } from "../ui/Icon";
 import type { Article } from "../api/viewModels";
 export function ArticleRow({

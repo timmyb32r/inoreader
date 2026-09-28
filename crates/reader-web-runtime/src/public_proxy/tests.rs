@@ -54,7 +54,7 @@ fn route_rejects_ambiguous_hosts_private_endpoints_and_zero_limit() {
         route(vec!["example.com"], vec!["8.8.8.8:80"], 0).unwrap_err(),
         PublicProxyConfigError::InvalidHeaderLimit
     );
-    assert!(PublicFetchTransport::new(vec![
+    assert!(ProxyTransport::new(vec![
         route(vec!["example.com"], vec!["8.8.8.8:80"], 1024).unwrap(),
         route(vec!["example.com"], vec!["1.1.1.1:80"], 1024).unwrap()
     ])
@@ -157,11 +157,10 @@ async fn connect_rejects_failure_oversize_incomplete_and_unsolicited_body() {
 
 #[tokio::test]
 async fn protected_requests_are_rejected_before_any_proxy_connection() {
-    let transport =
-        PublicFetchTransport::new(vec![
-            route(vec!["example.com"], vec!["8.8.8.8:1"], 1024).unwrap()
-        ])
-        .unwrap();
+    let transport = ProxyTransport::new(vec![
+        route(vec!["example.com"], vec!["8.8.8.8:1"], 1024).unwrap()
+    ])
+    .unwrap();
     let limits = crate::OutboundLimits::try_from(crate::RawOutboundLimits {
         connect_timeout_ms: 1000,
         request_deadline_ms: 1000,
@@ -274,7 +273,7 @@ async fn tls_proxy_fixture_response(response: &'static [u8]) -> (SocketAddr, Joi
 #[tokio::test]
 async fn tunnel_validates_tls_and_retains_original_hostname_after_ip_pinning() {
     let (endpoint, server) = tls_proxy_fixture().await;
-    let mut transport = PublicFetchTransport::new(vec![]).unwrap();
+    let mut transport = ProxyTransport::new(vec![]).unwrap();
     let mut roots = RootCertStore::empty();
     roots
         .add(rustls::pki_types::CertificateDer::from(
@@ -331,7 +330,7 @@ async fn tunnel_validates_tls_and_retains_original_hostname_after_ip_pinning() {
 #[tokio::test]
 async fn tunnel_rejects_untrusted_certificate_instead_of_weakening_tls() {
     let (endpoint, server) = tls_proxy_fixture().await;
-    let transport = PublicFetchTransport::new(vec![]).unwrap();
+    let transport = ProxyTransport::new(vec![]).unwrap();
     let limits = crate::OutboundLimits::try_from(crate::RawOutboundLimits {
         connect_timeout_ms: 2000,
         request_deadline_ms: 4000,
@@ -396,3 +395,5 @@ async fn gzip_members_and_http_zlib_deflate_preserve_the_full_body() {
 mod health;
 
 mod reliability;
+
+mod telegram;
