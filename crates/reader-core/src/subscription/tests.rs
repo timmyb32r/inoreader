@@ -111,16 +111,13 @@ fn rename_and_restore_preserve_identity_source_and_pause_history() {
 }
 
 #[test]
-fn note_and_custom_name_are_independent_and_clearable() {
+fn custom_name_is_independent_and_clearable() {
     let mut value = subscription();
     value.rename("My feed".into());
-    value.set_personal_note("Check weekly".into());
     assert_eq!(value.title(), "My feed");
-    assert_eq!(value.personal_note(), "Check weekly");
     value.rename(String::new());
     assert_eq!(value.title(), "Example");
     assert_eq!(value.source_title(), "Example");
-    assert_eq!(value.personal_note(), "Check weekly");
 }
 
 #[test]
@@ -129,13 +126,11 @@ fn persisted_subscription_without_detail_fields_loads_losslessly() {
     let mut document = serde_json::to_value(&value).unwrap();
     let object = document.as_object_mut().unwrap();
     object.remove("custom_name");
-    object.remove("personal_note");
     object.remove("created_at");
     let restored: Subscription = serde_json::from_value(document).unwrap();
     assert_eq!(restored.source_title(), "Example");
     assert_eq!(restored.title(), "Example");
     assert_eq!(restored.custom_name(), None);
-    assert_eq!(restored.personal_note(), "");
     assert_eq!(restored.created_at(), None);
 }
 
@@ -143,7 +138,6 @@ fn persisted_subscription_without_detail_fields_loads_losslessly() {
 fn source_replacement_preserves_user_owned_metadata() {
     let mut value = subscription();
     value.rename("Custom".into());
-    value.set_personal_note("Private note".into());
     value
         .replace_source(
             Url::parse("https://example.test/replacement.xml").unwrap(),
@@ -153,7 +147,6 @@ fn source_replacement_preserves_user_owned_metadata() {
         .unwrap();
     assert_eq!(value.title(), "Custom");
     assert_eq!(value.source_title(), "Discovered replacement");
-    assert_eq!(value.personal_note(), "Private note");
     assert_eq!(
         value.source_url().as_str(),
         "https://example.test/replacement.xml"
@@ -190,9 +183,15 @@ fn equal_source_urls_never_share_user_owned_subscription_state() {
         url,
         "Second".into(),
     );
-    first.set_personal_note("private".into());
     first.rename("custom".into());
-    assert_eq!(second.personal_note(), "");
     assert_eq!(second.title(), "Second");
     assert_ne!(first.workspace_id(), second.workspace_id());
+}
+
+#[test]
+fn subscription_rejects_unmigrated_notes_instead_of_silently_dropping_them() {
+    let mut document = serde_json::to_value(subscription()).unwrap();
+    assert!(document.get("personal_note").is_none());
+    document["personal_note"] = serde_json::json!("keep every character\n你好");
+    assert!(serde_json::from_value::<Subscription>(document).is_err());
 }

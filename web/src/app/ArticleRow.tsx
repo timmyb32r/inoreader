@@ -30,6 +30,12 @@ export function ArticleRow({
           )}
         </h2>
         <p>{article.excerpt}</p>
+        {article.markedReadAt && (
+          <span class="article-read-at">
+            ✓ Marked read{" "}
+            {new Date(article.markedReadAt).toLocaleString("en-US")}
+          </span>
+        )}
         <span class={`fulltext fulltext--${article.fullText}`}>
           {article.fullText === "pending" && (
             <span class="spinner" aria-hidden="true" />
@@ -61,14 +67,26 @@ export function ArticleRow({
     </article>
   );
 }
-export function EmptyState() {
+export function EmptyState({
+  readingHistory = false,
+}: {
+  readingHistory?: boolean;
+}) {
   return (
     <div class="empty-state">
       <span>
         <Icon name="check" size={24} />
       </span>
-      <h2>Nothing here right now</h2>
-      <p>You are caught up in this view.</p>
+      <h2>
+        {readingHistory
+          ? "No articles marked read in this period"
+          : "Nothing here right now"}
+      </h2>
+      <p>
+        {readingHistory
+          ? "Choose another date to view its reading history."
+          : "You are caught up in this view."}
+      </p>
     </div>
   );
 }

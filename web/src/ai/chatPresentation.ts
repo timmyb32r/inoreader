@@ -26,7 +26,10 @@ export function chatProgress(chat: ArticleChat): string {
     case "waiting_content":
       return "Waiting for the full article…";
     case "queued":
-      return verification ? "Verification queued…" : "Summary queued…";
+      return (
+        chat.error ||
+        (verification ? "Verification queued…" : "Summary queued…")
+      );
     case "generating":
       return summary ? "Writing summary…" : "DeepSeek is writing…";
     case "verifying":
@@ -35,11 +38,11 @@ export function chatProgress(chat: ArticleChat): string {
       return "";
     case "failed":
       return verification
-        ? "Verification failed · preview kept. Retry to check again."
+        ? "Verification not completed · summary kept. Retry manually."
         : "Generation failed · retry to try again.";
     case "interrupted":
       return verification
-        ? "Verification interrupted · preview kept."
+        ? "Verification not completed · summary kept. Retry manually."
         : summary
           ? "Summary interrupted."
           : "Response interrupted.";

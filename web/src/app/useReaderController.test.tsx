@@ -262,3 +262,36 @@ it("fulltext retry deduplicates writes and restarts a stopped content observer",
   );
   expect(result.current.pendingArticleMutations.size).toBe(0);
 });
+
+it("restores article URLs in another owned workspace without mixing subscriptions", async () => {
+  const client = mockClient(),
+    bootstrap = await client.bootstrap();
+  const restored = {
+    ...bootstrap,
+    activeWorkspaceId: "finance",
+    subscriptions: [],
+    articlePage: replacement,
+  };
+  const changed = vi.fn();
+  const boot = vi.spyOn(client, "bootstrap").mockResolvedValue(restored);
+  const { result } = renderHook(() =>
+    useReaderController(
+      client,
+      bootstrap,
+      bootstrap.subscriptions,
+      vi.fn(),
+      vi.fn(),
+      changed,
+    ),
+  );
+  act(() => {
+    history.pushState({}, "", "/reader?workspace=finance&article=1");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+  await waitFor(() => expect(result.current.workspaceId).toBe("finance"));
+  expect(boot).toHaveBeenCalledWith(
+    expect.objectContaining({ workspaceId: "finance", articleId: "1" }),
+  );
+  expect(result.current.selected?.title).toBe("Other workspace");
+  expect(changed).toHaveBeenCalledWith(restored);
+});

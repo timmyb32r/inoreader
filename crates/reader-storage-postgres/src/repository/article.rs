@@ -26,6 +26,9 @@ impl reader_application::ArticleRepository for PostgresRepository {
         workspace: WorkspaceId,
         request: ArticlePageRequest,
     ) -> Result<ArticlePage, RepositoryError> {
+        if let Some(period) = request.read_period() {
+            return self.read_history_page(workspace, request, period).await;
+        }
         let workspace_id = workspace.as_uuid().to_string();
         let subscription_id = request
             .scope()
@@ -112,21 +115,102 @@ impl reader_application::ArticleRepository for PostgresRepository {
         let article = self.article(workspace, id).await?;
         self.presentation(workspace, article, true).await
     }
+    async fn reading_activity(
+        &self,
+        workspace: WorkspaceId,
+        timezone: &str,
+    ) -> Result<Option<Vec<reader_application::ReadingDay>>, RepositoryError> {
+        let valid: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name=$1)")
+                .bind(timezone)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(storage)?;
+        if !valid {
+            return Ok(None);
+        }
+        let rows: Vec<(String, i64, i64)> = sqlx::query_as(include_str!("reading_activity.sql"))
+            .bind(workspace.as_uuid().to_string())
+            .bind(timezone)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(storage)?;
+        rows.into_iter()
+            .map(|(day, count, arrived)| {
+                Ok(reader_application::ReadingDay {
+                    day,
+                    count: u32::try_from(count).map_err(storage)?,
+                    arrived: u32::try_from(arrived).map_err(storage)?,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some)
+    }
+    async fn source_activity(
+        &self,
+        workspace: WorkspaceId,
+        timezone: &str,
+        period: reader_application::SourceActivityPeriod,
+    ) -> Result<Option<Vec<reader_application::SourceActivityDay>>, RepositoryError> {
+        let valid: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_timezone_names WHERE name=$1)")
+                .bind(timezone)
+                .fetch_one(&self.pool)
+                .await
+                .map_err(storage)?;
+        if !valid {
+            return Ok(None);
+        }
+        type Row = (String, i64, Option<String>, Option<String>, bool, i64);
+        let rows: Vec<Row> = sqlx::query_as(include_str!("source_activity.sql"))
+            .bind(workspace.as_uuid().to_string())
+            .bind(timezone)
+            .bind(period.start())
+            .bind(period.end())
+            .fetch_all(&self.pool)
+            .await
+            .map_err(storage)?;
+        let mut days =
+            std::collections::BTreeMap::<String, reader_application::SourceActivityDay>::new();
+        for (day, total, subscription_id, name, present, count) in rows {
+            let total = u32::try_from(total).map_err(storage)?;
+            let value =
+                days.entry(day.clone())
+                    .or_insert_with(|| reader_application::SourceActivityDay {
+                        day,
+                        total,
+                        sources: Vec::new(),
+                    });
+            value.sources.push(reader_application::SourceActivityCount {
+                subscription_id,
+                name: name
+                    .ok_or_else(|| storage("article origin references missing subscription"))?,
+                present,
+                count: u32::try_from(count).map_err(storage)?,
+            });
+        }
+        Ok(Some(days.into_values().collect()))
+    }
     async fn save_article(
         &self,
         w: WorkspaceId,
         e: Option<u64>,
         v: Article,
     ) -> Result<(), RepositoryError> {
-        self.cas(
-            "articles",
-            article_key(w, v.id),
-            w.as_uuid().to_string(),
-            e,
-            v.revision,
-            &v,
-        )
-        .await
+        let mut tx = self.pool.begin().await.map_err(storage)?;
+        let previous: Option<bool> =
+            sqlx::query_scalar("SELECT is_read FROM articles WHERE id=$1 FOR UPDATE")
+                .bind(article_key(w, v.id))
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(storage)?;
+        if cas_tx(&mut tx, "articles", article_key(w, v.id), e, v.revision, &v).await? != 1 {
+            return Err(RepositoryError::Conflict);
+        }
+        if previous == Some(false) && v.state.read {
+            record_read(&mut tx, w, &v).await?;
+        }
+        tx.commit().await.map_err(storage)
     }
     async fn enqueue_article_full_text_refresh(
         &self,
@@ -192,13 +276,15 @@ impl reader_application::ArticleRepository for PostgresRepository {
                 .revision
                 .checked_sub(1)
                 .ok_or_else(|| storage("updated article revision is invalid"))?;
-            let current: Option<i64> =
-                sqlx::query_scalar("SELECT revision FROM articles WHERE id=$1 FOR UPDATE")
+            let current: Option<(i64, bool)> =
+                sqlx::query_as("SELECT revision,is_read FROM articles WHERE id=$1 FOR UPDATE")
                     .bind(article_key(workspace, value.id))
                     .fetch_optional(&mut *tx)
                     .await
                     .map_err(storage)?;
-            if current != Some(i64::try_from(expected).map_err(storage)?) {
+            if current != Some((i64::try_from(expected).map_err(storage)?, false))
+                || !value.state.read
+            {
                 return Err(RepositoryError::Conflict);
             }
         }
@@ -217,7 +303,25 @@ impl reader_application::ArticleRepository for PostgresRepository {
             {
                 return Err(RepositoryError::Conflict);
             }
+            record_read(&mut tx, workspace, &value).await?;
         }
         tx.commit().await.map_err(storage)
     }
+}
+
+pub(super) async fn record_read(
+    tx: &mut Transaction<'_, Postgres>,
+    workspace: WorkspaceId,
+    value: &Article,
+) -> Result<(), RepositoryError> {
+    sqlx::query(
+        "INSERT INTO article_read_events(workspace_id,article_id,revision) VALUES($1,$2,$3)",
+    )
+    .bind(workspace.as_uuid().to_string())
+    .bind(value.id.as_uuid().to_string())
+    .bind(i64::try_from(value.revision).map_err(storage)?)
+    .execute(&mut **tx)
+    .await
+    .map_err(storage)?;
+    Ok(())
 }

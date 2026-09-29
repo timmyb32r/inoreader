@@ -31,7 +31,8 @@
   font-size: 12px;
   font-weight: 600;
 }
-.ai-profile input {
+.ai-profile input,
+.ai-profile select {
   width: 100%;
   height: 40px;
   padding: 0 10px;
@@ -376,5 +377,129 @@
   .ai-chat__content {
     overflow: auto;
     grid-template-rows: 80px 36px 80px;
+  }
+}
+
+.ai-spending {
+  border-top: 1px solid var(--line);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.ai-spending__summary {
+  height: 76px;
+  overflow: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ai-spending__plot {
+  height: 160px;
+  display: flex;
+  position: relative;
+  gap: 3px;
+  padding-left: 50px;
+  border-bottom: 1px solid var(--line);
+}
+.ai-spending__axis {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ai-spending__day {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+.ai-spending__bar {
+  height: 100%;
+  display: flex;
+  flex-direction: column-reverse;
+}
+.ai-spending__segment {
+  display: block;
+  width: 100%;
+}
+.ai-spending__mode-0 {
+  background: var(--accent);
+}
+.ai-spending__mode-1 {
+  background: var(--text-muted);
+}
+.ai-spending__mode-2 {
+  background: var(--warning);
+}
+.ai-spending__mode-3 {
+  background: var(--accent-deep);
+}
+.ai-spending__mode-4 {
+  background: var(--line-strong);
+}
+.ai-spending__tooltip {
+  display: none;
+  position: absolute;
+  bottom: 20px;
+  right: 0;
+  z-index: 3;
+  width: 250px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+}
+.ai-spending__day:nth-child(-n + 16) .ai-spending__tooltip {
+  left: 0;
+  right: auto;
+}
+.ai-spending__tooltip span {
+  display: block;
+}
+.ai-spending__day:hover .ai-spending__tooltip,
+.ai-spending__day:focus .ai-spending__tooltip {
+  display: block;
+}
+.ai-spending__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+  font-size: 11px;
+}
+.ai-spending__legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+}
+
+.ai-spending__summary > span {
+  display: block;
+}
+
+.ai-spending__range {
+  height: 18px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ai-model-settings {
+  display: grid;
+  gap: 12px;
+}
+.ai-model-settings__fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ai-model-settings select {
+  min-width: 0;
+  font: inherit;
+}
+@media (max-width: 560px) {
+  .ai-model-settings__fields {
+    grid-template-columns: 1fr;
   }
 }

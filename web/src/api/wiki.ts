@@ -12,6 +12,30 @@ const body = (method: string, value: unknown): RequestInit => ({
 });
 export class WikiClient {
   constructor(private readonly transport: Transport) {}
+  collection = (ns: string, kind: "favorites" | "standalone", offset = 0) =>
+    this.transport(
+      `/api/wiki/${ns}/collections/${kind}?offset=${offset}`,
+      undefined,
+      "WikiPages",
+    );
+  organization = (ns: string, id: string, offset = 0) =>
+    this.transport(
+      `/api/wiki/${ns}/pages/${id}/organization?offset=${offset}`,
+      undefined,
+      "WikiOrganization",
+    );
+  favorite = (ns: string, id: string, favorite: boolean) =>
+    this.transport(
+      `/api/wiki/${ns}/pages/${id}/favorite`,
+      body("PUT", { favorite }),
+      "empty",
+    );
+  subscriptionRoot = (ns: string) =>
+    this.transport(
+      `/api/wiki/${ns}/subscription-root`,
+      body("POST", {}),
+      "WikiPage",
+    );
   links = (ns: string, id: string) =>
     this.transport(
       `/api/wiki/${ns}/pages/${id}/links`,

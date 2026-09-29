@@ -9,7 +9,6 @@ export type Column =
   | "updated"
   | "unread"
   | "url"
-  | "note"
   | "interval"
   | "error"
   | "added";
@@ -29,7 +28,6 @@ export const labels: Record<Column, string> = {
   updated: "Last updated",
   unread: "Unread",
   url: "URL",
-  note: "Personal note",
   interval: "Update frequency",
   error: "Current error",
   added: "Added",
@@ -47,7 +45,6 @@ export const defaultWidths: Record<Column, number> = {
   updated: 160,
   unread: 85,
   url: 280,
-  note: 240,
   interval: 150,
   error: 240,
   added: 160,
@@ -138,8 +135,6 @@ function sortableValue(
       return subscription.unreadCount ?? 0;
     case "url":
       return subscription.sourceUrl ?? "";
-    case "note":
-      return subscription.personalNote ?? "";
     case "interval":
       return subscription.pollingInterval ?? "";
     case "error":
@@ -165,8 +160,21 @@ export function compareSubscriptions(
         });
   return (direction === "asc" ? order : -order) || a.name.localeCompare(b.name);
 }
-function withAttention(columns: Column[]): Column[] {
+function withAttention(savedColumns: Column[]): Column[] {
+  const columns = savedColumns.filter((column) => column in labels);
   return columns.includes("attention")
     ? columns
     : [...columns.slice(0, 1), "attention", ...columns.slice(1)];
+}
+
+/** Tab totals describe the entire workspace, independently of temporary table filters. */
+export function inCatalogView(
+  subscription: Subscription,
+  view: CatalogView,
+): boolean {
+  if (view === "archived") return subscription.status === "archived";
+  return (
+    subscription.status !== "archived" &&
+    (view !== "attention" || isProblem(subscription))
+  );
 }

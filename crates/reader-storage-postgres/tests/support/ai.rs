@@ -60,7 +60,7 @@ impl AiProvider for Provider {
     ) -> Result<CompletedGeneration, AiError> {
         assert_eq!(input.article.text, "Exact source 12.5%.");
         self.modes.lock().unwrap().push(input.generation_mode);
-        self.models.lock().unwrap().push(input.model);
+        self.models.lock().unwrap().push(input.model.clone());
         self.calls.fetch_add(1, Ordering::SeqCst);
         progress.check_active().await?;
         progress.publish("First verified paragraph.").await?;
@@ -82,17 +82,20 @@ impl AiProvider for Provider {
         } else {
             "First verified paragraph.\n\nSecond verified paragraph.".into()
         };
-        CompletedGeneration::new(
-            serde_json::json!({"segments":[{"kind":"text","content":content}]}).to_string(),
-            usage,
-            &input.article.text,
-            input.max_response_bytes,
-        )
+        complete_text(&input, &content, usage, progress).await
     }
 }
 pub(super) fn policy(owner: Uuid) -> AiPolicy {
     AiPolicy::new(
         AiConfig {
+            models: reader_ai::ModelRates {
+                flash: CostRates::new("0.30".into(), "0.006".into(), "1.20".into()).unwrap(),
+                pro: CostRates::new("1.32".into(), "0.044".into(), "3.96".into()).unwrap(),
+            },
+            daily_limit_usd: "3".into(),
+            automatic_summaries: false,
+            automatic_attempts: 3,
+            automatic_retry_seconds: 60,
             recovery_batch: 2,
             prompt_approved: true,
             prompt_path: "test".into(),
@@ -100,16 +103,11 @@ pub(super) fn policy(owner: Uuid) -> AiPolicy {
             review: ReviewConfig {
                 prompt_path: "review".into(),
                 prompt_version: "review-v1".into(),
-                model: "deepseek-flash".into(),
                 generation_mode: GenerationMode::standard(0.3).unwrap(),
                 max_output_tokens: 100,
-                input_usd_per_million_tokens: "0.30".into(),
-                cached_input_usd_per_million_tokens: "0.006".into(),
-                output_usd_per_million_tokens: "1.20".into(),
             },
             enabled_accounts: vec![owner],
             encryption_key_file_env: "UNUSED".into(),
-            model: "deepseek-flash".into(),
             generation_mode: GenerationMode::standard(0.3).unwrap(),
             context_tokens: 10000,
             framing_tokens_per_message: 64,
@@ -123,9 +121,6 @@ pub(super) fn policy(owner: Uuid) -> AiPolicy {
             workers: 1,
             poll_milliseconds: 10,
             lease_seconds: 5,
-            input_usd_per_million_tokens: "0.30".into(),
-            cached_input_usd_per_million_tokens: "0.006".into(),
-            output_usd_per_million_tokens: "1.20".into(),
         },
         "Test prompt".into(),
         "Review prompt".into(),
@@ -396,10 +391,6 @@ pub async fn verify(pool: &PgPool) {
         Err(AiError::Cancelled)
     ));
     let mut changed_config = policy(owner).config().clone();
-    changed_config.model = "deepseek-v4-pro".into();
-    changed_config.input_usd_per_million_tokens = "1.32".into();
-    changed_config.cached_input_usd_per_million_tokens = "0.044".into();
-    changed_config.output_usd_per_million_tokens = "3.96".into();
     changed_config.generation_mode = GenerationMode::Thinking {
         effort: ReasoningEffort::High,
     };
@@ -433,7 +424,7 @@ pub async fn verify(pool: &PgPool) {
     assert_eq!(
         *provider.models.lock().unwrap(),
         vec!["deepseek-flash"; 3],
-        "an old Flash conversation still calls Flash on a Pro-configured worker"
+        "Flash remains selected after unrelated worker configuration changes"
     );
     let calls = service.chat(owner, id).await.unwrap().provider_calls;
     assert_eq!(calls.len(), 3);
@@ -629,6 +620,16 @@ pub async fn verify(pool: &PgPool) {
     content_snapshot::verify(pool, store.clone(), owner, ws, a, &pointer).await;
     translation::verify(pool, store.clone(), owner, other, ws, a).await;
     definitions::verify(pool, store.clone(), owner, other, ws, a).await;
+    service
+        .save_models(
+            owner,
+            ModelPreferences {
+                summary: DeepSeekModel::Pro,
+                verification: DeepSeekModel::Flash,
+            },
+        )
+        .await
+        .unwrap();
     let thinking = changed_service
         .start(owner, ws, a, Uuid::new_v4(), true)
         .await
@@ -686,6 +687,11 @@ pub async fn verify(pool: &PgPool) {
         Some("0.000008412"),
         "review has its own saved model/rates"
     );
+
+    service
+        .save_models(owner, ModelPreferences::default())
+        .await
+        .unwrap();
 
     // A configured key does not bypass the unapproved-prompt gate, including a
     // durable operation queued before the deployment disabled approval.
@@ -751,4 +757,39 @@ pub async fn verify(pool: &PgPool) {
     );
     two_stage::verify(pool, store.clone(), owner, ws, a).await;
     storage_tests::verify(pool, store.clone(), owner, ws, a).await;
+}
+
+pub(super) async fn complete_text(
+    input: &GenerationInput,
+    text: &str,
+    usage: Usage,
+    progress: &mut (dyn GenerationProgress + Send),
+) -> Result<CompletedGeneration, AiError> {
+    let body = text
+        .strip_prefix(&format!("**{}**\n\n", input.article.title))
+        .unwrap_or(text);
+    if let Some(draft) = &input.review_draft {
+        let value: serde_json::Value = serde_json::from_str(draft).unwrap();
+        let segments = value["segments"].as_array().unwrap();
+        let segment = segments.len() - 1;
+        let before = segments[segment]["content"].as_str().unwrap();
+        let response = if before == body { serde_json::json!({"verdict":"unchanged"}) } else { serde_json::json!({"verdict":"corrections","changes":[{"segment":segment,"before":before,"after":body,"reason":"Fixture correction"}]}) }.to_string();
+        progress.usage(&usage).await?;
+        progress.response(&response, &input.system).await?;
+        CompletedGeneration::reviewed(
+            response,
+            usage,
+            draft,
+            &input.article.title,
+            &input.article.text,
+            input.max_response_bytes,
+        )
+    } else {
+        CompletedGeneration::new(
+            serde_json::json!({"segments":[{"kind":"text","content":body}]}).to_string(),
+            usage,
+            &input.article.text,
+            input.max_response_bytes,
+        )
+    }
 }

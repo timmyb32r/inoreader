@@ -192,6 +192,8 @@ struct ImportedSeedConfig {
     #[serde(default)]
     max_pages: Option<usize>,
     #[serde(default)]
+    page_size: Option<std::num::NonZeroUsize>,
+    #[serde(default)]
     browser: bool,
     #[serde(default)]
     browser_fallback: bool,
@@ -237,6 +239,12 @@ fn imported_source_kind(configuration: &serde_json::Value) -> Result<SourceKind,
             },
             "modb-news" => BuiltInAdapter::ModbNews,
             "infoq-bigdata" => BuiltInAdapter::InfoqBigdata,
+            "volcengine" => BuiltInAdapter::Volcengine,
+            "jdcloud" => BuiltInAdapter::JdCloud {
+                page_size: raw
+                    .page_size
+                    .ok_or_else(|| storage("jdcloud requires explicit page_size"))?,
+            },
             "highgo" => BuiltInAdapter::Highgo {
                 max_pages: raw.max_pages.unwrap_or(5),
             },
@@ -836,8 +844,11 @@ async fn cas_tx<T: Serialize>(
 mod article;
 mod identity;
 mod operations;
+mod read_history;
 mod rule;
 mod subscription;
 mod workspace;
 
 mod presentation;
+
+mod focused_reading;

@@ -34,9 +34,9 @@ impl AiProvider for SlowProvider {
         std::fs::write(&self.marker, b"admitted").unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
         progress.check_active().await?;
-        let envelope = serde_json::json!({"segments":[{"kind":"text","content":"**Title**\n\nExact source 12.5%."}]}).to_string();
-        CompletedGeneration::new(
-            envelope,
+        complete_text(
+            &input,
+            "Exact source 12.5%.",
             Usage {
                 prompt_tokens: 10,
                 completion_tokens: 5,
@@ -44,9 +44,9 @@ impl AiProvider for SlowProvider {
                 prompt_cache_miss_tokens: 10,
                 estimated_cost_usd: None,
             },
-            &input.article.text,
-            input.max_response_bytes,
+            progress,
         )
+        .await
     }
 }
 

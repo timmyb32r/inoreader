@@ -83,24 +83,23 @@ observability:
   external_request_metrics: true
   archive_budget_bytes: 107374182400
 ai:
+  daily_limit_usd: "3"
+  automatic_summaries: true
+  automatic_attempts: 3
+  automatic_retry_seconds: 60
   # Set true only after documented operator acceptance (passed evaluation or explicit owner waiver).
   prompt_approved: false
   prompt_path: "/etc/inoreader/prompts/reading-data-news/style.md"
   prompt_version: "reading-data-news-2026-09-27-candidate-04"
   review:
     prompt_path: "/etc/inoreader/prompts/reading-data-news/review.md"
-    prompt_version: "reading-data-news-factual-review-2026-09-27-v3"
-    model: "deepseek-v4-pro"
+    prompt_version: "reading-data-news-targeted-review-2026-09-29-v1"
     generation_mode:
       kind: thinking
       effort: low
     max_output_tokens: 16384
-    input_usd_per_million_tokens: "1.32"
-    cached_input_usd_per_million_tokens: "0.044"
-    output_usd_per_million_tokens: "3.96"
   enabled_accounts: []
   encryption_key_file_env: "AI_ENCRYPTION_KEY_FILE"
-  model: "deepseek-flash"
   generation_mode:
     kind: standard
     temperature: 0.3
@@ -120,9 +119,15 @@ ai:
   lease_seconds: 660
   recovery_batch: 32
   # Peak-price estimate; off-peak billing can be lower. Verified 2026-09-27.
-  input_usd_per_million_tokens: "0.3"
-  cached_input_usd_per_million_tokens: "0.006"
-  output_usd_per_million_tokens: "1.2"
+  models:
+    flash:
+      input_usd_per_million_tokens: "0.3"
+      cached_input_usd_per_million_tokens: "0.006"
+      output_usd_per_million_tokens: "1.2"
+    pro:
+      input_usd_per_million_tokens: "1.32"
+      cached_input_usd_per_million_tokens: "0.044"
+      output_usd_per_million_tokens: "3.96"
 
 # Explicit bounded Telegram history and bot delivery. No bot token in this file.
 # Store a dedicated bot token in Settings after creating it via BotFather.

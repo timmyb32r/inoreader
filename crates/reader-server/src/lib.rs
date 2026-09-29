@@ -14,6 +14,7 @@ use discovery::*;
 mod subscription_commands;
 use subscription_commands::*;
 mod articles;
+mod focused_reading;
 use articles::*;
 mod rules;
 use rules::*;
@@ -208,10 +209,6 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
             post(archive_subscription::<R>),
         )
         .route(
-            "/api/subscriptions/{id}/note",
-            put(save_subscription_note::<R>),
-        )
-        .route(
             "/api/subscriptions/{id}/activity",
             get(subscription_activity::<R>),
         )
@@ -249,9 +246,29 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
             "/api/subscriptions/{id}/refresh",
             post(refresh_subscription::<R>),
         )
+        .route(
+            "/api/workspaces/{id}/reading-activity",
+            get(reading_activity::<R>),
+        )
+        .route(
+            "/api/workspaces/{id}/source-activity",
+            get(source_activity::<R>),
+        )
         .route("/api/articles", get(list_articles::<R>))
         .route("/api/articles/{id}", get(get_article::<R>))
         .route("/api/articles/{id}/state", post(update_article::<R>))
+        .route(
+            "/api/articles/{id}/reading/next",
+            get(focused_reading::next::<R>),
+        )
+        .route(
+            "/api/articles/{id}/reading",
+            get(focused_reading::state::<R>).post(focused_reading::complete::<R>),
+        )
+        .route(
+            "/api/articles/{id}/reading/{operation}/undo",
+            post(focused_reading::undo::<R>),
+        )
         .route(
             "/api/articles/{id}/full-text/refresh",
             post(refresh_full_text::<R>),
@@ -344,12 +361,20 @@ async fn bootstrap<R: ReaderRepository + 'static>(
 ) -> Result<Json<BootstrapResponse>, ApiFailure> {
     let actor = auth(&s, &headers).await?;
     let workspaces = s.repository.workspaces_by_owner(actor.account.id).await?;
-    let active_id = workspaces
+    let default_id = workspaces
         .iter()
         .find(|w| matches!(w.status(), WorkspaceStatus::Active))
         .or_else(|| workspaces.first())
         .map(Workspace::id)
         .ok_or(ApiFailure::NoWorkspace)?;
+    let active_id = match query.workspace_id {
+        Some(id) => workspaces
+            .iter()
+            .find(|workspace| workspace.id().as_uuid() == id)
+            .map(Workspace::id)
+            .ok_or(RepositoryError::NotFound)?,
+        None => default_id,
+    };
     let subscriptions = s.repository.subscriptions_by_workspace(active_id).await?;
     let article_page = s
         .repository
@@ -360,7 +385,9 @@ async fn bootstrap<R: ReaderRepository + 'static>(
                 query.subscription_id.map(SubscriptionId::from_uuid),
                 query.cursor.as_deref(),
                 query.direction.as_deref(),
-            )?,
+            )?
+            .with_read_period(read_period(query.read_from, query.read_until)?)
+            .map_err(ApiFailure::Validation)?,
         )
         .await?;
     let initials = actor

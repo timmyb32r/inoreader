@@ -1,5 +1,6 @@
 import type { Article, Subscription, Workspace } from "../api/viewModels";
 import { reportApiRequest } from "../performanceDiagnostics";
+import { FocusedReadingClient } from "./focusedReading";
 import { SearchClient } from "./search";
 import { WikiClient } from "./wiki";
 import { ZhihuClient } from "./zhihu";
@@ -20,7 +21,10 @@ export type ArticlePage = Pick<
   newerCursor?: string | null;
   olderCursor?: string | null;
 };
+export type ReadPeriod = { from: string; until: string };
 export type ArticlePagePosition = {
+  workspaceId?: string;
+  readPeriod?: ReadPeriod;
   view?: string;
   subscriptionId?: string | null;
   cursor?: string;
@@ -103,13 +107,32 @@ export class ApiClient {
   readonly zhihu: ZhihuClient;
   readonly wiki: WikiClient;
   readonly search: SearchClient;
+  readonly reading: FocusedReadingClient;
   constructor(private readonly transport: Transport) {
     this.ai = new AiClient(transport);
     this.glossary = new GlossaryClient(transport);
     this.zhihu = new ZhihuClient(transport);
     this.wiki = new WikiClient(transport);
     this.search = new SearchClient(transport);
+    this.reading = new FocusedReadingClient(transport);
   }
+  sourceActivity = (
+    workspaceId: string,
+    timezone: string,
+    from: string,
+    until: string,
+  ) =>
+    this.transport(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/source-activity?${new URLSearchParams({ timezone, from, until })}`,
+      undefined,
+      "SourceActivityView",
+    );
+  readingActivity = (workspaceId: string, timezone: string) =>
+    this.transport(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/reading-activity?${new URLSearchParams({ timezone })}`,
+      undefined,
+      "ReadingActivityView",
+    );
   bootstrap = (position?: ArticlePagePosition): Promise<Bootstrap> =>
     this.transport(
       `/api/bootstrap${articlePageQuery(position)}`,
@@ -151,9 +174,10 @@ export class ApiClient {
     subscriptionId?: string,
     cursor?: string,
     direction?: "older" | "newer",
+    readPeriod?: ReadPeriod,
   ): Promise<ArticlePage> =>
     this.transport(
-      `/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}${cursor ? `&cursor=${enc(cursor)}&direction=${direction ?? "older"}` : ""}`,
+      `/api/articles?workspace_id=${enc(workspaceId)}&view=${enc(view)}${subscriptionId ? `&subscription_id=${enc(subscriptionId)}` : ""}${cursor ? `&cursor=${enc(cursor)}&direction=${direction ?? "older"}` : ""}${readPeriod ? `&read_from=${enc(readPeriod.from)}&read_until=${enc(readPeriod.until)}` : ""}`,
       undefined,
       "ArticlePageView",
     );
@@ -173,12 +197,6 @@ export class ApiClient {
     this.transport(
       `/api/subscriptions/${enc(id)}`,
       undefined,
-      "SubscriptionView",
-    );
-  saveSubscriptionNote = (id: string, note: string) =>
-    this.transport(
-      `/api/subscriptions/${enc(id)}/note`,
-      json("PUT", { note }),
       "SubscriptionView",
     );
   subscriptionActivity = (id: string) =>
@@ -471,12 +489,17 @@ const enc = encodeURIComponent;
 const articlePageQuery = (position?: ArticlePagePosition) => {
   if (!position) return "";
   const query = new URLSearchParams();
+  if (position.workspaceId) query.set("workspace_id", position.workspaceId);
   if (position.view) query.set("view", position.view);
   if (position.subscriptionId)
     query.set("subscription_id", position.subscriptionId);
   if (position.cursor) {
     query.set("cursor", position.cursor);
     query.set("direction", position.direction ?? "older");
+  }
+  if (position.readPeriod) {
+    query.set("read_from", position.readPeriod.from);
+    query.set("read_until", position.readPeriod.until);
   }
   const value = query.toString();
   return value ? `?${value}` : "";

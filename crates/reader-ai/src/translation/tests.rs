@@ -162,7 +162,7 @@ fn frozen_translation_input_round_trips_and_rejects_corrupted_execution() {
     let restored: TranslationInput = serde_json::from_value(stored.clone()).unwrap();
     assert_eq!(input.identity().unwrap(), restored.identity().unwrap());
     let mut different = config.clone();
-    different.model = "different-model".into();
+    different.max_output_tokens += 1;
     assert_ne!(
         input.identity().unwrap(),
         TranslationInput::new(&different, "磁盘。")

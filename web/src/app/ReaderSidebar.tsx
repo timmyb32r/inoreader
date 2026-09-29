@@ -6,8 +6,9 @@ import { WorkspacePicker } from "./WorkspacePicker";
 import { SubscriptionIcon } from "./SubscriptionIcon";
 import type { View } from "./readerLocation";
 
-const views: { id: View; label: string; icon: IconName }[] = [
+const views: { id: View | "wiki"; label: string; icon: IconName }[] = [
   { id: "feed", label: "Feed", icon: "inbox" },
+  { id: "wiki", label: "Wiki", icon: "book" },
   { id: "later", label: "Read later", icon: "later" },
 ];
 interface Props {
@@ -98,29 +99,26 @@ export function ReaderSidebar({
           <Icon name="home" />
           <span>Home</span>
         </button>
-        <button
-          class={
-            readerPath.startsWith("/wiki") ? "nav-item active" : "nav-item"
-          }
-          aria-label="Wiki"
-          title="Wiki"
-          onClick={() => navigate("/wiki")}
-        >
-          <Icon name="book" />
-          <span>Wiki</span>
-        </button>
         {views.map((item) => (
           <button
             key={item.id}
-            disabled={paging}
+            disabled={item.id !== "wiki" && paging}
+            aria-label={item.id === "wiki" ? "Wiki" : undefined}
+            title={item.id === "wiki" ? "Wiki" : undefined}
             class={
-              readerPath === "/reader" &&
-              view === item.id &&
-              !selectedSubscriptionId
-                ? "nav-item active"
-                : "nav-item"
+              item.id === "wiki"
+                ? readerPath.startsWith("/wiki")
+                  ? "nav-item active"
+                  : "nav-item"
+                : readerPath === "/reader" &&
+                    view === item.id &&
+                    !selectedSubscriptionId
+                  ? "nav-item active"
+                  : "nav-item"
             }
-            onClick={() => chooseView(item.id)}
+            onClick={() =>
+              item.id === "wiki" ? navigate("/wiki") : chooseView(item.id)
+            }
           >
             <Icon name={item.icon} />
             <span>

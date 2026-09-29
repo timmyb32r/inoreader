@@ -2,6 +2,14 @@ use reader_server_contracts::*;
 fn main() {
     let mut schemas = serde_json::Map::new();
     schemas.insert(
+        "SourceActivityView".into(),
+        serde_json::to_value(schemars::schema_for!(SourceActivityView)).unwrap(),
+    );
+    schemas.insert(
+        "ReadingActivityView".into(),
+        serde_json::to_value(schemars::schema_for!(ReadingActivityView)).unwrap(),
+    );
+    schemas.insert(
         "SearchPage".into(),
         serde_json::to_value(schemars::schema_for!(SearchPage)).unwrap(),
     );
@@ -44,6 +52,14 @@ fn main() {
     schemas.insert(
         "WikiNamespaces".into(),
         serde_json::to_value(schemars::schema_for!(WikiNamespaces)).unwrap(),
+    );
+    schemas.insert(
+        "WikiOrganization".into(),
+        serde_json::to_value(schemars::schema_for!(WikiOrganization)).unwrap(),
+    );
+    schemas.insert(
+        "WikiFavorite".into(),
+        serde_json::to_value(schemars::schema_for!(WikiFavorite)).unwrap(),
     );
     schemas.insert(
         "WikiPage".into(),
@@ -190,11 +206,6 @@ fn main() {
     schemas.insert(
         "RenameSubscriptionRequest".into(),
         serde_json::to_value(schemars::schema_for!(RenameSubscriptionRequest))
-            .expect("serializable schema"),
-    );
-    schemas.insert(
-        "SaveSubscriptionNoteRequest".into(),
-        serde_json::to_value(schemars::schema_for!(SaveSubscriptionNoteRequest))
             .expect("serializable schema"),
     );
     schemas.insert(
@@ -365,6 +376,19 @@ fn main() {
     schemas.insert(
         "FeedPreviewResponse".into(),
         serde_json::to_value(schemars::schema_for!(FeedPreviewResponse))
+            .expect("serializable schema"),
+    );
+    schemas.insert(
+        "CompleteReading".into(),
+        serde_json::to_value(schemars::schema_for!(CompleteReading)).expect("serializable schema"),
+    );
+    schemas.insert(
+        "ReadingState".into(),
+        serde_json::to_value(schemars::schema_for!(ReadingState)).expect("serializable schema"),
+    );
+    schemas.insert(
+        "ReadingCompletion".into(),
+        serde_json::to_value(schemars::schema_for!(ReadingCompletion))
             .expect("serializable schema"),
     );
     println!(

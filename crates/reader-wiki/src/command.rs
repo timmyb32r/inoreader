@@ -78,6 +78,7 @@ impl Limits {
 pub enum ChangeInput {
     Save { name: String, markdown: String },
     Rename { name: String },
+    SetParent { parent: Option<Uuid> },
     Trash,
     Restore,
     RestoreRevision { revision: Uuid },
@@ -107,6 +108,10 @@ impl Write {
         }
         if input.expected_revision.is_none() && !matches!(input.change, ChangeInput::Save { .. }) {
             return Err(Error::Invalid("existing page revision required".into()));
+        }
+        if matches!(input.change, ChangeInput::SetParent { parent: Some(parent) } if parent == input.page)
+        {
+            return Err(Error::Invalid("a page cannot be its own parent".into()));
         }
         Ok(Self(input))
     }

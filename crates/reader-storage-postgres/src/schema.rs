@@ -334,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 6;
-pub const RELEASE: &str = "unified-search-2026-09-28";
+pub const VERSION: i64 = 12;
+pub const RELEASE: &str = "focused-reading-2026-09-29";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -354,6 +354,13 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
             "database schema version does not match application release".into(),
         ));
     }
+    let retired_notes: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM subscriptions WHERE document::jsonb ? 'personal_note' UNION ALL SELECT 1 FROM removed_subscriptions WHERE document::jsonb ? 'personal_note')")
+        .fetch_one(pool).await?;
+    if retired_notes {
+        return Err(sqlx::Error::Protocol(
+            "subscription notes require an explicit wiki transfer before removal; see tools/remove_subscription_notes.sql".into(),
+        ));
+    }
     let valid: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='staged_content_chunks' AND column_name='bytes' AND data_type='bytea') OR (table_name='ai_chats' AND column_name IN ('inputs','public_view') AND data_type='text' AND is_nullable='NO') OR (table_name='ai_chats' AND column_name='public_revision' AND data_type='bigint'))").fetch_one(pool).await?;
     let provenance: bool = sqlx::query_scalar("SELECT to_regclass('removed_subscriptions') IS NOT NULL AND to_regclass('article_subscription_provenance') IS NOT NULL").fetch_one(pool).await?;
     let zhihu:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='zhihu_sessions' AND column_name='encrypted' AND data_type='bytea' AND is_nullable='NO')").fetch_one(pool).await?;
@@ -362,7 +369,27 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let search: bool = sqlx::query_scalar("SELECT to_regclass('search_content') IS NOT NULL")
         .fetch_one(pool)
         .await?;
-    if !valid || !provenance || !zhihu || !attention || !wiki || !search {
+    let reading: bool = sqlx::query_scalar("SELECT to_regclass('article_read_events') IS NOT NULL")
+        .fetch_one(pool)
+        .await?;
+    let budget:bool=sqlx::query_scalar("SELECT to_regclass('ai_spending') IS NOT NULL AND to_regclass('ai_summary_queue') IS NOT NULL").fetch_one(pool).await?;
+    let models: bool = sqlx::query_scalar("SELECT to_regclass('ai_model_preferences') IS NOT NULL AND to_regclass('ai_call_models') IS NOT NULL AND to_regclass('ai_budget_overrides') IS NOT NULL").fetch_one(pool).await?;
+    let organization: bool = sqlx::query_scalar("SELECT to_regclass('wiki_favorites') IS NOT NULL AND to_regclass('wiki_subscription_roots') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='wiki_pages' AND column_name='parent')").fetch_one(pool).await?;
+    let reviews: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='ai_call_responses' AND column_name IN ('id','owner','content','system_prompt')").fetch_one(pool).await?;
+    let focused: bool = sqlx::query_scalar("SELECT count(*)=7 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='article_ratings' AND column_name IN ('article_key','rating','rated_at')) OR (table_name='reading_completions' AND column_name IN ('owner','id','article_key','document')))").fetch_one(pool).await?;
+    if !focused
+        || !organization
+        || !models
+        || !valid
+        || !provenance
+        || !zhihu
+        || !attention
+        || !wiki
+        || !search
+        || !reading
+        || !budget
+        || !reviews
+    {
         return Err(sqlx::Error::Protocol(
             "database schema differs from its recorded version".into(),
         ));
@@ -384,14 +411,41 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         )
         .fetch_one(&mut *transaction)
         .await?;
-        if previous != (5, "private-wiki-2026-09-28".into()) {
+        if previous != (5, "private-wiki-2026-09-28".into())
+            && previous != (6, "unified-search-2026-09-28".into())
+            && previous != (7, "daily-read-activity-2026-09-29".into())
+            && previous != (8, "automatic-ai-budget-2026-09-29".into())
+            && previous != (9, "ai-model-preferences-2026-09-29".into())
+            && previous != (10, "wiki-organization-2026-09-29".into())
+            && previous != (11, "targeted-ai-review-2026-09-29".into())
+        {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
             ));
         }
-        install_search_table(&mut transaction).await?;
-        crate::search::projection::backfill(&mut transaction, batch).await?;
-        install_search_indexes(&mut transaction).await?;
+        if previous.0 == 5 {
+            install_search_table(&mut transaction).await?;
+            crate::search::projection::backfill(&mut transaction, batch).await?;
+            install_search_indexes(&mut transaction).await?;
+        }
+        if previous.0 < 7 {
+            install_reading(&mut transaction).await?;
+        }
+        if previous.0 < 8 {
+            install_ai_budget(&mut transaction).await?;
+        }
+        if previous.0 < 9 {
+            install_ai_models(&mut transaction).await?;
+        }
+        if previous.0 < 10 {
+            sqlx::raw_sql(crate::wiki::ORGANIZATION_SCHEMA)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        if previous.0 < 11 {
+            install_ai_reviews(&mut transaction).await?;
+        }
+        install_focused_reading(&mut transaction).await?;
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
@@ -412,12 +466,20 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     sqlx::raw_sql(crate::wiki::SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    sqlx::raw_sql(crate::wiki::ORGANIZATION_SCHEMA)
+        .execute(&mut *transaction)
+        .await?;
     sqlx::raw_sql(crate::zhihu::SCHEMA)
         .execute(&mut *transaction)
         .await?;
     install_search_table(&mut transaction).await?;
     crate::search::projection::backfill(&mut transaction, batch).await?;
     install_search_indexes(&mut transaction).await?;
+    install_reading(&mut transaction).await?;
+    install_ai_budget(&mut transaction).await?;
+    install_ai_models(&mut transaction).await?;
+    install_ai_reviews(&mut transaction).await?;
+    install_focused_reading(&mut transaction).await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)
         .bind(RELEASE)
@@ -441,8 +503,16 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     sqlx::raw_sql(crate::wiki::SCHEMA)
         .execute(&mut **transaction)
         .await?;
+    sqlx::raw_sql(crate::wiki::ORGANIZATION_SCHEMA)
+        .execute(&mut **transaction)
+        .await?;
     install_search_table(transaction).await?;
     install_search_indexes(transaction).await?;
+    install_reading(transaction).await?;
+    install_ai_budget(transaction).await?;
+    install_ai_models(transaction).await?;
+    install_ai_reviews(transaction).await?;
+    install_focused_reading(transaction).await?;
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)
         .execute(&mut **transaction)
         .await?;
@@ -464,6 +534,41 @@ async fn install_search_table(tx: &mut Transaction<'_, Postgres>) -> Result<(), 
 }
 async fn install_search_indexes(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     sqlx::raw_sql(include_str!("search/indexes.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_reading(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/reading.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_ai_budget(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/ai_budget.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_ai_models(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/ai_models.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_ai_reviews(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/ai_reviews.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_focused_reading(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/focused_reading.sql"))
         .execute(&mut **tx)
         .await?;
     Ok(())

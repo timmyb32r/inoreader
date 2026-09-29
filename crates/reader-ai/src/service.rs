@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::*;
 
+mod automatic;
 mod definitions;
 mod translation;
 mod worker;
@@ -37,12 +38,27 @@ impl AiService {
             .err()
             .or_else(|| (!configured).then_some(AiError::MissingKey));
         Ok(AiProfile {
+            models: self.store.model_preferences(owner).await?,
+            spending: Some(
+                self.store
+                    .spending(owner, &self.policy.config().daily_limit_usd)
+                    .await?,
+            ),
             configured,
             enabled: availability.is_none(),
             balance,
             error,
             availability_reason: availability.map(|v| v.to_string()),
         })
+    }
+    pub async fn save_models(
+        &self,
+        owner: Uuid,
+        models: ModelPreferences,
+    ) -> Result<AiProfile, AiError> {
+        self.policy.generation_allowed(owner)?;
+        self.store.save_model_preferences(owner, models).await?;
+        self.profile(owner).await
     }
     pub async fn save_key(&self, owner: Uuid, key: String) -> Result<AiProfile, AiError> {
         if !self.policy.allowed(owner) {
@@ -108,7 +124,11 @@ impl AiService {
         workspace: Uuid,
         article: Uuid,
     ) -> Result<Vec<ArticleChat>, AiError> {
-        self.store.public_chats(owner, workspace, article).await
+        let chats = self.store.public_chats(owner, workspace, article).await?;
+        if let Some(chat) = chats.first() {
+            self.store.prioritize(owner, chat.id).await?;
+        }
+        Ok(chats)
     }
     pub async fn chat(&self, owner: Uuid, id: Uuid) -> Result<ArticleChat, AiError> {
         self.store
@@ -133,6 +153,18 @@ impl AiService {
         operation: Uuid,
         regenerate: bool,
     ) -> Result<ArticleChat, AiError> {
+        self.start_internal(owner, workspace, article, operation, regenerate, true)
+            .await
+    }
+    async fn start_internal(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+        operation: Uuid,
+        regenerate: bool,
+        interactive: bool,
+    ) -> Result<ArticleChat, AiError> {
         log::info!("ai_submission operation_id={operation}");
         let prior = self.store.chats(owner, workspace, article).await?;
         // Retried starts and reopening never need a key or consume model credit.
@@ -151,6 +183,9 @@ impl AiService {
         }
         if !regenerate {
             if let Some(existing) = prior.first() {
+                if interactive {
+                    self.store.prioritize(owner, existing.view.id).await?;
+                }
                 return existing.clone().into_public_view();
             }
         }
@@ -181,7 +216,7 @@ impl AiService {
                 title,
                 source_url,
                 created_at: now,
-                model: self.policy.config().model.clone(),
+                model: crate::DeepSeekModel::Flash.id().into(),
                 prompt_version: self.policy.config().prompt_version.clone(),
                 status,
                 provider_calls: Vec::new(),
@@ -210,10 +245,14 @@ impl AiService {
                 task: AttemptTask::Summary { draft: None },
             }],
         };
-        self.store
+        let record = self
+            .store
             .create_chat(record, operation, regenerate)
-            .await?
-            .into_public_view()
+            .await?;
+        if interactive {
+            self.store.prioritize(owner, record.view.id).await?;
+        }
+        record.into_public_view()
     }
     pub async fn message(
         &self,
@@ -256,6 +295,7 @@ impl AiService {
         }
         self.policy.generation_allowed(owner)?;
         self.key(owner).await?;
+        self.manual_budget(owner).await?;
         self.store
             .append(owner, id, operation, kind)
             .await?

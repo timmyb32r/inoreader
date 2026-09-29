@@ -28,7 +28,6 @@ pub struct SubscriptionView {
     pub name: String,
     pub source_title: String,
     pub custom_name: Option<String>,
-    pub personal_note: String,
     pub source_url: String,
     pub icon_data_url: Option<String>,
     pub source_type: SourceTypeView,
@@ -51,6 +50,8 @@ pub struct SubscriptionView {
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticleView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub marked_read_at: Option<DateTime<Utc>>,
     pub id: Uuid,
     pub url: String,
     pub source: String,
@@ -168,11 +169,6 @@ pub struct AddSubscriptionRequest {
 pub struct RenameSubscriptionRequest {
     pub name: String,
 }
-#[derive(schemars::JsonSchema, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SaveSubscriptionNoteRequest {
-    pub note: String,
-}
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionActivityView {
@@ -217,13 +213,18 @@ pub struct ArticleListQuery {
     pub subscription_id: Option<Uuid>,
     pub cursor: Option<String>,
     pub direction: Option<String>,
+    pub read_from: Option<DateTime<Utc>>,
+    pub read_until: Option<DateTime<Utc>>,
 }
 #[derive(schemars::JsonSchema, Debug, Default, Deserialize)]
 pub struct BootstrapQuery {
+    pub workspace_id: Option<Uuid>,
     pub view: Option<String>,
     pub subscription_id: Option<Uuid>,
     pub cursor: Option<String>,
     pub direction: Option<String>,
+    pub read_from: Option<DateTime<Utc>>,
+    pub read_until: Option<DateTime<Utc>>,
 }
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -467,3 +468,15 @@ mod wiki;
 pub use wiki::*;
 
 pub use reader_application::{SearchLimitsInput as SearchLimitsView, SearchPage};
+
+#[derive(schemars::JsonSchema, serde::Serialize)]
+pub struct ReadingActivityView {
+    pub days: Vec<reader_application::ReadingDay>,
+}
+
+#[derive(schemars::JsonSchema, serde::Serialize)]
+pub struct SourceActivityView {
+    pub days: Vec<reader_application::SourceActivityDay>,
+}
+
+pub use reader_application::{CompleteReading, ReadingCompletion, ReadingState};

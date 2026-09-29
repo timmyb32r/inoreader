@@ -31,6 +31,11 @@ Startup is read-only with respect to schema. A missing, incompatible or physical
 drifted critical schema contract fails before listeners/workers start. The release
 journal is `schema_releases`; `prepare-schema` never upgrades an occupied database.
 
+Release 7 adds `article_read_events` for the Home calendar. Upgrade from release 6
+creates an empty event journal in one transaction, without rewriting articles or
+inventing historical reading dates. Use the same backup/rehearsal procedure below.
+See [reading activity](reading-activity.md).
+
 For release 6, add required `search.query_bytes`, `search.page_size`, and
 `search.excerpt_characters` (example: 512, 25, 220). See [search contracts](search.md).
 Build and validate the candidate first. Before upgrading release 5, stop/drain the
@@ -111,7 +116,7 @@ without its matching master key cannot recover encrypted API or bot credentials.
 The release gate includes the digest-pinned PostgreSQL Docker acceptance test.
 It creates the complete schema, checks idempotency and constraints, exercises
 lease theft fencing, and proves that two users may share a public fetch source
-without sharing workspace, subscription, activity, note, or article state. It also dumps and restores the entire database, comparing every field in every
+without sharing workspace, subscription, activity, or article state. It also dumps and restores the entire database, comparing every field in every
 application table, restoring schema/indexes and resuming a saved job. Missing Docker is a hard failure, never a skipped test.
 
 ## Initial source seed
@@ -320,3 +325,9 @@ same minimum timestamp to recurring recovery, so starting a fresh cycle cannot
 shorten the cooldown. Scheduler duration ranges and the combined retry/jitter
 budget are validated before startup conversions; unsupported values fail rather
 than wrapping signed seconds or panicking in chrono.
+
+Subscription descriptions live in linked wiki pages. To retire an older installation’s
+subscription notes, first copy every nonempty note verbatim into a private owner wiki
+page and bind that page to its subscription. Back up the database, stop application
+writers, then run `tools/remove_subscription_notes.sql`. It aborts unless every
+nonempty note has an exact bound private copy. Startup rejects unconverted documents.

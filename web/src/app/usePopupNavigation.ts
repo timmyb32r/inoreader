@@ -25,8 +25,17 @@ export function usePopupNavigation(confirmDiscard: () => boolean) {
       previousState.current = history.state;
       setUrl(previous.current);
     };
+    const written = () => {
+      previous.current = currentUrl();
+      previousState.current = history.state;
+      setUrl(previous.current);
+    };
     window.addEventListener("popstate", pop);
-    return () => window.removeEventListener("popstate", pop);
+    window.addEventListener("reader-location-written", written);
+    return () => {
+      window.removeEventListener("popstate", pop);
+      window.removeEventListener("reader-location-written", written);
+    };
   }, []);
   const navigate = (next: string) => {
     if (!confirm.current()) return false;

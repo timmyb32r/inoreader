@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from "preact/hooks";
 
 /** Position affects only the fixed overlay. Dragging starts exclusively on its
  * handle; resizing clamps its bounds so close/minimize never leave the viewport. */
-export function useFloatingPanel(collapsed: boolean) {
+export function useFloatingPanel(collapsed: boolean, enabled = true) {
   const element = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{
     left: number;
@@ -29,6 +29,7 @@ export function useFloatingPanel(collapsed: boolean) {
     };
   };
   useLayoutEffect(() => {
+    if (!enabled) return;
     const keepVisible = () => {
       const bounds = element.current?.getBoundingClientRect();
       if (bounds) setPosition(clamp(bounds.left, bounds.top));
@@ -40,7 +41,7 @@ export function useFloatingPanel(collapsed: boolean) {
       window.removeEventListener("resize", keepVisible);
       window.visualViewport?.removeEventListener("resize", keepVisible);
     };
-  }, [collapsed]);
+  }, [collapsed, enabled]);
   const onPointerDown: JSX.PointerEventHandler<HTMLDivElement> = (event) => {
     if (event.button !== 0) return;
     const bounds = element.current?.getBoundingClientRect();

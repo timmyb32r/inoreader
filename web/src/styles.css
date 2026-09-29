@@ -256,32 +256,6 @@ select:focus-visible {
 .account-popover > button:focus-visible {
   background: var(--surface-muted);
 }
-.search-stub {
-  width: 205px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  color: var(--text-muted);
-  background: var(--surface-muted);
-  opacity: 1;
-}
-.search-stub span {
-  flex: 1;
-  text-align: left;
-}
-.search-stub kbd {
-  padding: 2px 5px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
-}
 .reader-grid {
   height: calc(100% - 58px);
   display: grid;
@@ -1904,9 +1878,6 @@ select:focus-visible {
   .article-row__main {
     padding-left: 12px;
   }
-  .search-stub {
-    width: 145px;
-  }
 }
 @media (max-width: 760px) {
   .topbar {
@@ -1921,15 +1892,6 @@ select:focus-visible {
   }
   .mobile-menu {
     display: grid;
-  }
-  .search-stub {
-    width: 36px;
-    padding: 0;
-    justify-content: center;
-  }
-  .search-stub span,
-  .search-stub kbd {
-    display: none;
   }
   .reader-grid {
     position: relative;
@@ -2564,19 +2526,6 @@ select:focus-visible {
 .source-url button:disabled {
   color: var(--text-muted);
   cursor: not-allowed;
-}
-.note-card textarea {
-  width: 100%;
-  min-height: 124px;
-  resize: vertical;
-}
-.note-status {
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--text-muted);
-  font-size: 9px;
 }
 .recent-card {
   grid-column: 1/-1;
@@ -3248,7 +3197,8 @@ select:focus-visible {
   gap: 12px;
   margin: 22px auto;
 }
-.activity-summary article {
+.activity-summary article,
+.activity-summary__read {
   min-height: 92px;
   display: flex;
   flex-direction: column;
@@ -3308,12 +3258,22 @@ select:focus-visible {
   padding-top: 14px;
 }
 .activity-calendar__days {
-  height: 92px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-around;
+  height: 95px;
+  display: grid;
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  align-items: center;
   color: var(--text-muted);
   font-size: 8px;
+}
+.activity-calendar__days span:nth-child(1) {
+  grid-row: 1;
+}
+.activity-calendar__days span:nth-child(2) {
+  grid-row: 3;
+}
+.activity-calendar__days span:nth-child(3) {
+  grid-row: 5;
 }
 .activity-calendar__grid {
   width: max-content;
@@ -3321,6 +3281,7 @@ select:focus-visible {
   grid-auto-flow: column;
   grid-template-rows: repeat(7, 11px);
   grid-auto-columns: 11px;
+  grid-template-columns: repeat(53, 11px);
   gap: 3px;
 }
 .activity-tile {
@@ -3438,4 +3399,85 @@ button[aria-busy] {
   overflow: auto;
   font-size: 11px;
   color: var(--danger);
+}
+
+.activity-status {
+  height: 3em;
+  overflow: auto;
+}
+.activity-summary strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.catalog-tab-count {
+  display: inline-block;
+  min-width: 5ch;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.activity-summary__read {
+  text-align: left;
+  color: var(--text);
+  position: relative;
+}
+.activity-summary__read:hover:not(:disabled),
+.activity-summary__read:active:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.activity-summary__read .activity-summary__link {
+  color: var(--accent);
+  min-height: 14px;
+}
+.read-history-filter {
+  flex: 0 0 128px;
+  height: 128px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.read-history-filter > button {
+  align-self: start;
+}
+.read-history-filter__controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.read-history-filter__controls input {
+  min-width: 0;
+  width: 150px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 4px 8px;
+}
+.read-history-filter__status {
+  height: 18px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.article-read-at {
+  grid-column: 2 / 4;
+  display: block;
+  font-size: 11px;
+  color: var(--accent);
+  margin: 6px 0;
+}
+.activity-calendar__grid button {
+  padding: 0;
+  cursor: pointer;
+}
+.activity-calendar__grid button:active:not(:disabled) {
+  outline: 2px solid var(--accent);
+}
+
+.article-list--history .article-scroll {
+  flex: 1;
 }

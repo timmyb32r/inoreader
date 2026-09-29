@@ -1,7 +1,11 @@
 #[path = "built_in_adapters/dropbox.rs"]
 pub(crate) mod dropbox;
+#[path = "built_in_adapters/jdcloud.rs"]
+mod jdcloud;
 #[path = "built_in_adapters/telegram.rs"]
 mod telegram;
+#[path = "built_in_adapters/volcengine.rs"]
+mod volcengine;
 use crate::{
     BrowserHttpClient, BuiltInAdapter, FetchError, SourceDefinition, SourceKind, SourceRecord,
 };
@@ -40,6 +44,8 @@ impl BuiltInAdapterCollector {
             BuiltInAdapter::Pingkai { listing_url } => self.pingkai(source, listing_url).await,
             BuiltInAdapter::ModbNews => self.modb(source).await,
             BuiltInAdapter::InfoqBigdata => self.infoq(source).await,
+            BuiltInAdapter::Volcengine => self.volcengine(source).await,
+            BuiltInAdapter::JdCloud { page_size } => self.jdcloud(source, page_size.get()).await,
             BuiltInAdapter::Highgo { max_pages } => self.highgo(source, *max_pages).await,
         }
     }

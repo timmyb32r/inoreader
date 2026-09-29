@@ -5,8 +5,16 @@ export function CopyButton({
   text,
   label,
   html,
+  className = "icon-button ai-copy",
+  disabled = false,
+  hint,
+  visibleLabel,
 }: {
-  text: string;
+  text: string | (() => string);
+  className?: string;
+  disabled?: boolean;
+  hint?: string;
+  visibleLabel?: string;
   label: string;
   html?: () => string;
 }) {
@@ -27,22 +35,24 @@ export function CopyButton({
         ? "Copying…"
         : state === "failed"
           ? "Copy failed — select the text to copy"
-          : label;
+          : (hint ?? label);
   return (
     <button
-      class="icon-button ai-copy"
+      class={className}
       type="button"
       aria-label={label}
       title={title}
       aria-busy={state === "pending"}
-      disabled={!text || state === "pending"}
+      disabled={disabled || !text || state === "pending"}
       data-copy-state={state}
       onClick={async () => {
-        if (locked.current || !text) return;
+        if (locked.current || disabled || !text) return;
         locked.current = true;
         setState("pending");
         const token = revision.current;
         try {
+          const value = typeof text === "function" ? text() : text;
+          if (!value) throw new Error("No article content to copy");
           if (
             html &&
             typeof ClipboardItem !== "undefined" &&
@@ -50,11 +60,11 @@ export function CopyButton({
           ) {
             await navigator.clipboard.write([
               new ClipboardItem({
-                "text/plain": new Blob([text], { type: "text/plain" }),
+                "text/plain": new Blob([value], { type: "text/plain" }),
                 "text/html": new Blob([html()], { type: "text/html" }),
               }),
             ]);
-          } else await navigator.clipboard.writeText(text);
+          } else await navigator.clipboard.writeText(value);
           if (token === revision.current) setState("copied");
         } catch {
           if (token === revision.current) setState("failed");
@@ -72,6 +82,9 @@ export function CopyButton({
           }
           size={16}
         />
+      )}
+      {visibleLabel && (
+        <span class="reader-toolbar-button__label">{visibleLabel}</span>
       )}
       <span class="sr-only" aria-live="polite">
         {state !== "idle" ? title : ""}

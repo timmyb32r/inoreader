@@ -1,4 +1,6 @@
-import { useRef, useState } from "preact/hooks";
+import { AutofillResistantField } from "../ui/fields";
+import { localDay, readPeriodForDay } from "./readPeriod";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { ApiClient } from "../api/client";
 import type { Subscription } from "../api/viewModels";
 import type { useReaderController } from "./useReaderController";
@@ -33,6 +35,7 @@ export function ArticleListPanel({
 }: Props) {
   const {
     view,
+    readPeriod,
     unreadTotal,
     paging,
     loadPage,
@@ -51,9 +54,13 @@ export function ArticleListPanel({
   } = reader;
   const [refreshingSubscription, setRefreshingSubscription] = useState(false);
   const refreshLock = useRef(false);
+  const [showReadFilter, setShowReadFilter] = useState(!!readPeriod);
+  useEffect(() => {
+    if (readPeriod) setShowReadFilter(true);
+  }, [readPeriod]);
   return (
     <section
-      class={`article-list panel-mobile-${mobilePanel === "list" ? "show" : "hide"}`}
+      class={`article-list ${view === "feed" && (readPeriod || showReadFilter) ? "article-list--history" : ""} panel-mobile-${mobilePanel === "list" ? "show" : "hide"}`}
       aria-label="Article list"
     >
       <header class="list-header">
@@ -78,7 +85,9 @@ export function ArticleListPanel({
               <p class="eyebrow">{workspace}</p>
               <h1>
                 {view === "feed"
-                  ? `Feed (${unreadTotal})`
+                  ? readPeriod
+                    ? "Feed"
+                    : `Feed (${unreadTotal})`
                   : view === "subscription"
                     ? "Retained articles"
                     : "Read later"}
@@ -87,6 +96,19 @@ export function ArticleListPanel({
           )}
         </div>
         <div class="list-header__tools">
+          {view === "feed" && !readPeriod && (
+            <button
+              class="text-button"
+              disabled={paging || markingAll || unreadTotal === 0}
+              onClick={() =>
+                navigate(
+                  `/reading?${new URLSearchParams({ workspace: reader.workspaceId, ...(selected && !selected.read ? { article: selected.id } : {}) })}`,
+                )
+              }
+            >
+              Reading mode
+            </button>
+          )}
           <button
             class="icon-button"
             aria-label="Refresh subscription"
@@ -119,6 +141,50 @@ export function ArticleListPanel({
           </button>
         </div>
       </header>
+      {view === "feed" && (readPeriod || showReadFilter) && (
+        <div class="read-history-filter" aria-busy={paging}>
+          <button class="text-button" onClick={() => navigate("/")}>
+            ← Back to Home
+          </button>
+          <div class="read-history-filter__controls">
+            <span>Marked read</span>
+            <AutofillResistantField
+              type="date"
+              aria-label="Marked read on"
+              value={readPeriod ? localDay(new Date(readPeriod.from)) : ""}
+              disabled={paging}
+              onChange={(event) => {
+                const day = event.currentTarget.value;
+                if (!day) return;
+                void loadPage(
+                  "feed",
+                  null,
+                  undefined,
+                  undefined,
+                  1,
+                  undefined,
+                  readPeriodForDay(day),
+                );
+              }}
+            />
+            <button
+              class="icon-button"
+              aria-label="Clear reading date filter"
+              disabled={paging || !readPeriod}
+              onClick={() => loadPage("feed", null)}
+            >
+              ×
+            </button>
+          </div>
+          <span class="read-history-filter__status" role="status">
+            {paging
+              ? "Loading articles…"
+              : readPeriod
+                ? `${pageTotal} articles · ${Intl.DateTimeFormat().resolvedOptions().timeZone}`
+                : "All unread articles"}
+          </span>
+        </div>
+      )}
       {archived && (
         <div class="archive-strip">
           <Icon name="archive" />
@@ -149,7 +215,15 @@ export function ArticleListPanel({
           disabled={paging}
           aria-busy={paging}
           onClick={() =>
-            loadPage(view, selectedSubscriptionId, undefined, undefined, 1)
+            loadPage(
+              view,
+              selectedSubscriptionId,
+              undefined,
+              undefined,
+              1,
+              undefined,
+              readPeriod,
+            )
           }
         >
           <span>
@@ -168,6 +242,7 @@ export function ArticleListPanel({
       <div class="list-controls">
         <button
           disabled={
+            !!readPeriod ||
             markingAll ||
             pendingArticleMutations.size > 0 ||
             !filtered.some((article) => !article.read)
@@ -187,8 +262,14 @@ export function ArticleListPanel({
             ? `${(pageNumber - 1) * 50 + 1}–${Math.min(pageNumber * 50, pageTotal)} of ${pageTotal}`
             : "0 articles"}
         </span>
-        <span title="Sorted by the date first saved in this workspace">
-          Newest saved first
+        <span
+          title={
+            readPeriod
+              ? "Sorted by the latest read event in this period"
+              : "Sorted by the date first saved in this workspace"
+          }
+        >
+          {readPeriod ? "Recently marked read" : "Newest saved first"}
         </span>
       </div>
       <div class="article-scroll">
@@ -203,7 +284,7 @@ export function ArticleListPanel({
             />
           ))
         ) : (
-          <EmptyState />
+          <EmptyState readingHistory={!!readPeriod} />
         )}
       </div>
       <nav class="article-pager" aria-label="Article pages">
@@ -218,6 +299,8 @@ export function ArticleListPanel({
               newerCursor,
               "newer",
               Math.max(1, pageNumber - 1),
+              undefined,
+              readPeriod,
             )
           }
         >
@@ -235,6 +318,8 @@ export function ArticleListPanel({
               olderCursor,
               "older",
               pageNumber + 1,
+              undefined,
+              readPeriod,
             )
           }
         >

@@ -78,7 +78,7 @@ test("keyboard shortcut opens the unified search page", async ({ page }) => {
   );
   await page.goto("/reader");
   await expect(
-    page.getByRole("button", { name: "Search news and wiki", exact: true }),
+    page.getByRole("button", { name: "Search", exact: true }),
   ).toBeEnabled();
   await page.keyboard.press("Control+k");
   await expect(page).toHaveURL(/\/search$/);

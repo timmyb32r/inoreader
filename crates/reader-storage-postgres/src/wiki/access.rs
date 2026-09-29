@@ -3,11 +3,36 @@ use async_trait::async_trait;
 use reader_wiki::*;
 #[async_trait]
 impl Store for PostgresWikiStore {
+    async fn collection(
+        &self,
+        a: Uuid,
+        n: Uuid,
+        kind: Collection,
+        offset: u32,
+    ) -> Result<PageList, Error> {
+        self.read_collection(a, n, kind, offset).await
+    }
+    async fn organization(
+        &self,
+        a: Uuid,
+        n: Uuid,
+        p: Uuid,
+        offset: u32,
+    ) -> Result<Organization, Error> {
+        self.read_organization(a, n, p, offset).await
+    }
+    async fn favorite(&self, a: Uuid, n: Uuid, p: Uuid, favorite: bool) -> Result<(), Error> {
+        self.set_favorite(a, n, p, favorite).await
+    }
+    async fn subscription_root(&self, a: Uuid, n: Uuid) -> Result<Page, Error> {
+        self.ensure_subscription_root(a, n).await
+    }
+
     async fn revision(&self, a: Uuid, n: Uuid, p: Uuid, v: Uuid) -> Result<Revision, Error> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
         let (_, role) = authorize(&mut tx, a, n, false).await?;
         load_page(&mut tx, n, p, role).await?;
-        let row=sqlx::query("SELECT r.namespace,r.page AS id,r.revision,r.name,r.markdown,r.deleted,r.author,r.created_at AS updated_at,r.action,a.document::jsonb->>'username' AS author_name FROM wiki_revisions r JOIN accounts a ON a.id=r.author WHERE r.namespace=$1 AND r.page=$2 AND r.revision=$3").bind(n).bind(p).bind(v).fetch_optional(&mut *tx).await.map_err(storage)?.ok_or(Error::NotFound)?;
+        let row=sqlx::query("SELECT r.parent,r.namespace,r.page AS id,r.revision,r.name,r.markdown,r.deleted,r.author,r.created_at AS updated_at,r.action,a.document::jsonb->>'username' AS author_name FROM wiki_revisions r JOIN accounts a ON a.id=r.author WHERE r.namespace=$1 AND r.page=$2 AND r.revision=$3").bind(n).bind(p).bind(v).fetch_optional(&mut *tx).await.map_err(storage)?.ok_or(Error::NotFound)?;
         let result = Revision {
             page: page_row(&row)?,
             action: row.try_get("action").map_err(storage)?,

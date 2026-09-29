@@ -46,3 +46,11 @@ and repeat the audit. Missing publication evidence remains explicitly unknown.
 Standards: [Schema.org datePublished](https://schema.org/datePublished),
 [Open Graph article metadata](https://ogp.me/),
 [RSS item pubDate](https://www.rssboard.org/rss-specification).
+
+Huawei publisher extraction: `bbs.huaweicloud.com/blogs/*` uses the unique desktop
+`.article-write-time.isPc` publication byline. Its full text remains evidence;
+only the exact `发表于` label is removed when parsing. The local clock retains
+seconds without inventing a timezone. Huawei international news pages use their
+unique direct-child `body > time[datetime]`, retaining its explicit offset and
+precision. Duplicate candidate bylines stay unresolved. Retained raw HTML can be
+reprocessed with the existing publication-date backfill command.

@@ -82,6 +82,7 @@ impl PostgresRepository {
             reader_application::ContentStatus::Pending
         };
         Ok(ArticlePresentation {
+            marked_read_at: None,
             publication,
             article,
             subscription_ids,
@@ -208,6 +209,7 @@ impl PostgresRepository {
                     reader_application::ContentStatus::Pending
                 };
                 Ok(ArticlePresentation {
+                    marked_read_at: None,
                     publication,
                     article,
                     subscription_ids,

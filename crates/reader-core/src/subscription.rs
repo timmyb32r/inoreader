@@ -18,6 +18,7 @@ pub enum SubscriptionStatus {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Subscription {
     id: SubscriptionId,
     workspace_id: WorkspaceId,
@@ -28,8 +29,6 @@ pub struct Subscription {
     source_title: String,
     #[serde(default)]
     custom_name: Option<String>,
-    #[serde(default)]
-    personal_note: String,
     #[serde(default)]
     created_at: Option<DateTime<Utc>>,
     status: SubscriptionStatus,
@@ -51,7 +50,6 @@ impl Subscription {
             source_url_exact: None,
             source_title: title,
             custom_name: None,
-            personal_note: String::new(),
             created_at: Some(Utc::now()),
             status: SubscriptionStatus::Active,
             revision: 0,
@@ -95,9 +93,6 @@ impl Subscription {
     pub fn custom_name(&self) -> Option<&str> {
         self.custom_name.as_deref()
     }
-    pub fn personal_note(&self) -> &str {
-        &self.personal_note
-    }
     pub fn created_at(&self) -> Option<DateTime<Utc>> {
         self.created_at
     }
@@ -114,12 +109,6 @@ impl Subscription {
         let custom_name = (!title.is_empty()).then_some(title);
         if self.custom_name != custom_name {
             self.custom_name = custom_name;
-            self.revision += 1;
-        }
-    }
-    pub fn set_personal_note(&mut self, note: String) {
-        if self.personal_note != note {
-            self.personal_note = note;
             self.revision += 1;
         }
     }

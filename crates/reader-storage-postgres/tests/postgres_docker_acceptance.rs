@@ -19,11 +19,17 @@ use std::{
 };
 use uuid::Uuid;
 
+#[path = "support/focused_reading.rs"]
+mod focused_reading;
+
 #[path = "support/search_content.rs"]
 mod search_content;
 
 #[path = "support/search.rs"]
 mod search;
+
+#[path = "support/wiki_organization.rs"]
+mod wiki_organization;
 
 #[path = "support/wiki.rs"]
 mod wiki;
@@ -37,10 +43,16 @@ mod manual_refresh;
 #[path = "support/recurring_recovery.rs"]
 mod recurring_recovery;
 
+#[path = "support/note_retirement.rs"]
+mod note_retirement;
+
 #[path = "support/schema_contracts.rs"]
 mod schema_contracts;
 #[path = "support/schema_upgrade.rs"]
 mod schema_upgrade;
+
+#[path = "support/ai_budget.rs"]
+mod ai_budget;
 
 #[path = "support/ai.rs"]
 mod ai_tests;
@@ -230,7 +242,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 60); // Includes account-owned encrypted Zhihu sessions.
+    assert_eq!(table_count, 72); // Includes ratings and idempotent completion receipts.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -295,10 +307,12 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_lease_fencing(&pool).await;
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
+    ai_budget::verify(&pool).await;
     ai_tests::verify(&pool).await;
     ai_tests::shutdown::parent(&connection);
     glossary_tests::verify(&pool).await;
     bulk_read::verify(&pool).await;
+    focused_reading::verify(&pool).await;
     article_delivery::verify(&pool).await;
     subscription_deletion::verify(&pool).await;
     attention::verify(&pool).await;
@@ -306,6 +320,8 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     admission::verify(&pool).await;
     browser_tests::verify(&pool).await;
     wiki::verify(&pool).await;
+    note_retirement::verify(&pool).await;
+    wiki_organization::verify(&pool).await;
     verify_database_backup_restore(&container, &pool).await;
 }
 
@@ -628,14 +644,13 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .expect("list second workspace articles")
         .is_empty());
 
-    let mut legacy = Subscription::new(
+    let legacy = Subscription::new(
         SubscriptionId::new(),
         workspace_a.id(),
         url::Url::parse("http://china-radio-international.duckdns.org:8080/example.xml")
             .expect("valid legacy URL"),
         "Legacy title".into(),
     );
-    legacy.set_personal_note("private retained note".into());
     repository
         .save_subscription(None, legacy.clone())
         .await
@@ -684,7 +699,6 @@ async fn verify_repository_isolation(pool: &PgPool) {
         .subscription(legacy.id())
         .await
         .expect("read migrated subscription");
-    assert_eq!(migrated.personal_note(), "private retained note");
     assert_eq!(
         migrated.source_url_exact(),
         "https://publisher.example/blog"
@@ -944,6 +958,7 @@ async fn verify_database_backup_restore(container: &PostgresContainer, pool: &Pg
         "restore includes every application table"
     );
     let required_nonempty = [
+        "article_read_events",
         "search_content",
         "accounts",
         "workspaces",
@@ -957,6 +972,12 @@ async fn verify_database_backup_restore(container: &PostgresContainer, pool: &Pg
         "glossary_definitions",
         "ai_definitions",
         "ai_definition_operations",
+        "ai_spending",
+        "ai_model_preferences",
+        "ai_call_models",
+        "ai_budget_overrides",
+        "ai_summary_queue",
+        "ai_automatic_accounts",
         "wiki_namespaces",
         "wiki_members",
         "wiki_pages",

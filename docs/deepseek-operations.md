@@ -1,5 +1,9 @@
 # DeepSeek operations
 
+Current behavior is specified in [automatic summaries and daily budget](automatic-summaries.md).
+Production uses a shared $3 Moscow-day limit, automatic unread backfill and new
+full-text processing; the profile reports separate per-mode estimated spending.
+
 `reader-ai` owns the provider protocol, prompt gate, encrypted credentials and
 conversation orchestration. `PostgresAiStore` owns account-scoped storage and
 fenced jobs. The UI only receives public profile/chat DTOs; raw keys, the master
@@ -36,7 +40,7 @@ Production now runs image
 `sha256:24929210d1617d58f2e9630ae8573f51c7f84c5777c0961ea9b9a851e4ecbdc6`
 with owner-only access. The owner has configured their provider key; the latest
 public smoke confirmed it remained enabled and both saved chats were readable
-after restart. New summaries default to Flash with background Pro verification.
+after restart. Both summary and verification now default to Flash.
 See [the compact-chat deployment and verification record](tasks/flash-chat-2026-09-27.md).
 The earlier deployment report records the original, then-keyless state.
 
@@ -44,7 +48,7 @@ The earlier deployment report records the original, then-keyless state.
 `prompts/reading-data-news/transport.md` instruction is appended with one newline.
 The standalone research deliverable `system.md` already combines those parts and
 must not be supplied as `prompt_path`. `review.prompt_path` points to the separate
-factual-review instruction (`review.md`), with the same transport appended once.
+factual-review instruction (`review.md`), with the dedicated correction transport appended once.
 Both artifacts may be absent while approval is false. Enabling approval requires
 both files; no single-request fallback is used for initial summaries.
 
@@ -59,22 +63,21 @@ responsibility, outside the production approval gate.
 0.3}` or `{kind: thinking, effort: high}`. Thinking supports `low`, `high`, and
 `max`; it rejects a temperature rather than silently ignoring it. Standard
 temperature must be finite and in `0..=2`. The selected mode is saved with each
-conversation's model, prompt and output limit. Subsequent turns and retries use
-that snapshot even after deployment configuration changes; explicit regeneration
-creates a new version with the new configuration. Reasoning deltas are never
-shown, persisted or logged. Provider completion-token usage includes reasoning
-tokens, so cost estimates keep the full reported completion count. The nested
-`review` configuration independently selects the review model/mode/output bound
-and tariffs. Both prompt bodies/versions and both sets of parameters are frozen
-in the conversation, along with context/input/response/framing limits.
+conversation's prompt and output limit. Subsequent turns and retries retain these
+mode/limit snapshots. Reviews use the currently approved correction prompt; its exact text is retained with each response. Existing summaries are reused, never regenerated.
+Reasoning deltas are never shown, persisted or logged; completion-token usage
+includes reasoning. The nested `review` config owns its prompt, mode and output
+bound. The `models` catalog owns mandatory Flash and Pro tariffs exactly once.
 
-Each conversation also freezes the exact USD input, cached-input and output
-tariffs for that model. Retries and later turns estimate cost with those saved
-rates, even when the worker configuration changes models or tariffs. Explicit
-regeneration creates a new snapshot with the newly configured rates. These are
-estimates at the saved prices, not a claim about the provider's current billing.
-The required persisted `cost_rates` field is validated during deserialization;
-missing or invalid rates fail explicitly instead of substituting current prices.
+Settings exposes independent Summary and Fact-check model selectors, both Flash
+by default, including existing accounts without an explicit choice. Preferences
+are account-owned and survive key removal. Each paid request reads them at
+admission; queued jobs and retained drafts follow the current choice. Chat
+replies use the summary choice; translations and terms remain Flash. The selected
+model and exact tariff are saved in `ai_call_models` atomically with the budget
+reservation. Editing preferences or deployment tariffs cannot alter an admitted
+request's accounting. Existing historical calls keep their old snapshots and costs.
+Prices remain conservative peak-price estimates, not the provider's invoice.
 
 The server reads exactly 32 random master-key bytes from the file identified by
 `AI_ENCRYPTION_KEY_FILE`. Compose mounts `secrets/ai-encryption-key` at
@@ -95,19 +98,17 @@ Chats retain full extracted safe HTML and a plaintext snapshot whose text-node
 boundaries are newline separators. Quotes are exact contiguous matches against
 that plaintext. PostgreSQL captures the selected content manifest and all chunks
 in one statement's MVCC snapshot. Source refresh and old chunk cleanup cannot
-change an existing conversation. New versions are explicit; existing output is
-never replaced by regeneration.
+change an existing conversation. Existing output is never regenerated automatically.
 
 Generation is a durable job, not a long-lived API request. New initial summaries
-and explicit regeneration use `deepseek-flash`, standard/non-thinking mode at
-configured temperature0.3, then Pro/low checks the identical full article and
+use `deepseek-flash`, standard/non-thinking mode at
+configured temperature0.3, then Flash/low by default checks the identical full article and
 retained draft. The owner explicitly requested this faster flow on2026-09-27;
 the candidate04 style/review text is unchanged, but the old Pro/high research
 scores do not evaluate this new model configuration. Configured Flash tariffs
 are peak-price estimates (USD0.3 input,0.006 cached input,1.2 output per million;
 [provider prices](https://api-docs.deepseek.com/quick_start/pricing/) checked
-2026-09-27); actual off-peak billing can be lower. Existing chats retain their
-original model/mode/rate snapshots; New summary explicitly uses current defaults.
+2026-09-29); actual off-peak billing can be lower. The widget has no New summary action.
 
 Once the first complete response passes transport and exact-quote validation,
 the public API projects the retained draft as an early preview. It is labelled
@@ -115,18 +116,18 @@ not yet checked while verification continues in the background. Failure or Stop
 keeps the preview; Retry runs only the missing check. Partial verifier output
 never replaces it. Successful verification atomically replaces the displayed
 body with the complete checked response. The original envelope remains retained.
-The first standalone bold
-heading must preserve every title byte, including Unicode whitespace. The worker
-checks after recording known usage; the repository repeats the same invariant
-at the final accepted-state transition. A mismatch fails explicitly and permits
-review-only retry from the saved draft. The draft itself is allowed to contain a
-title error that review can correct; chat replies do not require a title.
+The application prepends the exact source heading to new drafts. The checker
+returns only exact segment-scoped corrections; worker and repository both validate
+the complete patch before publication. Rejected/unfinished reviews retain the
+preview and are retried only by an explicit user action. The exact review response
+and actual system prompt are retained in `ai_call_responses`, including invalid
+JSON. See [targeted review](targeted-review.md).
 This second model pass reduces factual errors; it is not a
 mathematical guarantee of truth. Follow-up questions use one streaming request.
 
 
 The compact widget has no version selector, profile shortcut or request-cost
-panel. Copy, new summary, send and recovery use labelled icons. Stop/retry/reconnect
+panel. Copy, send and recovery use labelled icons. Stop/retry/reconnect
 appear only when applicable, in fixed reserved positions. Profile/key management
 remains under the account menu. Older versions and per-call usage remain persisted
 and available through the account-scoped API. The message viewport keeps its
@@ -154,9 +155,8 @@ estimate. `max_input_bytes` remains an additional explicit byte budget. The
 provider also enforces its exact token limit at the request boundary.
 
 An expired job lease is marked interrupted, preserving verified partial content.
-It is never automatically submitted again because provider billing may already
-have occurred. Retry is an explicit new operation, retaining the original source
-snapshot and question. If a complete draft was saved, retry resumes verification
+Paid summary, review and follow-up failures require an explicit retry; uncertain
+billing keeps its reservation. Setup attempts before a chat exists remain bounded. Each retry is a new operation retaining the source snapshot and question. If a complete draft was saved, retry resumes verification
 only; it does not charge for another draft. Each request has an independent ID,
 assistant attempt, phase, terminal outcome and optional reported usage. Completed
 first-stage billing survives second-stage failure, cancellation and process

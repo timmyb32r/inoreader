@@ -1,0 +1,146 @@
+.source-activity {
+  overflow: auto;
+  min-width: 0;
+  padding: 24px;
+  background: var(--bg);
+}
+.source-activity > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.source-activity h1 {
+  margin: 6px 0 10px;
+  font-size: clamp(24px, 3vw, 38px);
+}
+.source-activity header p,
+.source-activity-note {
+  color: var(--text-muted);
+}
+.source-activity-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.source-activity-controls label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.source-activity-controls input {
+  width: 160px;
+  height: 38px;
+  padding: 8px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.source-activity-controls button {
+  width: 104px;
+  height: 38px;
+}
+.source-activity-status {
+  min-height: 54px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: auto;
+  font-size: 13px;
+}
+.source-activity-note {
+  min-height: 42px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.source-treemap-frame {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.source-treemap {
+  height: clamp(300px, 48vh, 560px);
+  position: relative;
+}
+.source-treemap-tile {
+  position: absolute;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--surface);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+.source-treemap-tile:hover,
+.source-treemap-tile:focus-visible,
+.source-treemap-tile:active {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
+.source-treemap-tile > span {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow: hidden;
+  text-align: left;
+}
+.source-treemap-tile strong {
+  font-size: 13px;
+  overflow: hidden;
+}
+.source-treemap-tile small {
+  font-size: 12px;
+}
+.source-treemap-detail {
+  height: 44px;
+  padding: 12px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.source-activity-ranking {
+  margin-top: 24px;
+  min-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: auto;
+  background: var(--surface);
+}
+.source-activity table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.source-activity caption {
+  text-align: left;
+  padding: 16px;
+  font-weight: 600;
+}
+.source-activity th,
+.source-activity td {
+  padding: 12px 16px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+}
+.source-activity tr:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+}
+.source-activity a {
+  color: var(--accent-deep);
+}
+@media (max-width: 760px) {
+  .source-activity {
+    padding: 14px;
+  }
+  .source-activity > header {
+    flex-direction: column;
+  }
+}

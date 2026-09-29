@@ -1,49 +1,84 @@
-import { render, screen } from "@testing-library/preact";
-import {
-  ActivityDashboard,
-  activityStorageKey,
-  readActivity,
-  recordActivity,
-} from "./ActivityDashboard";
+import { act, render, screen, waitFor } from "@testing-library/preact";
+import { ApiClient } from "../api/client";
+import { ActivityDashboard } from "./ActivityDashboard";
 
 describe("activity dashboard", () => {
-  const memory = new Map<string, string>();
-  beforeEach(() => {
-    memory.clear();
+  it("shows server article counts, never the former local elapsed time", async () => {
+    const now = new Date();
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     Object.defineProperty(window, "localStorage", {
       configurable: true,
-      value: {
-        getItem: (key: string) => memory.get(key) ?? null,
-        setItem: (key: string, value: string) => memory.set(key, value),
-        clear: () => memory.clear(),
-      },
+      value: { getItem: () => JSON.stringify({ [day]: 3600000 }) },
     });
-  });
-
-  it("persists elapsed time under an account-specific key", () => {
-    recordActivity("account-one", 90_000, new Date("2026-09-26T12:00:00Z"));
-    expect(readActivity("account-one")["2026-09-26"]).toBe(90_000);
-    expect(readActivity("account-two")).toEqual({});
-    expect(
-      window.localStorage.getItem(activityStorageKey("account-one")),
-    ).not.toBeNull();
-  });
-
-  it("renders a fixed daily grid and accessible minute labels", () => {
+    const transport = vi
+      .fn()
+      .mockResolvedValue({ days: [{ day, count: 7, arrived: 12 }] });
     render(
       <ActivityDashboard
-        activity={{ "2026-09-26": 3_600_000 }}
+        client={new ApiClient(transport)}
+        workspaceId="one"
         workspaceName="Personal"
         onOpenLibrary={() => undefined}
       />,
     );
+    await waitFor(() =>
+      expect(
+        screen.getByText("articles marked read today").previousElementSibling,
+      ).toHaveTextContent("7"),
+    );
+    const grid = screen.getByRole("grid", {
+      name: "Daily articles marked read",
+    });
+    expect(grid.querySelectorAll('[role="gridcell"]')).toHaveLength(364);
+    const firstDay = new Date(now);
+    firstDay.setDate(firstDay.getDate() - 363);
     expect(
-      screen.getByRole("heading", { name: "Your reading activity" }),
+      (grid.querySelector('[role="gridcell"]') as HTMLElement).style
+        .gridRowStart,
+    ).toBe(String(((firstDay.getDay() + 6) % 7) + 1));
+    expect(
+      screen.getByRole("gridcell", { name: /: 7 articles$/ }),
     ).toBeVisible();
+    expect(transport.mock.calls[0][0]).toContain(
+      "/api/workspaces/one/reading-activity?timezone=",
+    );
+    expect(screen.queryByText(/minutes/)).toBeNull();
+  });
+
+  it("keeps the calendar mounted during loading and failure; deduplicates refresh", async () => {
+    let reject!: (error: Error) => void;
+    const transport = vi.fn().mockImplementation(
+      () =>
+        new Promise((_, no) => {
+          reject = no;
+        }),
+    );
+    render(
+      <ActivityDashboard
+        client={new ApiClient(transport)}
+        workspaceId="one"
+        workspaceName="Personal"
+        onOpenLibrary={() => undefined}
+      />,
+    );
+    const grid = screen.getByRole("grid");
+    const button = screen.getByRole("button", { name: "Open feed" });
+    expect(grid).toHaveAttribute("aria-busy", "true");
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(transport).toHaveBeenCalledTimes(1);
+    await act(async () => reject(new Error("offline")));
     expect(
       screen
-        .getByRole("grid", { name: "Daily minutes" })
-        .querySelectorAll('[role="gridcell"]'),
-    ).toHaveLength(364);
+        .getAllByRole("status")
+        .every((node) => node.textContent?.includes("Could not load")),
+    ).toBe(true);
+    expect(screen.getByRole("grid")).toBe(grid);
+    expect(grid.querySelectorAll('[role="gridcell"]')).toHaveLength(364);
+    expect(screen.getByRole("button", { name: "Open feed" })).toBe(button);
+    expect(
+      screen.getByText("articles marked read today").previousElementSibling,
+    ).toHaveTextContent("—");
   });
 });

@@ -1,3 +1,4 @@
+import { WikiOrganization } from "./WikiOrganization";
 import { SearchField } from "../ui/SearchField";
 import "../search/search.css";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -50,6 +51,8 @@ export function NamespaceWorkspace({
   const listGeneration = useRef(0);
   const mode = parts[2] ?? "",
     id = parts[3];
+  const collection =
+    mode === "favorites" || mode === "standalone" ? mode : null;
   const trash = mode === "trash",
     access = mode === "access",
     isNew = mode === "new";
@@ -59,7 +62,9 @@ export function NamespaceWorkspace({
   const loadList = async (o = offset, s = search) => {
     const token = generation.current,
       sequence = ++listGeneration.current;
-    const data = await client.pages(namespace, s, trash, o);
+    const data = await (collection
+      ? client.collection(namespace, collection, o)
+      : client.pages(namespace, s, trash, o));
     if (token !== generation.current || sequence !== listGeneration.current)
       return;
     setList(data);
@@ -89,7 +94,9 @@ export function NamespaceWorkspace({
     setRenaming(false);
     setStatus("Loading…");
     Promise.all([
-      client.pages(namespace, "", trash),
+      collection
+        ? client.collection(namespace, collection)
+        : client.pages(namespace, "", trash),
       mode === "page" && id
         ? client.page(namespace, id)
         : Promise.resolve(null),
@@ -209,21 +216,42 @@ export function NamespaceWorkspace({
         >
           New page
         </button>
+        <nav class="wiki-collections" aria-label="Wiki collections">
+          <button
+            class={!collection && !trash ? "active" : ""}
+            onClick={() => navigate(`/wiki/${namespace}`)}
+          >
+            All pages
+          </button>
+          <button
+            class={collection === "favorites" ? "active" : ""}
+            onClick={() => navigate(`/wiki/${namespace}/favorites`)}
+          >
+            ★ Favorites
+          </button>
+          <button
+            class={collection === "standalone" ? "active" : ""}
+            onClick={() => navigate(`/wiki/${namespace}/standalone`)}
+          >
+            Standalone pages
+          </button>
+        </nav>
         <div class="wiki-page-list">
-          {list.items.map((p) => (
-            <button
-              class={p.id === id ? "active" : ""}
-              onClick={() => navigate(`/wiki/${namespace}/page/${p.id}`)}
-            >
-              {p.name}
-              {p.excerpt && (
-                <small class="wiki-search-excerpt">
-                  {p.excerpt}
-                  {p.excerpt_truncated ? "…" : ""}
-                </small>
-              )}
-            </button>
-          ))}
+          {!collection &&
+            list.items.map((p) => (
+              <button
+                class={p.id === id ? "active" : ""}
+                onClick={() => navigate(`/wiki/${namespace}/page/${p.id}`)}
+              >
+                {p.name}
+                {p.excerpt && (
+                  <small class="wiki-search-excerpt">
+                    {p.excerpt}
+                    {p.excerpt_truncated ? "…" : ""}
+                  </small>
+                )}
+              </button>
+            ))}
         </div>
         <div class="wiki-pagination">
           <AsyncButton
@@ -327,6 +355,12 @@ export function NamespaceWorkspace({
                 </details>
               </div>
             </header>
+            <WikiOrganization
+              key={page.id}
+              {...{ client, page, canEdit, navigate }}
+              pageSize={limits.page_size}
+              onSaved={open}
+            />
             {page.deleted && (
               <p>This page is in trash. Its history is preserved.</p>
             )}
@@ -382,12 +416,43 @@ export function NamespaceWorkspace({
           </>
         ) : (
           <div class="wiki-empty">
-            <h1>{trash ? "Trash" : "Your wiki"}</h1>
+            <h1>
+              {trash
+                ? "Trash"
+                : collection === "favorites"
+                  ? "Favorites"
+                  : collection === "standalone"
+                    ? "Standalone pages"
+                    : "Your wiki"}
+            </h1>
             <p>
               {trash
                 ? "Select a deleted page to inspect its history or restore it."
-                : "Select a page or create your first one."}
+                : collection === "favorites"
+                  ? "Your starred pages in this namespace."
+                  : collection === "standalone"
+                    ? "Pages with neither a parent nor child pages."
+                    : "Select a page or create your first one."}
             </p>
+            {collection && (
+              <div
+                class="wiki-collection-results"
+                aria-label={
+                  collection === "favorites"
+                    ? "Favorite pages"
+                    : "Standalone pages"
+                }
+              >
+                {list.items.map((p) => (
+                  <button
+                    onClick={() => navigate(`/wiki/${namespace}/page/${p.id}`)}
+                  >
+                    <strong>{p.name}</strong>
+                  </button>
+                ))}
+                {!list.items.length && <p>No pages in this collection.</p>}
+              </div>
+            )}
           </div>
         )}
         {missing && !editing && (

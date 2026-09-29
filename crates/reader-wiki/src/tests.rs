@@ -78,3 +78,19 @@ fn configured_limits_reject_unsupported_storage_and_timer_capacities() {
     raw.search_excerpt_characters = 0;
     assert!(Limits::try_from(raw).is_err());
 }
+
+#[test]
+fn parent_changes_require_revision_and_reject_self_before_storage() {
+    let id = Uuid::new_v4();
+    for revision in [None, Some(Uuid::new_v4())] {
+        let raw = serde_json::json!({"operation":Uuid::new_v4(),"page":id,"expected_revision":revision,"change":{"action":"set_parent","parent":id}});
+        assert!(Write::new(serde_json::from_value(raw).unwrap(), &limits()).is_err());
+    }
+    let valid = WriteInput {
+        operation: Uuid::new_v4(),
+        page: id,
+        expected_revision: Some(Uuid::new_v4()),
+        change: ChangeInput::SetParent { parent: None },
+    };
+    assert!(Write::new(valid, &limits()).is_ok());
+}

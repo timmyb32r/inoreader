@@ -102,7 +102,14 @@ pub struct PublicationEvidence {
 }
 impl PublicationEvidence {
     pub fn date(&self) -> Option<PublicationDate> {
-        PublicationDate::parse(&self.raw)
+        // Huawei's verified byline includes a publication label. Keep the full
+        // evidence verbatim; only the date parser removes this exact label.
+        let value = if self.source == "html:huawei-blog-byline" {
+            self.raw.trim().strip_prefix("发表于")?.trim()
+        } else {
+            &self.raw
+        };
+        PublicationDate::parse(value)
     }
 }
 

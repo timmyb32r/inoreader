@@ -1,3 +1,7 @@
+import { FocusedReading } from "./reading/FocusedReading";
+import { SourceActivityPage } from "./SourceActivityPage";
+import { PanelDock } from "../ui/PanelDock";
+import { readPeriodForDay } from "./readPeriod";
 import { SearchApplication } from "../search/SearchApplication";
 import { CountdownTimer } from "./timer/CountdownTimer";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
@@ -12,7 +16,7 @@ import { useGlossary } from "../glossary/useGlossary";
 import { reportLibraryReady } from "../performanceDiagnostics";
 import { Icon } from "../ui/Icon";
 import { ModalDialog } from "../ui/ModalDialog";
-import { ActivityDashboard, useActivityTracker } from "./ActivityDashboard";
+import { ActivityDashboard } from "./ActivityDashboard";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { ArticleReader } from "./ArticleReader";
 import { ArticleListPanel } from "./ArticleListPanel";
@@ -92,10 +96,9 @@ export function ReaderApplication({
   );
   const noticeTimer = useRef<number>();
   const accountMenuRef = useRef<HTMLDivElement>(null);
-  const dirtySubscriptionNote = useRef(false);
   const dirtyWiki = useRef(false);
   const confirmDiscard = () =>
-    (!dirtySubscriptionNote.current && !dirtyWiki.current) ||
+    !dirtyWiki.current ||
     window.confirm(
       "Leave with unsaved changes? Text not saved to the server may be lost.",
     );
@@ -138,6 +141,14 @@ export function ReaderApplication({
     subscriptions,
     announce,
     () => setMobilePanel("article"),
+    (restored) => {
+      setSubscriptions(restored.subscriptions);
+      setArchived(
+        restored.workspaces.find((w) => w.id === restored.activeWorkspaceId)
+          ?.archived ?? false,
+      );
+      setNewCount(0);
+    },
   );
   const {
     workspaceId,
@@ -164,6 +175,48 @@ export function ReaderApplication({
     markAllRead,
     replaceWorkspace,
   } = reader;
+  useEffect(() => {
+    document.title =
+      locationPath === "/reader" && view === "feed"
+        ? `Feed (${unreadTotal}) · Reader`
+        : "Reader";
+    return () => {
+      document.title = "Reader";
+    };
+  }, [locationPath, view, unreadTotal]);
+  useEffect(() => {
+    if (
+      readerPath !== "/reading" &&
+      glossary.target &&
+      glossary.target.id !== selected?.id
+    )
+      glossary.close();
+  }, [selected?.id]);
+  const automaticTarget = useRef("");
+  useEffect(() => {
+    if (locationPath !== "/reader") {
+      automaticTarget.current = "";
+      return;
+    }
+    if (!selected || selected.fullText !== "ready" || !aiProfile?.configured) {
+      automaticTarget.current = "";
+      return;
+    }
+    const identity = `${workspaceId}/${selected.id}`;
+    if (automaticTarget.current === identity) return;
+    automaticTarget.current = identity;
+    void chat.open({
+      articleId: selected.id,
+      workspaceId,
+      title: selected.title,
+    });
+  }, [
+    locationPath,
+    workspaceId,
+    selected?.id,
+    selected?.fullText,
+    aiProfile?.configured,
+  ]);
   const subscriptionCommands = useSubscriptionCommands(
     client,
     account.id,
@@ -180,7 +233,6 @@ export function ReaderApplication({
     subscriptions.find((item) => item.id === selectedSubscriptionId) ?? null;
   const settingsSubscription =
     subscriptions.find((item) => item.id === settingsTarget) ?? null;
-  const activity = useActivityTracker(account.id);
   useEffect(() => {
     if (account.id)
       setSidebarCollapsed(
@@ -293,13 +345,15 @@ export function ReaderApplication({
   return (
     <div class={`app theme-${theme}`} data-theme={theme}>
       <header class="topbar">
-        <button
-          class="mobile-menu icon-button"
-          aria-label="Open navigation"
-          onClick={() => setMobilePanel("nav")}
-        >
-          <Icon name="menu" />
-        </button>
+        {readerPath !== "/reading" && (
+          <button
+            class="mobile-menu icon-button"
+            aria-label="Open navigation"
+            onClick={() => setMobilePanel("nav")}
+          >
+            <Icon name="menu" />
+          </button>
+        )}
         <a
           class="brand"
           href="/"
@@ -316,15 +370,6 @@ export function ReaderApplication({
         </a>
         <div class="topbar__spacer" />
         <CountdownTimer accountId={bootstrap.account.id} />
-        <button
-          class="search-stub"
-          onClick={() => navigate("/search")}
-          aria-label="Search news and wiki"
-        >
-          <Icon name="search" />
-          <span>Search</span>
-          <kbd>⌘ K</kbd>
-        </button>
         <button
           class="icon-button"
           aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
@@ -384,50 +429,77 @@ export function ReaderApplication({
         </div>
       </header>
       <main
-        class={`reader-grid${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
+        class={`reader-grid${readerPath === "/reading" ? " reader-grid--focused" : ""}${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" || readerPath === "/source-activity" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
       >
         <>
-          <ReaderSidebar
-            key={`${account.id}/${workspaceId}`}
-            {...{
-              sidebarCollapsed,
-              mobilePanel,
-              toggleSidebar,
-              workspace,
-              workspaces,
-              archived,
-              switchingWorkspace,
-              switchWorkspace,
-              readerPath,
-              goHome,
-              paging,
-              view,
-              selectedSubscriptionId,
-              chooseView,
-              unreadTotal,
-              subscriptions,
-              navigate,
-              announce,
-            }}
-            onArchive={() => setModal("archive")}
-            onAdd={() => setModal("add")}
-            onSelectSubscription={(id) => {
-              if (navigate("/reader")) {
-                loadPage("subscription", id, undefined, undefined, 1);
-                setMobilePanel("list");
-              }
-            }}
-            onPause={(id) => {
-              setPauseTarget(id);
-              setModal("pause");
-            }}
-            onSettings={() => {
-              setSettingsTarget(selectedSubscriptionId);
-              setModal("shortcuts");
-            }}
-            onRefresh={subscriptionCommands.refresh}
-          />
-          {readerPath === "/search" ? (
+          {readerPath !== "/reading" && (
+            <ReaderSidebar
+              key={`${account.id}/${workspaceId}`}
+              {...{
+                sidebarCollapsed,
+                mobilePanel,
+                toggleSidebar,
+                workspace,
+                workspaces,
+                archived,
+                switchingWorkspace,
+                switchWorkspace,
+                readerPath,
+                goHome,
+                paging,
+                view,
+                selectedSubscriptionId,
+                chooseView,
+                unreadTotal,
+                subscriptions,
+                navigate,
+                announce,
+              }}
+              onArchive={() => setModal("archive")}
+              onAdd={() => setModal("add")}
+              onSelectSubscription={(id) => {
+                if (navigate("/reader")) {
+                  loadPage("subscription", id, undefined, undefined, 1);
+                  setMobilePanel("list");
+                }
+              }}
+              onPause={(id) => {
+                setPauseTarget(id);
+                setModal("pause");
+              }}
+              onSettings={() => {
+                setSettingsTarget(selectedSubscriptionId);
+                setModal("shortcuts");
+              }}
+              onRefresh={subscriptionCommands.refresh}
+            />
+          )}
+          {readerPath === "/reading" ? (
+            <FocusedReading
+              key={`${account.id}/${workspaceId}`}
+              client={client}
+              owner={account.id}
+              workspace={workspaceId}
+              chat={chat}
+              profile={aiProfile}
+              glossary={glossary}
+              navigate={navigate}
+              announce={announce}
+              onExit={(articleId) => {
+                navigate(
+                  `/reader?${new URLSearchParams({ workspace: workspaceId, ...(articleId ? { article: articleId } : {}) })}`,
+                );
+                void loadPage("feed", null, undefined, undefined, 1, articleId);
+              }}
+            />
+          ) : readerPath === "/source-activity" ? (
+            <SourceActivityPage
+              key={`${account.id}/${workspaceId}`}
+              client={client}
+              workspaceId={workspaceId}
+              navigate={navigate}
+            />
+          ) : readerPath === "/search" ? (
             <SearchApplication
               key={account.id}
               client={client}
@@ -447,9 +519,36 @@ export function ReaderApplication({
             />
           ) : readerPath === "/" ? (
             <ActivityDashboard
-              activity={activity}
+              key={`${account.id}/${workspaceId}`}
+              client={client}
+              workspaceId={workspaceId}
               workspaceName={workspace}
+              onArrivedDay={(day) =>
+                navigate(
+                  `/source-activity?day=${day}&workspace=${encodeURIComponent(workspaceId)}`,
+                )
+              }
               onOpenLibrary={() => chooseView("feed")}
+              opening={paging}
+              onReadDay={async (day) => {
+                const period = readPeriodForDay(day);
+                if (
+                  await loadPage(
+                    "feed",
+                    null,
+                    undefined,
+                    undefined,
+                    1,
+                    undefined,
+                    period,
+                  )
+                ) {
+                  navigate(
+                    `/reader?${new URLSearchParams({ read_from: period.from, read_until: period.until })}`,
+                  );
+                  setMobilePanel("list");
+                }
+              }}
             />
           ) : (
             <>
@@ -471,12 +570,15 @@ export function ReaderApplication({
               {selected ? (
                 <ArticleReader
                   key={`${account.id}:${workspaceId}:${selected.id}`}
-                  onDefinitions={() =>
-                    void glossary.open(selected.id, selected.title)
-                  }
+                  onDefinitions={() => {
+                    chat.setCollapsed(false);
+                    void glossary.open(selected.id, selected.title);
+                  }}
                   definitionsPending={
                     glossary.busy && glossary.target?.id === selected.id
                   }
+                  wikiClient={client.wiki}
+                  onNavigate={navigate}
                   aiClient={client.ai}
                   workspaceId={workspaceId}
                   translationEnabled={!!aiProfile?.enabled}
@@ -553,9 +655,6 @@ export function ReaderApplication({
           onEditRecipe={(recipe) => {
             setEditingRecipe(recipe);
             setModal("webfeed");
-          }}
-          onDirtyNoteChange={(dirty) => {
-            dirtySubscriptionNote.current = dirty;
           }}
         />
       )}
@@ -673,14 +772,39 @@ export function ReaderApplication({
           }}
         />
       )}
-      {glossary.target && (
-        <GlossaryPanel
-          key={`${account.id}:${workspaceId}:${glossary.target.id}`}
-          controller={glossary}
+      {readerPath !== "/reading" && (
+        <PanelDock
+          active={
+            !!glossary.target &&
+            glossary.target.id === chat.target?.articleId &&
+            chat.visible &&
+            !chat.collapsed &&
+            locationPath === "/reader" &&
+            modal === null &&
+            selected?.fullText === "ready"
+          }
+          terms={
+            glossary.target && (
+              <GlossaryPanel
+                key={`${account.id}:${workspaceId}:${glossary.target.id}`}
+                controller={glossary}
+              />
+            )
+          }
+          summary={
+            chat.visible && (
+              <div
+                hidden={
+                  locationPath !== "/reader" ||
+                  modal !== null ||
+                  selected?.fullText !== "ready"
+                }
+              >
+                <ArticleChatWidget controller={chat} profile={aiProfile} />
+              </div>
+            )
+          }
         />
-      )}
-      {chat.visible && (
-        <ArticleChatWidget controller={chat} profile={aiProfile} />
       )}
       {modal === "profile" && (
         <ModalDialog

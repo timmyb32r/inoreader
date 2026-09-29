@@ -70,6 +70,11 @@ pub enum BuiltInAdapter {
     },
     ModbNews,
     InfoqBigdata,
+    /// Public latest-articles window, using the publisher-provided page size.
+    Volcengine,
+    JdCloud {
+        page_size: std::num::NonZeroUsize,
+    },
     Highgo {
         max_pages: usize,
     },

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AiClient, AiProfile } from "../api/ai";
-import { AutofillResistantField } from "../ui/fields";
+import { AutofillResistantField, AutofillResistantSelect } from "../ui/fields";
 import { formatArticleDate } from "../ui/formatArticleDate";
 import "./deepseek.css";
+import { SpendingChart } from "./SpendingChart";
 
 export function DeepSeekProfile({
   client,
@@ -14,6 +15,13 @@ export function DeepSeekProfile({
   completedGeneration: number;
 }) {
   const [profile, setProfile] = useState<AiProfile | null>(null);
+  const [models, setModels] = useState<AiProfile["models"]>({
+    summary: "deepseek-flash",
+    verification: "deepseek-flash",
+  });
+  useEffect(() => {
+    if (profile) setModels(profile.models);
+  }, [profile?.models.summary, profile?.models.verification]);
   const [key, setKey] = useState("");
   const [pending, setPending] = useState("Loading DeepSeek profile");
   const [status, setStatus] = useState("");
@@ -70,6 +78,13 @@ export function DeepSeekProfile({
     return () => {
       alive.current = false;
     };
+  }, [client]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden && !locked.current)
+        void run("Refreshing spending", () => client.profile(), "");
+    }, 30000);
+    return () => window.clearInterval(timer);
   }, [client]);
   const previousGeneration = useRef(completedGeneration);
   useEffect(() => {
@@ -179,6 +194,60 @@ export function DeepSeekProfile({
           </span>
         )}
       </div>
+      <div class="ai-model-settings">
+        <h4>Models</h4>
+        <div class="ai-model-settings__fields">
+          {(["summary", "verification"] as const).map((stage) => (
+            <label key={stage}>
+              {stage === "summary" ? "Summary model" : "Fact-check model"}
+              <AutofillResistantSelect
+                value={models[stage]}
+                disabled={!!pending || !profile}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  if (value === "deepseek-flash" || value === "deepseek-v4-pro")
+                    setModels({ ...models, [stage]: value });
+                }}
+              >
+                <option value="deepseek-flash">DeepSeek Flash · cheaper</option>
+                <option value="deepseek-v4-pro">DeepSeek Pro</option>
+              </AutofillResistantSelect>
+            </label>
+          ))}
+        </div>
+        <div class="ai-profile__actions">
+          <button
+            class="secondary-button"
+            disabled={
+              !!pending ||
+              !profile ||
+              (models.summary === profile.models.summary &&
+                models.verification === profile.models.verification)
+            }
+            aria-busy={pending === "Saving models"}
+            onClick={() =>
+              void run(
+                "Saving models",
+                () => client.saveModels(models),
+                "Models saved",
+              )
+            }
+          >
+            {pending === "Saving models" ? (
+              <>
+                <span class="spinner" /> Saving…
+              </>
+            ) : (
+              "Save models"
+            )}
+          </button>
+        </div>
+        <p>
+          Applies to the next request, including queued summaries. Running
+          requests and saved summaries stay unchanged. Chat replies use the
+          summary model.
+        </p>
+      </div>
       <div class="ai-balance">
         <header>
           <h4>Balance</h4>
@@ -224,6 +293,7 @@ export function DeepSeekProfile({
         </div>
         <p>Provider balance may include activity outside Reader.</p>
       </div>
+      <SpendingChart spending={profile?.spending} />
     </section>
   );
 }

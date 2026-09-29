@@ -297,11 +297,21 @@ impl TryFrom<TranslationInputWire> for TranslationInput {
     }
 }
 impl TranslationInput {
+    pub fn budget_cost(&self, rates: &crate::CostRates) -> Result<String, AiError> {
+        crate::budget::bound_cost(
+            self.body["messages"].as_array().ok_or(AiError::Protocol)?,
+            self.limits.framing_tokens_per_message,
+            self.limits.framing_tokens_base,
+            usize::try_from(self.body["max_tokens"].as_u64().ok_or(AiError::Protocol)?)
+                .map_err(|_| AiError::Context)?,
+            rates,
+        )
+    }
     pub fn new(config: &AiConfig, source: &str) -> Result<Self, AiError> {
         config.validate()?;
         TranslationInputWire{
             source:source.into(), limits:crate::InputLimits::from(config),max_message_bytes:config.max_message_bytes,validator_version:"paragraph-ru-exact-v2".into(),
-            body:json!({"model":config.model,"messages":[{"role":"system","content":PROMPT},{"role":"user","content":serde_json::to_string(&json!({"paragraph":source})).map_err(|_|AiError::Protocol)?}],"stream":false,"thinking":{"type":"disabled"},"response_format":{"type":"json_object"},"max_tokens":config.max_output_tokens,"temperature":0})
+            body:json!({"model":crate::DeepSeekModel::Flash.id(),"messages":[{"role":"system","content":PROMPT},{"role":"user","content":serde_json::to_string(&json!({"paragraph":source})).map_err(|_|AiError::Protocol)?}],"stream":false,"thinking":{"type":"disabled"},"response_format":{"type":"json_object"},"max_tokens":config.max_output_tokens,"temperature":0})
         }.try_into()
     }
     pub fn source(&self) -> &str {

@@ -6,10 +6,15 @@ test("toolbar has consistent neutral controls and stable toggle/press styles in 
 }) => {
   await page.route("**/api/ai/profile", (route) =>
     route.fulfill({
-      json: wireFixture({ configured: true, enabled: true }),
+      json: wireFixture({
+        models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+        configured: true,
+        enabled: true,
+      }),
     }),
   );
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Close chat" }).click();
   const toolbar = page.locator(".reader-toolbar");
   const summarize = toolbar.getByRole("button", { name: "Summarize" });
   const terms = toolbar.getByRole("button", { name: "Terms" });

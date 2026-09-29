@@ -2,8 +2,8 @@
 pub use reader_wiki::{
     Binding as WikiBinding, Draft as WikiDraft, LimitsInput as WikiLimits,
     MemberList as WikiMembers, Namespace as WikiNamespace, NamespaceList as WikiNamespaces,
-    Page as WikiPage, PageList as WikiPages, RevisionList as WikiHistory, Role as WikiRole,
-    WriteInput as WikiWrite,
+    Organization as WikiOrganization, Page as WikiPage, PageList as WikiPages,
+    RevisionList as WikiHistory, Role as WikiRole, WriteInput as WikiWrite,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -46,3 +46,9 @@ pub struct WikiDiscardDraft {
 pub use reader_wiki::Link as WikiLink;
 
 pub use reader_wiki::Revision as WikiRevision;
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WikiFavorite {
+    pub favorite: bool,
+}

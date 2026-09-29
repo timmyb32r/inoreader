@@ -11,8 +11,16 @@ import type { Transport } from "../api/client";
 import { DeepSeekProfile } from "./DeepSeekProfile";
 import { useAiProfile } from "./useAiProfile";
 
-const enabled: AiProfile = { configured: true, enabled: true };
-const disabled: AiProfile = { configured: false, enabled: false };
+const enabled: AiProfile = {
+  models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+  configured: true,
+  enabled: true,
+};
+const disabled: AiProfile = {
+  models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+  configured: false,
+  enabled: false,
+};
 function Harness({
   client,
   account = "owner",

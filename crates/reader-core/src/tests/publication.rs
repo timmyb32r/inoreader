@@ -47,3 +47,27 @@ fn conflicts_are_not_silently_resolved() {
         "2026-01-01T12:00:00Z"
     );
 }
+
+#[test]
+fn huawei_label_is_stripped_only_for_the_verified_evidence_source() {
+    let evidence = PublicationEvidence {
+        source: "html:huawei-blog-byline".into(),
+        raw: " 发表于 2026/06/09 08:50:02".into(),
+    };
+    let restored: PublicationEvidence =
+        serde_json::from_str(&serde_json::to_string(&evidence).unwrap()).unwrap();
+    assert_eq!(restored, evidence);
+    assert_eq!(restored.date().unwrap().as_str(), "2026-06-09T08:50:02");
+    assert!(PublicationEvidence {
+        source: "other".into(),
+        ..evidence.clone()
+    }
+    .date()
+    .is_none());
+    assert!(PublicationEvidence {
+        raw: "updated 2026/06/09 08:50:02".into(),
+        ..evidence
+    }
+    .date()
+    .is_none());
+}

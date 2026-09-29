@@ -22,17 +22,20 @@ fn ai_policy_rejects_invalid_alternate_configuration_before_runtime() {
     let mut invalid = raw.clone();
     invalid.lease_seconds = invalid.request_timeout_seconds;
     assert!(reader_ai::AiPolicy::new(invalid, "prompt".into(), "review".into()).is_err());
-    for field in 0..3 {
-        let mut invalid = raw.clone();
-        match field {
-            0 => invalid.input_usd_per_million_tokens = "-1".into(),
-            1 => invalid.cached_input_usd_per_million_tokens = "NaN".into(),
-            _ => {
-                invalid.output_usd_per_million_tokens =
-                    "340282366920938463463374607431768211455".into()
-            }
+    for model in ["flash", "pro"] {
+        for (field, bad) in [
+            ("input_usd_per_million_tokens", "-1"),
+            ("cached_input_usd_per_million_tokens", "NaN"),
+            (
+                "output_usd_per_million_tokens",
+                "340282366920938463463374607431768211455",
+            ),
+        ] {
+            let mut value: serde_yaml::Value =
+                serde_yaml::from_str(include_str!("../../../config.example.yaml")).unwrap();
+            value["ai"]["models"][model][field] = bad.into();
+            assert!(serde_yaml::from_value::<Config>(value).is_err());
         }
-        assert!(reader_ai::AiPolicy::new(invalid, "prompt".into(), "review".into()).is_err());
     }
     let mut invalid = raw;
     invalid.max_message_bytes = 0;
@@ -79,9 +82,9 @@ fn ai_review_configuration_is_explicit_and_both_prompts_must_be_approved_artifac
     for field in 0..4 {
         let mut invalid = config.clone();
         match field {
-            0 => invalid.review.model.clear(),
+            0 => invalid.review.prompt_version.clear(),
             1 => invalid.review.max_output_tokens = 0,
-            2 => invalid.review.input_usd_per_million_tokens = "-1".into(),
+            2 => invalid.review.prompt_path.clear(),
             _ => {
                 invalid.review.max_output_tokens =
                     invalid.context_tokens - invalid.framing_tokens_base

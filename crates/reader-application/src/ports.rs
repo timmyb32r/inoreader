@@ -1,4 +1,6 @@
-use crate::{ArticlePageRequest, ArticleScope, SelectionLimit};
+use crate::{
+    ArticlePageRequest, ArticleScope, SelectionLimit, SourceActivityDay, SourceActivityPeriod,
+};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reader_core::{
@@ -17,6 +19,16 @@ pub enum RepositoryError {
     Conflict,
     #[error("storage failure: {0}")]
     Storage(String),
+}
+
+/// Daily distinct articles explicitly marked read in a workspace, in the requested
+/// IANA timezone. Undo does not erase historical activity; rereading on another day counts.
+#[derive(Clone, Debug, Serialize, schemars::JsonSchema)]
+pub struct ReadingDay {
+    pub day: String,
+    pub count: u32,
+    /// First arrivals in the workspace, independent of publication dates and read state.
+    pub arrived: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -58,6 +70,8 @@ pub struct PasswordResetRecord {
 }
 #[derive(Clone, Debug)]
 pub struct ArticlePresentation {
+    /// Latest read event within the explicitly selected history period.
+    pub marked_read_at: Option<DateTime<Utc>>,
     pub publication: Vec<reader_core::PublicationEvidence>,
     pub article: Article,
     pub subscription_ids: Vec<SubscriptionId>,
@@ -201,21 +215,39 @@ pub trait ArticleRepository: Send + Sync {
                 .subscription()
                 .is_none_or(|subscription| value.subscription_ids.contains(&subscription))
                 && match request.scope() {
-                    ArticleScope::Feed => !value.article.state.read,
+                    ArticleScope::Feed => {
+                        request
+                            .read_period()
+                            .map_or(!value.article.state.read, |period| {
+                                value.article.state.read
+                                    && value
+                                        .marked_read_at
+                                        .is_some_and(|at| at >= period.start() && at < period.end())
+                            })
+                    }
                     ArticleScope::Later => value.article.state.later,
                     _ => true,
                 }
         });
         all.sort_by_key(|value| {
             (
-                std::cmp::Reverse(value.article.first_arrived_at),
+                std::cmp::Reverse(
+                    value
+                        .marked_read_at
+                        .unwrap_or(value.article.first_arrived_at),
+                ),
                 std::cmp::Reverse(value.article.id.as_uuid()),
             )
         });
         let total = all.len();
         let matching = |value: &&ArticlePresentation| {
             request.cursor().is_none_or(|cursor| {
-                let key = (value.article.first_arrived_at, value.article.id.as_uuid());
+                let key = (
+                    value
+                        .marked_read_at
+                        .unwrap_or(value.article.first_arrived_at),
+                    value.article.id.as_uuid(),
+                );
                 let boundary = (cursor.arrived_at, cursor.article_id.as_uuid());
                 match request.direction() {
                     ArticlePageDirection::Older => key < boundary,
@@ -254,6 +286,19 @@ pub trait ArticleRepository: Send + Sync {
             .find(|value| value.article.id == id)
             .ok_or(RepositoryError::NotFound)
     }
+    /// None means the timezone is not supported. Returns only observed days in the last 364 days.
+    async fn reading_activity(
+        &self,
+        workspace: WorkspaceId,
+        timezone: &str,
+    ) -> Result<Option<Vec<ReadingDay>>, RepositoryError>;
+    /// None indicates an unsupported IANA timezone; authorization belongs to the caller.
+    async fn source_activity(
+        &self,
+        workspace: WorkspaceId,
+        timezone: &str,
+        period: SourceActivityPeriod,
+    ) -> Result<Option<Vec<SourceActivityDay>>, RepositoryError>;
     async fn save_article(
         &self,
         workspace: WorkspaceId,
@@ -515,7 +560,8 @@ pub trait WorkspaceRepository: Send + Sync {
 
 /// Composition boundary for the HTTP application; individual use cases depend on narrower ports.
 pub trait ReaderRepository:
-    ArticleRepository
+    crate::FocusedReadingRepository
+    + ArticleRepository
     + IdentityRepository
     + OperationsRepository
     + RuleRepository
@@ -524,7 +570,8 @@ pub trait ReaderRepository:
 {
 }
 impl<
-        T: ArticleRepository
+        T: crate::FocusedReadingRepository
+            + ArticleRepository
             + IdentityRepository
             + OperationsRepository
             + RuleRepository

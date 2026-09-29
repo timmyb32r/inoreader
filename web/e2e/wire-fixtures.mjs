@@ -20,7 +20,6 @@ export function wireFixture(value) {
       sourceTitle: result.name,
       sourceUrl: "https://example.test/feed",
       sourceType: "feed",
-      personalNote: "",
       unreadCount: 0,
       consecutiveFailures: 0,
       needsAttention: false,

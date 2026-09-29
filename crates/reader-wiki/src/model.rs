@@ -25,6 +25,7 @@ pub struct Namespace {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Page {
+    pub parent: Option<Uuid>,
     pub namespace: Uuid,
     pub id: Uuid,
     pub revision: Uuid,
@@ -115,4 +116,21 @@ pub struct RevisionSummary {
     pub author_name: String,
     pub created_at: DateTime<Utc>,
     pub action: String,
+}
+
+/// Namespace-local, actor-owned organization. Deleted pages are excluded from
+/// collections; hierarchy edges remain intact through trash/restore.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Collection {
+    Favorites,
+    Standalone,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct Organization {
+    pub parent: Option<PageSummary>,
+    pub children: PageList,
+    pub favorite: bool,
 }

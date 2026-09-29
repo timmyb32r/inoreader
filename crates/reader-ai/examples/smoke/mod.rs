@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use reader_ai::{
-    validate_summary_title, AiError, AiProvider, ArticleSnapshot, CompletedGeneration, CostRates,
-    DeepSeekProvider, GenerationInput, GenerationProgress, InputLimits, ReviewSnapshot, Usage,
+    AiError, AiProvider, ArticleSnapshot, CompletedGeneration, CostRates, DeepSeekProvider,
+    GenerationInput, GenerationProgress, InputLimits, ReviewSnapshot, Usage,
 };
 use reader_web_runtime::{
     ExternalRequestCompletion, ExternalRequestObserver, OutboundHttpClient, OutboundLimits,
@@ -403,12 +403,7 @@ pub async fn run(args: Vec<String>) -> Result<(), &'static str> {
                     .map_err(|_| "cost calculation failed; retain reservation")?,
             );
             progress.usage = Some(usage);
-            let validation = if args.stage == Stage::Verifying {
-                validate_summary_title(completed.content(), &snapshot.article.title)
-            } else {
-                Ok(())
-            };
-            let error = validation.err().map(|e| e.to_string());
+            let error: Option<String> = None;
             (
                 if error.is_some() {
                     "not_completed"

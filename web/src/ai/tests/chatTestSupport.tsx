@@ -2,7 +2,11 @@ import { AiClient, type AiProfile, type ArticleChat } from "../../api/ai";
 import { ArticleChatWidget } from "../ArticleChatWidget";
 import { useArticleChat } from "../useArticleChat";
 
-export const profile: AiProfile = { configured: true, enabled: true };
+export const profile: AiProfile = {
+  models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+  configured: true,
+  enabled: true,
+};
 export const saved = (id = "chat1", articleId = "a"): ArticleChat => ({
   id,
   articleId,

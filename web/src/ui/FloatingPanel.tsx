@@ -1,3 +1,4 @@
+import { usePanelDock } from "./PanelDock";
 import type { ComponentChildren, JSX } from "preact";
 import type { useFloatingPanel } from "./useFloatingPanel";
 
@@ -18,11 +19,12 @@ export function FloatingPanel({
   class: string;
   onPointerDown?: JSX.PointerEventHandler<HTMLDivElement>;
 }) {
+  const dock = usePanelDock();
   return (
     <div
       ref={position.element}
       class={className}
-      style={position.style}
+      style={dock ? undefined : position.style}
       role="dialog"
       aria-modal="false"
       aria-label={label}

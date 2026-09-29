@@ -1,3 +1,4 @@
+import { readLayout } from "./subscriptionCatalogModel";
 import type { ResponseContract, ResponseValue } from "../api/decode";
 import { render, screen, waitFor, within } from "@testing-library/preact";
 import userEvent from "@testing-library/user-event";
@@ -16,7 +17,6 @@ const subscriptions: Subscription[] = [
     sourceTitle: "Alpha",
     sourceUrl: "https://alpha.test/feed",
     sourceType: "feed",
-    personalNote: "databases",
     count: 4,
     status: "active",
     lastUpdate: "2026-09-25",
@@ -118,11 +118,6 @@ function client(detailValue: SubscriptionDetail = detail) {
       } as unknown as ResponseValue<C>;
     if (path === "/api/subscriptions/one")
       return detailValue as unknown as ResponseValue<C>;
-    if (path === "/api/subscriptions/one/note")
-      return {
-        ...detailValue,
-        personalNote: JSON.parse(String(init?.body)).note,
-      } as unknown as ResponseValue<C>;
     return undefined as unknown as ResponseValue<C>;
   };
   return { api: new ApiClient(transport), calls };
@@ -141,6 +136,21 @@ const props = (api: ApiClient, subscriptionId?: string) => ({
 });
 
 describe("subscription catalog", () => {
+  it("focuses search when opening or returning to the catalog, without stealing focus on updates", () => {
+    const { api } = client();
+    const view = render(<SubscriptionsPage {...props(api)} />);
+    const search = screen.getByRole("searchbox", {
+      name: "Search subscriptions",
+    });
+    expect(search).toHaveFocus();
+    const close = screen.getByRole("button", { name: "Close subscriptions" });
+    close.focus();
+    view.rerender(<SubscriptionsPage {...props(api)} />);
+    expect(close).toHaveFocus();
+    view.rerender(<SubscriptionsPage {...props(api, "one")} />);
+    view.rerender(<SubscriptionsPage {...props(api)} />);
+    expect(search).toHaveFocus();
+  });
   it("renders the catalog as a modal window and closes through its stable control", async () => {
     const { api } = client();
     const user = userEvent.setup();
@@ -159,11 +169,20 @@ describe("subscription catalog", () => {
     const user = userEvent.setup();
     render(<SubscriptionsPage {...props(api)} />);
     expect(screen.getByText("Alpha feed")).toBeVisible();
+    const tabs = within(
+      screen.getByRole("navigation", { name: "Subscription views" }),
+    );
+    expect(tabs.getByRole("button", { name: "Current (2)" })).toBeVisible();
+    expect(
+      tabs.getByRole("button", { name: "Needs attention (1)" }),
+    ).toBeVisible();
+    expect(tabs.getByRole("button", { name: "Archived (1)" })).toBeVisible();
+
     expect(screen.queryByText("Archived source")).not.toBeInTheDocument();
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Subscription views" }),
-      ).getByRole("button", { name: "Needs attention" }),
+      ).getByRole("button", { name: /^Needs attention \(\d+\)$/ }),
     );
     expect(screen.getByText("Broken page")).toBeVisible();
     expect(screen.getByText("Preview no longer finds articles")).toBeVisible();
@@ -194,7 +213,7 @@ describe("subscription catalog", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Subscription views" }),
-      ).getByRole("button", { name: "Needs attention" }),
+      ).getByRole("button", { name: /^Needs attention \(\d+\)$/ }),
     );
     expect(
       screen.queryByText("Recent transient error"),
@@ -277,14 +296,14 @@ describe("subscription catalog", () => {
       <SubscriptionsPage
         {...props(api)}
         subscriptions={[
-          { ...subscriptions[0], personalNote: "Zulu" },
-          { ...subscriptions[1], personalNote: "Alpha" },
+          { ...subscriptions[0], sourceUrl: "https://zulu.test" },
+          { ...subscriptions[1], sourceUrl: "https://alpha.test" },
         ]}
       />,
     );
     await user.selectOptions(
       screen.getByLabelText("Sort subscriptions"),
-      "note",
+      "url",
     );
     expect(screen.getAllByRole("row")[1]).toHaveTextContent("Broken page");
     await user.click(screen.getByRole("button", { name: "Name" }));
@@ -393,55 +412,24 @@ describe("subscription details", () => {
     );
     expect(screen.queryByText("Timed out")).not.toBeInTheDocument();
   });
-  it("keeps note edits local until explicit save and prevents duplicate activation", async () => {
-    const { api, calls } = client();
-    const user = userEvent.setup();
-    render(<SubscriptionsPage {...props(api, "one")} />);
-    const note = await screen.findByRole("textbox", { name: "Personal note" });
-    await user.clear(note);
-    await user.type(note, "private note");
-    expect(screen.getByText("Unsaved changes")).toBeVisible();
-    expect(calls.filter((c) => c.path.endsWith("/note"))).toHaveLength(0);
-    await user.dblClick(screen.getByRole("button", { name: "Save note" }));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.path.endsWith("/note"))).toHaveLength(1),
-    );
+  it("uses wiki instead of a note editor and ignores retired catalog columns", async () => {
+    const { api } = client();
+    const view = render(<SubscriptionsPage {...props(api, "one")} />);
+    expect(await screen.findByText("Wiki page")).toBeVisible();
     expect(
-      JSON.parse(
-        String(calls.find((c) => c.path.endsWith("/note"))?.init?.body),
-      ),
-    ).toEqual({ note: "private note" });
-    expect(screen.getByText("All changes saved")).toBeVisible();
-  });
-  it("registers a reload guard only while the note is dirty", async () => {
-    const { api } = client();
-    const user = userEvent.setup();
-    render(<SubscriptionsPage {...props(api, "one")} />);
-    const clean = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(clean);
-    expect(clean.defaultPrevented).toBe(false);
-    await user.type(
-      await screen.findByRole("textbox", { name: "Personal note" }),
-      " changed",
-    );
-    const dirty = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(dirty);
-    expect(dirty.defaultPrevented).toBe(true);
-  });
-  it("reports dirty note state to the global navigation guard", async () => {
-    const { api } = client();
-    const changed = vi.fn();
-    const user = userEvent.setup();
-    const view = render(
-      <SubscriptionsPage {...props(api, "one")} onDirtyNoteChange={changed} />,
-    );
-    await user.type(
-      await screen.findByRole("textbox", { name: "Personal note" }),
-      " changed",
-    );
-    expect(changed).toHaveBeenLastCalledWith(true);
+      screen.queryByRole("textbox", { name: "Personal note" }),
+    ).not.toBeInTheDocument();
     view.unmount();
-    expect(changed).toHaveBeenLastCalledWith(false);
+    const key = "retired-note-layout";
+    vi.stubGlobal("localStorage", {
+      getItem: () =>
+        JSON.stringify({ columns: ["name", "note", "unread"], widths: {} }),
+    });
+    try {
+      expect(readLayout(key).columns).toEqual(["name", "attention", "unread"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
   it("restores an archived subscription from its detail page", async () => {
     const archived = {

@@ -72,7 +72,7 @@ it("shows the first complete summary while checking and replaces it with the che
     expect(screen.getByRole("status")).toHaveTextContent("Checking facts");
     expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByLabelText("Provider request costs")).toBeNull();
-    expect(screen.getByRole("button", { name: "New summary" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "New summary" })).toBeNull();
     expect(
       screen.getByRole("button", { name: "Send", exact: true }),
     ).toBeDisabled();
@@ -116,7 +116,7 @@ it("explains verification failure and retries it once while retaining drafts and
   };
   render(<Harness client={new AiClient(transport)} />);
   fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
-  await screen.findByText(/Verification failed/);
+  await screen.findByText(/Verification not completed/);
   expect(screen.getByRole("status")).toHaveAttribute(
     "title",
     "Provider timeout",
@@ -136,7 +136,10 @@ it("explains verification failure and retries it once while retaining drafts and
     ctrlKey: true,
   });
   expect(retries).toHaveLength(0);
-  const retry = screen.getByRole("button", { name: "Retry", exact: true });
+  const retry = screen.getByRole("button", {
+    name: "Retry verification",
+    exact: true,
+  });
   fireEvent.click(retry);
   fireEvent.click(retry);
   expect(screen.getByRole("status")).toHaveTextContent("Retrying verification");

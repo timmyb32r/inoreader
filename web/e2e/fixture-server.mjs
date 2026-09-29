@@ -59,14 +59,12 @@ let rules = [
     enabled: true,
   },
 ];
-let personalNote = "";
 const subscription = () => ({
   id: "sub",
   name: "This Week in Rust",
   sourceTitle: "This Week in Rust",
   sourceUrl: "https://example.test/feed",
   sourceType: "feed",
-  personalNote,
   count: 2,
   unreadCount: 2,
   status: "active",
@@ -112,13 +110,6 @@ createServer(async (request, response) => {
       return json(response, 200, { days: [], undated: 2, conflicting: 0 });
     if (url.pathname === "/api/subscriptions/sub" && request.method === "GET")
       return json(response, 200, subscription());
-    if (
-      url.pathname === "/api/subscriptions/sub/note" &&
-      request.method === "PUT"
-    ) {
-      personalNote = (await body(request)).note;
-      return json(response, 200, subscription());
-    }
     if (url.pathname === "/api/articles")
       return json(
         response,

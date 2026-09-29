@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 use crate::PostgresRepository;
 
+mod automatic;
+mod budget;
 mod calls;
 mod chat_document;
 pub(crate) use chat_document::backfill_public_views;
@@ -230,6 +232,59 @@ fn set_attempt(
 
 #[async_trait]
 impl AiStore for PostgresAiStore {
+    async fn spending(&self, owner: Uuid, limit: &str) -> Result<AiSpending, AiError> {
+        self.spending_view(owner, limit).await
+    }
+    async fn reserve(
+        &self,
+        owner: Uuid,
+        id: Uuid,
+        reservation: &SpendReservation,
+    ) -> Result<(), AiError> {
+        let mut tx = self.pool.begin().await.map_err(storage)?;
+        budget::reserve(&mut tx, owner, id, reservation).await?;
+        tx.commit().await.map_err(storage)
+    }
+    async fn settle(&self, owner: Uuid, id: Uuid, amount: &str) -> Result<(), AiError> {
+        DecimalRate::parse(amount)?;
+        let count=sqlx::query("UPDATE ai_spending SET actual=$3::numeric WHERE id=$1 AND owner=$2 AND (actual IS NULL OR actual=$3::numeric)").bind(id).bind(owner).bind(amount).execute(&self.pool).await.map_err(storage)?.rows_affected();
+        if count != 1 {
+            return Err(AiError::Conflict);
+        }
+        Ok(())
+    }
+    async fn enroll_summaries(&self, owners: &[Uuid]) -> Result<(), AiError> {
+        self.enroll_automatic(owners).await
+    }
+    async fn next_summary(
+        &self,
+        owners: &[Uuid],
+        attempts: u32,
+        retry_seconds: u64,
+    ) -> Result<Option<AutoSummary>, AiError> {
+        self.automatic_next(owners, attempts, retry_seconds).await
+    }
+    async fn finish_summary(
+        &self,
+        target: &AutoSummary,
+        error: Option<&str>,
+    ) -> Result<(), AiError> {
+        sqlx::query("UPDATE ai_summary_queue SET dispatched=$4,error=$5 WHERE owner=$1 AND workspace=$2 AND article=$3").bind(target.owner).bind(target.workspace).bind(target.article).bind(error.is_none()).bind(error).execute(&self.pool).await.map_err(storage)?;
+        Ok(())
+    }
+    async fn prioritize(&self, owner: Uuid, chat: Uuid) -> Result<(), AiError> {
+        sqlx::query("UPDATE ai_chats SET priority_at=now() WHERE owner=$1 AND id=$2")
+            .bind(owner)
+            .bind(chat)
+            .execute(&self.pool)
+            .await
+            .map_err(storage)?;
+        Ok(())
+    }
+    async fn defer_budget(&self, claim: &ClaimedChat) -> Result<(), AiError> {
+        self.budget_wait(claim).await
+    }
+
     async fn retain_reply(
         &self,
         kind: ReplyKind,
@@ -317,6 +372,30 @@ impl AiStore for PostgresAiStore {
         self.complete_translation(claim, state, usage).await
     }
 
+    async fn model_preferences(&self, owner: Uuid) -> Result<ModelPreferences, AiError> {
+        let raw: Option<String> =
+            sqlx::query_scalar("SELECT document FROM ai_model_preferences WHERE owner=$1")
+                .bind(owner)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(storage)?;
+        raw.map(|value| decode(&value))
+            .transpose()
+            .map(|value| value.unwrap_or_default())
+    }
+    async fn save_model_preferences(
+        &self,
+        owner: Uuid,
+        models: ModelPreferences,
+    ) -> Result<(), AiError> {
+        let mut tx = self.pool.begin().await.map_err(storage)?;
+        sqlx::query("INSERT INTO ai_model_preferences(owner,document) VALUES($1,$2) ON CONFLICT(owner) DO UPDATE SET document=EXCLUDED.document").bind(owner).bind(encode(&models)?).execute(&mut *tx).await.map_err(storage)?;
+        // A cheaper choice may now fit today's remainder. Preserve the paid
+        // draft and attempt identity; re-admission still enforces the budget.
+        sqlx::query("UPDATE ai_chats SET scheduled_at=now() WHERE owner=$1 AND status='queued' AND lease IS NULL AND document::jsonb#>>'{view,error}'=$2").bind(owner).bind(AiError::Budget.to_string()).execute(&mut *tx).await.map_err(storage)?;
+        tx.commit().await.map_err(storage)?;
+        Ok(())
+    }
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError> {
         sqlx::query_scalar("SELECT encrypted_key FROM ai_profiles WHERE owner=$1")
             .bind(owner)
@@ -711,7 +790,7 @@ impl AiStore for PostgresAiStore {
                 Err(_) => quarantine::chat(&mut tx, id).await?,
             }
         }
-        let row: Option<quarantine::ChatRow> = sqlx::query_as("SELECT c.id,c.owner,c.workspace,c.article,json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND w.document::jsonb->>'owner'=c.owner::text ORDER BY CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
+        let row: Option<quarantine::ChatRow> = sqlx::query_as("SELECT c.id,c.owner,c.workspace,c.article,json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND c.scheduled_at<=now() AND w.document::jsonb->>'owner'=c.owner::text ORDER BY c.priority_at DESC NULLS LAST,CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
         let Some(row) = row else {
             tx.commit().await.map_err(storage)?;
             return Ok(None);
@@ -750,8 +829,10 @@ impl AiStore for PostgresAiStore {
         &self,
         claim: &ClaimedChat,
         phase: GenerationPhase,
+        reservation: &SpendReservation,
+        model: &CallModel,
     ) -> Result<Uuid, AiError> {
-        calls::begin(&self.pool, claim, phase).await
+        calls::begin(&self.pool, claim, phase, reservation, model).await
     }
     async fn update_call(
         &self,
@@ -804,15 +885,39 @@ impl AiStore for PostgresAiStore {
                     .ok_or(AiError::Storage)?
                     .content
                     .as_str();
-                validate_summary_title(
-                    content.unwrap_or(current_content),
-                    &claim
-                        .record
-                        .snapshot
-                        .as_ref()
-                        .ok_or(AiError::Storage)?
-                        .title,
+                let call = record
+                    .view
+                    .provider_calls
+                    .iter()
+                    .find(|c| {
+                        c.assistant_id == operation.assistant_id
+                            && c.phase == GenerationPhase::Verifying
+                            && c.status == CallStatus::Completed
+                    })
+                    .ok_or(AiError::Conflict)?;
+                let raw: String = sqlx::query_scalar(
+                    "SELECT content FROM ai_call_responses WHERE id=$1 AND owner=$2",
+                )
+                .bind(call.id)
+                .bind(record.owner)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(storage)?;
+                let AttemptTask::Summary { draft: Some(draft) } = &operation.task else {
+                    return Err(AiError::Conflict);
+                };
+                let source = claim.record.snapshot.as_ref().ok_or(AiError::Storage)?;
+                let checked = CompletedGeneration::reviewed(
+                    raw,
+                    call.usage.clone().ok_or(AiError::Storage)?,
+                    draft,
+                    &source.title,
+                    &source.text,
+                    claim.record.limits.max_response_bytes,
                 )?;
+                if checked.content() != content.unwrap_or(current_content) {
+                    return Err(AiError::Review);
+                }
             }
         }
         if let Some(snapshot) = snapshot {

@@ -21,6 +21,7 @@ impl AiService {
         self.policy.generation_allowed(owner)?;
         let input = TranslationInput::new(self.policy.config(), &source)?;
         self.key(owner).await?;
+        self.manual_budget(owner).await?;
         let snapshot = match self.store.article_input(owner, workspace, article).await? {
             ArticleInput::Ready(s) => s,
             _ => return Err(AiError::FullText),
@@ -44,7 +45,7 @@ impl AiService {
                     workspace_id: workspace,
                     article_id: article,
                     source,
-                    model: self.policy.config().model.clone(),
+                    model: crate::DeepSeekModel::Flash.id().into(),
                     state: TranslationState::Queued,
                     usage: None,
                 },
@@ -65,6 +66,14 @@ impl AiService {
                     self.policy.generation_allowed(claim.record.owner)?;
                     let key = self.key(claim.record.owner).await?;
                     let input = claim.record.input.clone().ok_or(AiError::Unavailable)?;
+                    let reservation = SpendReservation::new(
+                        input.budget_cost(&claim.record.cost_rates)?,
+                        self.policy.config().daily_limit_usd.clone(),
+                        SpendMode::Translation,
+                    )?;
+                    self.store
+                        .reserve(claim.record.owner, claim.lease, &reservation)
+                        .await?;
                     reader_runtime::observe(
                         reader_runtime::Stage::TranslationProvider,
                         self.provider.translate(&key, input),
@@ -85,6 +94,16 @@ impl AiService {
                         let mut usage = reply.usage();
                         if let Some(usage) = &mut usage {
                             usage.estimated_cost_usd = Some(claim.record.cost_rates.cost(usage)?);
+                            self.store
+                                .settle(
+                                    claim.record.owner,
+                                    claim.lease,
+                                    usage
+                                        .estimated_cost_usd
+                                        .as_deref()
+                                        .ok_or(AiError::Storage)?,
+                                )
+                                .await?;
                         }
                         let state = match reader_runtime::observe_sync(
                             reader_runtime::Stage::TranslationValidation,

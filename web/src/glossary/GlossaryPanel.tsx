@@ -1,3 +1,4 @@
+import { usePanelDock } from "../ui/PanelDock";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { CopyButton } from "../ui/CopyButton";
 import type {
@@ -16,11 +17,14 @@ import type { useGlossary } from "./useGlossary";
 
 export function GlossaryPanel({
   controller,
+  embedded = false,
 }: {
   controller: ReturnType<typeof useGlossary>;
+  embedded?: boolean;
 }) {
   const [actionError, setActionError] = useState("");
-  const floating = useFloatingPanel(false);
+  const dock = usePanelDock();
+  const floating = useFloatingPanel(false, !embedded);
   const [shown, setShown] = useState<DefinitionsView | null>(controller.view);
   const latest = useRef(controller.view),
     pressed = useRef(false),
@@ -79,8 +83,9 @@ export function GlossaryPanel({
           : shown && !shown.channel.generationAllowed
             ? "DeepSeek недоступен для этого аккаунта."
             : "");
+  const Shell = embedded ? EmbeddedGlossary : FloatingPanel;
   return (
-    <FloatingPanel
+    <Shell
       position={floating}
       label="Термины статьи"
       onClose={controller.close}
@@ -92,10 +97,10 @@ export function GlossaryPanel({
       <header>
         <div
           class="glossary-handle"
-          role="button"
-          tabIndex={0}
+          role={embedded ? undefined : "button"}
+          tabIndex={embedded ? undefined : 0}
           aria-label="Переместить окно терминов"
-          {...floating.handle}
+          {...(embedded ? {} : (dock ?? floating.handle))}
         >
           <small>Термины</small>
           <strong>{controller.target?.title}</strong>
@@ -191,7 +196,7 @@ export function GlossaryPanel({
           }
         />
       </footer>
-    </FloatingPanel>
+    </Shell>
   );
 }
 function NewDefinition({ entity: e }: { entity: EntityDefinition }) {
@@ -235,5 +240,20 @@ function Known({ value: k }: { value: KnownDefinition }) {
         html={() => paragraph.current?.innerHTML ?? ""}
       />
     </article>
+  );
+}
+
+function EmbeddedGlossary({
+  children,
+  onPointerDown,
+}: import("preact").ComponentProps<typeof FloatingPanel>) {
+  return (
+    <section
+      class="glossary-panel glossary-panel--embedded"
+      aria-label="Article terms"
+      onPointerDown={onPointerDown}
+    >
+      {children}
+    </section>
   );
 }

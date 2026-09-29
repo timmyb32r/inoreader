@@ -69,7 +69,11 @@ test("paragraph translation preserves article geometry and links, deduplicates c
       });
     if (path === "/api/ai/profile")
       return route.fulfill({
-        json: wireFixture({ configured: true, enabled: true }),
+        json: wireFixture({
+          models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+          configured: true,
+          enabled: true,
+        }),
       });
     if (path.endsWith("/translations")) {
       if (route.request().method() === "POST") {
@@ -87,6 +91,7 @@ test("paragraph translation preserves article geometry and links, deduplicates c
     return route.fulfill({ json: wireFixture([]) });
   });
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Close chat" }).click();
   const content = page.locator(".article-content"),
     paragraph = content.locator("p").first(),
     following = content.locator("p").nth(1),
@@ -118,6 +123,27 @@ test("paragraph translation preserves article geometry and links, deduplicates c
     page.getByRole("region", { name: "Paragraph translation" }),
   ).toHaveAttribute("aria-busy", "true");
   expect(posts).toBe(1);
+  const panel = page.getByRole("region", { name: "Paragraph translation" });
+  const handle = panel.getByRole("button", {
+    name: "Move paragraph translation with arrow keys or drag",
+  });
+  const initialPanel = (await panel.boundingBox())!;
+  const grip = (await handle.boundingBox())!;
+  await page.mouse.move(grip.x + 20, grip.y + 15);
+  await page.mouse.down();
+  await page.mouse.move(grip.x - 80, grip.y - 65, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await panel.boundingBox())!;
+  expect(moved.x).toBeCloseTo(initialPanel.x - 100, 0);
+  expect(moved.y).toBeCloseTo(initialPanel.y - 80, 0);
+  await handle.focus();
+  await page.keyboard.press("ArrowLeft");
+  expect((await panel.boundingBox())!.x).toBeCloseTo(moved.x - 20, 0);
+  expect(await following.boundingBox()).toEqual(before);
+  expect(await page.locator(".reader-toolbar").boundingBox()).toEqual(toolbar);
+  // Restore the overlay before exercising the underlying word hover targets.
+  for (let i = 0; i < 6; i++) await handle.press("ArrowRight");
+  for (let i = 0; i < 4; i++) await handle.press("ArrowDown");
   // Double-click can select browser text; annotations must wait until it clears.
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   done = true;
@@ -212,7 +238,14 @@ for (const target of [
         });
       if (path === "/api/ai/profile")
         return route.fulfill({
-          json: wireFixture({ configured: true, enabled: true }),
+          json: wireFixture({
+            models: {
+              summary: "deepseek-flash",
+              verification: "deepseek-flash",
+            },
+            configured: true,
+            enabled: true,
+          }),
         });
       if (
         path.endsWith("/translations") &&
@@ -235,6 +268,7 @@ for (const target of [
       return route.fulfill({ json: wireFixture([]) });
     });
     await page.goto("/reader");
+    await page.getByRole("button", { name: "Close chat" }).click();
     const block = page.locator(".reader-body").locator(target),
       following = page.locator(".article-content p"),
       toolbar = page.locator(".reader-toolbar");

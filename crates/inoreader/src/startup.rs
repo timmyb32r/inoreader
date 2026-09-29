@@ -178,6 +178,7 @@ pub(super) async fn serve(
     });
 
     if let Some(ai) = ai_service {
+        ai.initialize_automatic().await?;
         ai.spawn_workers(&mut supervisor);
     }
     if let Some(glossary) = glossary_service {

@@ -1,135 +1,53 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 
-export type DailyActivity = Record<string, number>;
+import { ReadingFlowChart } from "./ReadingFlowChart";
 
-const FLUSH_INTERVAL_MS = 15_000;
+export type DailyActivity = Record<string, { count: number; arrived: number }>;
+
+import type { ApiClient } from "../api/client";
 
 function dateKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function activityStorageKey(accountId: string): string {
-  return `reader.activity.${accountId}`;
-}
-
-function browserStorage(): Storage | undefined {
-  return typeof window === "undefined"
-    ? undefined
-    : (window.localStorage ?? undefined);
-}
-
-export function readActivity(accountId: string): DailyActivity {
-  try {
-    const value = JSON.parse(
-      browserStorage()?.getItem(activityStorageKey(accountId)) ?? "{}",
-    );
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(
-      Object.entries(value).filter(
-        (entry): entry is [string, number] =>
-          /^\d{4}-\d{2}-\d{2}$/.test(entry[0]) &&
-          typeof entry[1] === "number" &&
-          entry[1] >= 0,
-      ),
-    );
-  } catch {
-    return {};
-  }
-}
-
-export function recordActivity(
-  accountId: string,
-  elapsedMs: number,
-  now = new Date(),
-): DailyActivity {
-  const activity = readActivity(accountId);
-  const day = dateKey(now);
-  activity[day] = (activity[day] ?? 0) + Math.max(0, elapsedMs);
-  browserStorage()?.setItem(
-    activityStorageKey(accountId),
-    JSON.stringify(activity),
-  );
-  return activity;
-}
-
-export function useActivityTracker(accountId: string): DailyActivity {
-  const [activity, setActivity] = useState<DailyActivity>(() =>
-    accountId ? readActivity(accountId) : {},
-  );
-  useEffect(() => {
-    if (!accountId) return;
-    setActivity(readActivity(accountId));
-    let startedAt =
-      document.visibilityState === "visible" && document.hasFocus()
-        ? Date.now()
-        : undefined;
-    const flush = () => {
-      if (startedAt === undefined) return;
-      const now = Date.now();
-      setActivity(recordActivity(accountId, now - startedAt, new Date(now)));
-      startedAt = now;
-    };
-    const sync = () => {
-      const active =
-        document.visibilityState === "visible" && document.hasFocus();
-      if (active && startedAt === undefined) startedAt = Date.now();
-      if (!active && startedAt !== undefined) {
-        flush();
-        startedAt = undefined;
-      }
-    };
-    const interval = window.setInterval(flush, FLUSH_INTERVAL_MS);
-    document.addEventListener("visibilitychange", sync);
-    window.addEventListener("focus", sync);
-    window.addEventListener("blur", sync);
-    window.addEventListener("pagehide", flush);
-    return () => {
-      flush();
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", sync);
-      window.removeEventListener("focus", sync);
-      window.removeEventListener("blur", sync);
-      window.removeEventListener("pagehide", flush);
-    };
-  }, [accountId]);
-  return activity;
-}
-
-type Day = { key: string; label: string; minutes: number; level: number };
+type Day = {
+  key: string;
+  label: string;
+  count: number;
+  arrived: number;
+  level: number;
+  weekday: number;
+};
 
 function activityDays(activity: DailyActivity, today = new Date()): Day[] {
   const end = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()),
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+    12,
   );
   const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 363);
+  start.setDate(start.getDate() - 363);
   const values: Day[] = [];
   for (
     let cursor = new Date(start);
     cursor <= end;
-    cursor.setUTCDate(cursor.getUTCDate() + 1)
+    cursor.setDate(cursor.getDate() + 1)
   ) {
     const key = dateKey(cursor);
-    const minutes = Math.floor((activity[key] ?? 0) / 60_000);
+    const count = activity[key]?.count ?? 0;
     const level =
-      minutes === 0
-        ? 0
-        : minutes < 15
-          ? 1
-          : minutes < 45
-            ? 2
-            : minutes < 90
-              ? 3
-              : 4;
+      count === 0 ? 0 : count < 5 ? 1 : count < 15 ? 2 : count < 30 ? 3 : 4;
     values.push({
       key,
-      minutes,
+      count,
+      arrived: activity[key]?.arrived ?? 0,
       level,
+      weekday: ((cursor.getDay() + 6) % 7) + 1,
       label: cursor.toLocaleDateString("en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
-        timeZone: "UTC",
       }),
     });
   }
@@ -137,47 +55,125 @@ function activityDays(activity: DailyActivity, today = new Date()): Day[] {
 }
 
 export function ActivityDashboard({
-  activity,
+  client,
+  workspaceId,
   workspaceName,
   onOpenLibrary,
+  onReadDay,
+  onArrivedDay,
+  opening = false,
 }: {
-  activity: DailyActivity;
+  client: ApiClient;
+  workspaceId: string;
   workspaceName: string;
   onOpenLibrary: () => void;
+  onReadDay?: (day: string) => void;
+  onArrivedDay?: (day: string) => void;
+  opening?: boolean;
 }) {
-  const days = useMemo(() => activityDays(activity), [activity]);
-  const totalMinutes = days.reduce((sum, day) => sum + day.minutes, 0);
-  const activeDays = days.filter((day) => day.minutes > 0).length;
+  const [activity, setActivity] = useState<DailyActivity | null>(null);
+  const [error, setError] = useState(false);
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    let disposed = false;
+    let pending = false;
+    setActivity(null);
+    setError(false);
+    const load = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const result = await client.readingActivity(
+          workspaceId,
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+        );
+        if (!disposed) {
+          setActivity(
+            Object.fromEntries(
+              result.days.map((day) => [
+                day.day,
+                { count: day.count, arrived: day.arrived },
+              ]),
+            ),
+          );
+          setToday(new Date());
+          setError(false);
+        }
+      } catch {
+        if (!disposed) setError(true);
+      } finally {
+        pending = false;
+      }
+    };
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const interval = window.setInterval(refresh, 60_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [client, workspaceId]);
+  const days = useMemo(
+    () => activityDays(activity ?? {}, today),
+    [activity, today],
+  );
+  const countToday = activity?.[dateKey(today)]?.count ?? 0;
+  const arrivedToday = activity?.[dateKey(today)]?.arrived ?? 0;
   return (
     <section class="home-dashboard" aria-labelledby="home-title">
       <header class="home-dashboard__header">
         <div>
           <p class="eyebrow">{workspaceName}</p>
           <h1 id="home-title">Your reading activity</h1>
-          <p>Time spent reading and maintaining your library on this device.</p>
+          <p>New arrivals and articles you marked as read, day by day.</p>
         </div>
         <button class="primary-button" onClick={onOpenLibrary}>
           Open feed
         </button>
       </header>
       <div class="activity-summary">
-        <article>
-          <strong>{totalMinutes}</strong>
-          <span>minutes this year</span>
-        </article>
-        <article>
-          <strong>{activeDays}</strong>
-          <span>active days</span>
-        </article>
+        <button
+          class="activity-summary__read"
+          disabled={!activity || opening || !onReadDay}
+          aria-busy={opening}
+          onClick={() => onReadDay?.(dateKey(today))}
+        >
+          <strong>{activity ? countToday : "—"}</strong>
+          <span>articles marked read today</span>
+          <span class="activity-summary__link">
+            {opening ? "Opening…" : "View articles →"}
+          </span>
+        </button>
+        <button
+          class="activity-summary__read"
+          disabled={!activity || !onArrivedDay}
+          onClick={() => onArrivedDay?.(dateKey(today))}
+        >
+          <strong>{activity ? arrivedToday : "—"}</strong>
+          <span>articles arrived today</span>
+          <span class="activity-summary__link">Explore sources →</span>
+        </button>
       </div>
+      <ReadingFlowChart
+        days={days}
+        onReadDay={onReadDay}
+        opening={opening}
+        status={activity ? "ready" : error ? "error" : "loading"}
+      />
       <section
         class="activity-card"
         aria-label="Reading activity for the last year"
       >
         <div class="activity-card__heading">
           <div>
-            <h2>Time on Reader</h2>
-            <p>Each tile is one day. Darker tiles mean more minutes.</p>
+            <h2>Articles marked read</h2>
+            <p>Each tile is one day. Darker tiles mean more articles.</p>
           </div>
           <div class="activity-legend" aria-label="Activity intensity">
             <span>Less</span>
@@ -187,23 +183,37 @@ export function ActivityDashboard({
             <span>More</span>
           </div>
         </div>
-        <div class="activity-calendar" role="grid" aria-label="Daily minutes">
+        <div
+          class="activity-calendar"
+          role="grid"
+          aria-label="Daily articles marked read"
+          aria-busy={activity === null && !error}
+        >
           <div class="activity-calendar__days" aria-hidden="true">
             <span>Mon</span>
             <span>Wed</span>
             <span>Fri</span>
           </div>
           <div class="activity-calendar__grid">
-            {days.map((day) => (
-              <span
+            {days.map((day, index) => (
+              <button
+                disabled={!activity || opening || !onReadDay}
+                aria-busy={opening}
+                onClick={() => onReadDay?.(day.key)}
                 role="gridcell"
+                style={index === 0 ? { gridRowStart: day.weekday } : undefined}
                 class={`activity-tile activity-tile--${day.level}`}
-                title={`${day.label}: ${day.minutes} minutes`}
-                aria-label={`${day.label}: ${day.minutes} minutes`}
+                title={`${day.label}: ${activity ? `${day.count} articles` : "not loaded"}`}
+                aria-label={`${day.label}: ${activity ? `${day.count} articles` : "not loaded"}`}
               />
             ))}
           </div>
         </div>
+        <p class="activity-status" role="status">
+          {error
+            ? "Could not load reading activity. Return to this page to retry."
+            : "Recorded since tracking was enabled. Days use your local timezone."}
+        </p>
       </section>
     </section>
   );

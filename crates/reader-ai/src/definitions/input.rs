@@ -36,11 +36,21 @@ impl TryFrom<InputWire> for DefinitionsInput {
     }
 }
 impl DefinitionsInput {
+    pub fn budget_cost(&self, rates: &crate::CostRates) -> Result<String, AiError> {
+        let body = self.checked_body()?;
+        crate::budget::bound_cost(
+            body["messages"].as_array().ok_or(AiError::Protocol)?,
+            self.limits.framing_tokens_per_message,
+            self.limits.framing_tokens_base,
+            self.max_output_tokens,
+            rates,
+        )
+    }
     pub fn new(config: &AiConfig, snapshot: ArticleSnapshot) -> Result<Self, AiError> {
         config.validate()?;
         InputWire {
             snapshot,
-            model: config.model.clone(),
+            model: crate::DeepSeekModel::Flash.id().into(),
             system: SYSTEM.into(),
             version: DEFINITIONS_VERSION.into(),
             limits: InputLimits::from(config),

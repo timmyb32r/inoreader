@@ -91,23 +91,6 @@ pub(super) async fn get_subscription<R: ReaderRepository + 'static>(
     let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
     Ok(Json(subscription_view(&value, &stats)))
 }
-pub(super) async fn save_subscription_note<R: ReaderRepository + 'static>(
-    State(s): State<AppState<R>>,
-    headers: HeaderMap,
-    Path(id): Path<Uuid>,
-    Json(body): Json<SaveSubscriptionNoteRequest>,
-) -> Result<Json<SubscriptionView>, ApiFailure> {
-    csrf(&s, &headers)?;
-    let actor = auth(&s, &headers).await?;
-    let mut value = owned_subscription(&s, SubscriptionId::from_uuid(id), actor.account.id).await?;
-    let revision = value.revision();
-    value.set_personal_note(body.note);
-    s.repository
-        .save_subscription(Some(revision), value.clone())
-        .await?;
-    let stats = subscription_stats_for(s.repository.as_ref(), &value).await?;
-    Ok(Json(subscription_view(&value, &stats)))
-}
 pub(super) async fn subscription_activity<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,
     headers: HeaderMap,

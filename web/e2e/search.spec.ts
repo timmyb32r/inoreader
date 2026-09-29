@@ -30,11 +30,10 @@ test("unified search keeps controls stable, previews results, and restores brows
     });
   });
   await page.goto("/reader");
-  await page
-    .getByRole("button", { name: "Search news and wiki", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Search", exact: true }).click();
   await expect(page).toHaveURL(/\/search$/);
   const field = page.getByRole("searchbox");
+  await expect(field).toBeFocused();
   await field.fill("Rust");
   const submit = page
     .getByRole("button", { name: "Search", exact: true })

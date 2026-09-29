@@ -1,12 +1,14 @@
 //! Namespace-scoped PostgreSQL adapter. SQLx observes queries without bind data.
 mod access;
 mod binding;
+mod organization;
 mod read;
 mod write;
 use reader_wiki::{Error, Limits, Page, Role};
 use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
+pub const ORGANIZATION_SCHEMA: &str = include_str!("organization.sql");
 pub const SCHEMA: &str = include_str!("schema.sql");
 pub struct PostgresWikiStore {
     pool: PgPool,
@@ -25,6 +27,7 @@ fn storage(_: impl std::fmt::Display) -> Error {
 }
 fn page_row(row: &PgRow) -> Result<Page, Error> {
     Ok(Page {
+        parent: row.try_get("parent").map_err(storage)?,
         namespace: row.try_get("namespace").map_err(storage)?,
         id: row.try_get("id").map_err(storage)?,
         revision: row.try_get("revision").map_err(storage)?,

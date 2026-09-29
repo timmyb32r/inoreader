@@ -9,6 +9,7 @@ pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
             get(profile::<R>).put(save_key::<R>).delete(delete_key::<R>),
         )
         .route("/api/ai/balance", post(balance::<R>))
+        .route("/api/ai/models", axum::routing::put(save_models::<R>))
         .route(
             "/api/articles/{id}/translations",
             get(translations::<R>).post(translate::<R>),
@@ -39,6 +40,8 @@ async fn profile<R: ReaderRepository + 'static>(
     let owner = auth(&s, &headers).await?.account.id.as_uuid();
     let Some(ai) = s.ai.as_ref() else {
         return Ok(Json(AiProfile {
+            models: reader_ai::ModelPreferences::default(),
+            spending: None,
             configured: false,
             enabled: false,
             balance: None,
@@ -61,6 +64,15 @@ async fn save_key<R: ReaderRepository + 'static>(
     csrf(&s, &headers)?;
     let owner = auth(&s, &headers).await?.account.id.as_uuid();
     Ok(Json(service(&s)?.save_key(owner, body.api_key).await?))
+}
+async fn save_models<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Json(models): Json<reader_ai::ModelPreferences>,
+) -> Result<Json<AiProfile>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let owner = auth(&s, &headers).await?.account.id.as_uuid();
+    Ok(Json(service(&s)?.save_models(owner, models).await?))
 }
 async fn delete_key<R: ReaderRepository + 'static>(
     State(s): State<AppState<R>>,

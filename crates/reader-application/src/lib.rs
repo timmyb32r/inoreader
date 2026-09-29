@@ -17,3 +17,9 @@ pub use source_session::ZhihuProfilePort;
 
 mod search;
 pub use search::*;
+
+mod source_activity;
+pub use source_activity::*;
+
+pub mod focused_reading;
+pub use focused_reading::*;

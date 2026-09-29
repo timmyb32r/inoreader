@@ -80,3 +80,27 @@ fn release_and_publisher_headers_exclude_commit_and_sidebar_dates() {
         );
     }
 }
+
+#[test]
+fn huawei_publication_bylines_retain_time_precision_and_offsets() {
+    let html = r#"<span class="article-write-time isPc"> 发表于 2026/06/09 08:50:02</span><span class="article-write-time isMb">2026/06/09</span>"#;
+    let blog = Url::parse("https://bbs.huaweicloud.com/blogs/478868").unwrap();
+    let evidence = extract_publication(html, &blog);
+    assert_eq!(evidence[0].raw, " 发表于 2026/06/09 08:50:02");
+    assert_eq!(
+        resolve_publication(&evidence).unwrap().as_str(),
+        "2026-06-09T08:50:02"
+    );
+    assert!(extract(html).is_empty());
+    assert!(extract_publication(&format!("{html}{html}"), &blog).is_empty());
+    let news =
+        Url::parse("https://www.huaweicloud.com/intl/en-us/news/20260918131810473.html").unwrap();
+    let evidence = extract_publication(
+        r#"<body><time datetime="2026-09-18T13:31:18.000+08:00">2026-09-18</time></body>"#,
+        &news,
+    );
+    assert_eq!(
+        resolve_publication(&evidence).unwrap().as_str(),
+        "2026-09-18T13:31:18.000+08:00"
+    );
+}

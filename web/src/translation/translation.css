@@ -65,10 +65,10 @@
   z-index: 90;
   right: 24px;
   bottom: 24px;
-  width: 430px;
-  max-width: calc(100vw - 32px);
-  height: 260px;
-  max-height: calc(100dvh - 100px);
+  --chat-width: min(430px, calc(100vw - 32px));
+  --chat-height: min(260px, calc(100dvh - 100px));
+  width: var(--chat-width);
+  height: var(--chat-height);
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -123,4 +123,14 @@
   border: 1px solid var(--line);
   padding: 14px;
   border-radius: 8px;
+}
+
+.paragraph-result-handle {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
 }

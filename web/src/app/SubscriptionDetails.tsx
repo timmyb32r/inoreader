@@ -1,6 +1,6 @@
 import { WikiBinding } from "../wiki/WikiBinding";
 import { useSubscriptionLifecycle } from "./useSubscriptionLifecycle";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type {
   ApiClient,
   RuleDraft,
@@ -10,10 +10,7 @@ import type {
   SubscriptionExtraction,
   WebFeedRecipeView,
 } from "../api/client";
-import {
-  AutofillResistantField,
-  AutofillResistantTextarea,
-} from "../ui/fields";
+import { AutofillResistantField } from "../ui/fields";
 import { ModalDialog } from "../ui/ModalDialog";
 import type { Subscription } from "../api/viewModels";
 import { LatestArticles } from "./LatestArticles";
@@ -34,7 +31,6 @@ export function SubscriptionDetails({
   onChanged,
   onRemoved,
   onEditRecipe,
-  onDirtyNoteChange,
   onOpenWiki,
 }: {
   client: ApiClient;
@@ -50,7 +46,6 @@ export function SubscriptionDetails({
   onChanged?: (item: Subscription) => void;
   onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
-  onDirtyNoteChange?: (dirty: boolean) => void;
   onOpenWiki?: (path: string) => boolean;
 }) {
   const summary = subscriptions.find((x) => x.id === subscriptionId);
@@ -58,8 +53,6 @@ export function SubscriptionDetails({
       summary ?? null,
     ),
     [tab, setTab] = useState(initialTab ?? "overview"),
-    [note, setNote] = useState(summary?.personalNote ?? ""),
-    [savedNote, setSavedNote] = useState(summary?.personalNote ?? ""),
     [saving, setSaving] = useState(false),
     [refreshing, setRefreshing] = useState(false),
     [error, setError] = useState(""),
@@ -85,8 +78,6 @@ export function SubscriptionDetails({
     onRemoved,
     onBack,
   );
-  const noteEdited = useRef(false);
-  const dirty = note !== savedNote;
   useEffect(() => {
     let active = true;
     client
@@ -94,8 +85,6 @@ export function SubscriptionDetails({
       .then((v) => {
         if (active && v) {
           setDetail(v);
-          if (!noteEdited.current) setNote(v.personalNote ?? "");
-          setSavedNote(v.personalNote ?? "");
         }
       })
       .catch((e) => {
@@ -105,20 +94,6 @@ export function SubscriptionDetails({
       active = false;
     };
   }, [client, subscriptionId]);
-  useEffect(() => {
-    const before = (e: BeforeUnloadEvent) => {
-      if (dirty) {
-        e.preventDefault();
-        e.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", before);
-    return () => window.removeEventListener("beforeunload", before);
-  }, [dirty]);
-  useEffect(() => {
-    onDirtyNoteChange?.(dirty);
-    return () => onDirtyNoteChange?.(false);
-  }, [dirty, onDirtyNoteChange]);
   useEffect(() => {
     if (tab !== "activity" || activity !== null || activityLoading) return;
     setActivityLoading(true);
@@ -158,13 +133,6 @@ export function SubscriptionDetails({
       })
       .finally(() => setRulesLoading(false));
   }, [tab, rules, rulesLoading, client, workspaceId, subscriptionId]);
-  const leave = (action: () => void) => {
-    if (
-      !dirty ||
-      window.confirm("Discard unsaved changes to your personal note?")
-    )
-      action();
-  };
   if (!detail)
     return (
       <section class="subscriptions-page">
@@ -176,20 +144,6 @@ export function SubscriptionDetails({
         </div>
       </section>
     );
-  const save = () => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    client
-      .saveSubscriptionNote(subscriptionId, note)
-      .then((v) => {
-        setDetail(v);
-        noteEdited.current = false;
-        setSavedNote(note);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setSaving(false));
-  };
   return (
     <section class="subscriptions-page detail-page">
       {lifecycle.dialog}
@@ -259,10 +213,7 @@ export function SubscriptionDetails({
             ["activity", "Update log"],
           ] satisfies [DetailTab, string][]
         ).map(([id, label]) => (
-          <button
-            class={tab === id ? "active" : ""}
-            onClick={() => leave(() => setTab(id))}
-          >
+          <button class={tab === id ? "active" : ""} onClick={() => setTab(id)}>
             {label}
           </button>
         ))}
@@ -345,37 +296,9 @@ export function SubscriptionDetails({
               <dt>Unread</dt>
               <dd>{detail.unreadCount ?? 0}</dd>
             </dl>
-          </section>
-          <section class="detail-card note-card">
-            <h2>Personal note</h2>
-            <AutofillResistantTextarea
-              aria-label="Personal note"
-              rows={7}
-              value={note}
-              onInput={(e) => {
-                noteEdited.current = true;
-                setNote(e.currentTarget.value);
-              }}
-            />
-            <div class="note-status" aria-live="polite">
-              <span>{dirty ? "Unsaved changes" : "All changes saved"}</span>
-              <button
-                class="primary-button"
-                disabled={!dirty || saving}
-                aria-busy={saving}
-                onClick={save}
-              >
-                {saving ? (
-                  <>
-                    <span class="spinner" />
-                    Saving…
-                  </>
-                ) : (
-                  "Save note"
-                )}
-              </button>
+            <div class="field-help field-help--error" role="status">
+              {error}
             </div>
-            <span class="field-help field-help--error">{error}</span>
           </section>
           <PublicationHistory client={client} subscriptionId={subscriptionId} />
           <LatestArticles

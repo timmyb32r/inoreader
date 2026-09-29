@@ -2,13 +2,15 @@ use super::*;
 use std::collections::VecDeque;
 use tokio::sync::Notify;
 
-#[path = "ai_titles.rs"]
-mod titles;
+#[path = "ai_review.rs"]
+mod review;
 
 enum Step {
     Text(&'static str),
+    ChangeModels(reader_ai::ModelPreferences, &'static str),
     Error(AiError),
     BadQuote,
+    Review(&'static str),
     Stop(bool),
     Wait(Arc<Notify>),
 }
@@ -62,6 +64,12 @@ impl AiProvider for Scripted {
             );
         }
         let text = match step {
+            Step::ChangeModels(models, text) => {
+                self.store
+                    .save_model_preferences(self.owner, models)
+                    .await?;
+                text
+            }
             Step::Error(error) => return Err(error),
             Step::Wait(notify) => {
                 progress.publish("Partial verifier output").await?;
@@ -81,17 +89,24 @@ impl AiProvider for Scripted {
                 progress.usage(&usage()).await?;
                 return CompletedGeneration::new(serde_json::json!({"segments":[{"kind":"quote","content":"fabricated quotation"}]}).to_string(), usage(), &input.article.text, input.max_response_bytes);
             }
+            Step::Review(raw) => {
+                progress.usage(&usage()).await?;
+                progress.response(raw, &input.system).await?;
+                return CompletedGeneration::reviewed(
+                    raw.into(),
+                    usage(),
+                    input.review_draft.as_deref().unwrap(),
+                    &input.article.title,
+                    &input.article.text,
+                    input.max_response_bytes,
+                );
+            }
             Step::Text(text) => {
                 progress.publish(text).await?;
                 text
             }
         };
-        CompletedGeneration::new(
-            serde_json::json!({"segments":[{"kind":"text","content":text}]}).to_string(),
-            usage(),
-            &input.article.text,
-            input.max_response_bytes,
-        )
+        complete_text(&input, text, usage(), progress).await
     }
 }
 
@@ -143,6 +158,80 @@ pub(super) async fn verify(
     ws: Uuid,
     article: Uuid,
 ) {
+    // A queued job follows current preferences; a preference change while the
+    // first request is running affects the checker, but not that first bill.
+    use reader_ai::{DeepSeekModel, ModelPreferences};
+    assert_eq!(
+        store.model_preferences(owner).await.unwrap(),
+        ModelPreferences::default()
+    );
+    let (service, provider, id) = fixture(
+        store.clone(),
+        owner,
+        ws,
+        article,
+        vec![
+            Step::ChangeModels(ModelPreferences::default(), "Draft"),
+            Step::Text("**Title**\n\nChecked summary"),
+        ],
+    )
+    .await;
+    service
+        .save_models(
+            owner,
+            ModelPreferences {
+                summary: DeepSeekModel::Pro,
+                verification: DeepSeekModel::Pro,
+            },
+        )
+        .await
+        .unwrap();
+    let other = Uuid::new_v4();
+    assert_eq!(
+        store.model_preferences(other).await.unwrap(),
+        ModelPreferences::default()
+    );
+    assert_eq!(
+        service.profile(owner).await.unwrap().models.summary,
+        DeepSeekModel::Pro
+    );
+    service.work_once().await.unwrap();
+    let view = service.chat(owner, id).await.unwrap();
+    assert_eq!(view.status, ChatStatus::Completed);
+    assert_eq!(provider.inputs.lock().unwrap()[0].model, "deepseek-v4-pro");
+    assert_eq!(provider.inputs.lock().unwrap()[1].model, "deepseek-flash");
+    assert_eq!(
+        view.provider_calls[0]
+            .usage
+            .as_ref()
+            .unwrap()
+            .estimated_cost_usd
+            .as_deref(),
+        Some("0.000030448")
+    );
+    assert_eq!(
+        view.provider_calls[1]
+            .usage
+            .as_ref()
+            .unwrap()
+            .estimated_cost_usd
+            .as_deref(),
+        Some("0.000008412")
+    );
+    let selected: String = sqlx::query_scalar(
+        "SELECT document::jsonb->>'model' FROM ai_call_models WHERE id=$1 AND owner=$2",
+    )
+    .bind(view.provider_calls[0].id)
+    .bind(owner)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(selected, "deepseek-v4-pro");
+    assert_eq!(
+        service.profile(owner).await.unwrap().models,
+        ModelPreferences::default()
+    );
+
     // Second-request auth/rate errors preserve the paid draft and retry only the
     // checker, with the same source/prompt, even after worker configuration changes.
     for error in [AiError::InvalidKey, AiError::RateLimit, AiError::Provider] {
@@ -165,7 +254,7 @@ pub(super) async fn verify(
             failed.status,
             ChatStatus::Failed | ChatStatus::Interrupted
         ));
-        assert_eq!(failed.messages[0].content, "Unverified draft");
+        assert_eq!(failed.messages[0].content, "**Title**\n\nUnverified draft");
         assert_eq!(failed.messages[0].phase, Some(GenerationPhase::Verifying));
         assert_eq!(failed.provider_calls.len(), 2);
         assert_eq!(
@@ -188,13 +277,9 @@ pub(super) async fn verify(
         assert_eq!(left.unwrap().messages.len(), 2);
         assert_eq!(right.unwrap().messages.len(), 2);
         let mut changed = policy(owner).config().clone();
-        changed.review.model = "deepseek-v4-pro".into();
         changed.review.generation_mode = GenerationMode::Thinking {
             effort: ReasoningEffort::High,
         };
-        changed.review.input_usd_per_million_tokens = "1.32".into();
-        changed.review.cached_input_usd_per_million_tokens = "0.044".into();
-        changed.review.output_usd_per_million_tokens = "3.96".into();
         changed.review.max_output_tokens = 200;
         let next = AiService::new(
             store.clone(),
@@ -202,6 +287,15 @@ pub(super) async fn verify(
             CredentialCipher::new(&[5; 32]).unwrap(),
             AiPolicy::new(changed, "Different style".into(), "Different review".into()).unwrap(),
         );
+        next.save_models(
+            owner,
+            ModelPreferences {
+                summary: DeepSeekModel::Flash,
+                verification: DeepSeekModel::Pro,
+            },
+        )
+        .await
+        .unwrap();
         next.work_once().await.unwrap();
         let checked = service.chat(owner, id).await.unwrap();
         assert_eq!(checked.status, ChatStatus::Completed);
@@ -214,14 +308,14 @@ pub(super) async fn verify(
                 .unwrap()
                 .estimated_cost_usd
                 .as_deref(),
-            Some("0.000008412")
+            Some("0.000030448")
         );
         {
             let inputs = provider.inputs.lock().unwrap();
             assert_eq!(inputs.len(), 3);
             assert_eq!(inputs[1].review_draft, inputs[2].review_draft);
-            assert_eq!(inputs[1].system, inputs[2].system);
-            assert_eq!(inputs[2].model, "deepseek-flash");
+            assert_ne!(inputs[1].system, inputs[2].system); // retry uses the current correction protocol
+            assert_eq!(inputs[2].model, "deepseek-v4-pro");
             assert_eq!(
                 inputs[2].generation_mode,
                 GenerationMode::standard(0.3).unwrap()
@@ -240,6 +334,10 @@ pub(super) async fn verify(
             "follow-up uses exactly one request"
         );
         assert!(provider.inputs.lock().unwrap()[3].review_draft.is_none());
+        service
+            .save_models(owner, ModelPreferences::default())
+            .await
+            .unwrap();
     }
 
     // Invalid verbatim quotes never become an accepted summary; known usage of
@@ -255,7 +353,7 @@ pub(super) async fn verify(
     service.work_once().await.unwrap();
     let bad = service.chat(owner, id).await.unwrap();
     assert_eq!(bad.status, ChatStatus::Failed);
-    assert_eq!(bad.messages[0].content, "Unverified");
+    assert_eq!(bad.messages[0].content, "**Title**\n\nUnverified");
     assert!(bad.provider_calls.iter().all(|c| c.usage.is_some()));
 
     // Stop in the durable stage handoff must prevent the second paid request,
@@ -277,7 +375,7 @@ pub(super) async fn verify(
         assert!(stopped.provider_calls[0].usage.is_some());
         assert_eq!(
             stopped.messages[0].content,
-            "Unverified draft retained after stop"
+            "**Title**\n\nUnverified draft retained after stop"
         );
         let saved = store.chat(owner, id).await.unwrap();
         assert!(
@@ -312,7 +410,7 @@ pub(super) async fn verify(
         ws,
         article,
         vec![
-            Step::Text("Unverified before crash"),
+            Step::Text("**Title**\n\nUnverified before crash"),
             Step::Wait(entered.clone()),
             Step::Text("**Title**\n\nVerified after restart"),
         ],
@@ -327,13 +425,16 @@ pub(super) async fn verify(
         .unwrap();
     let preview = service.chat(owner, id).await.unwrap();
     assert_eq!(preview.status, ChatStatus::Verifying);
-    assert_eq!(preview.messages[0].content, "Unverified before crash");
+    assert_eq!(
+        preview.messages[0].content,
+        "**Title**\n\nUnverified before crash"
+    );
     assert_ne!(preview.messages[0].status, MessageStatus::Complete);
     assert!(service.chat(Uuid::new_v4(), id).await.is_err());
     let listed = service.chats(owner, ws, article).await.unwrap();
     assert_eq!(
         listed.iter().find(|chat| chat.id == id).unwrap().messages[0].content,
-        "Unverified before crash"
+        "**Title**\n\nUnverified before crash"
     );
     let old_record = store.chat(owner, id).await.unwrap();
     assert_eq!(
@@ -375,7 +476,10 @@ pub(super) async fn verify(
     worker.abort();
     let interrupted = service.chat(owner, id).await.unwrap();
     assert_eq!(interrupted.status, ChatStatus::Interrupted);
-    assert_eq!(interrupted.messages[0].content, "Unverified before crash");
+    assert_eq!(
+        interrupted.messages[0].content,
+        "**Title**\n\nUnverified before crash"
+    );
     assert!(interrupted.provider_calls[0].usage.is_some());
     assert!(interrupted.provider_calls[1].usage.is_none());
     assert_eq!(
@@ -385,7 +489,7 @@ pub(super) async fn verify(
     let retry = service.retry(owner, id, Uuid::new_v4()).await.unwrap();
     assert_eq!(
         retry.messages.last().unwrap().content,
-        "Unverified before crash"
+        "**Title**\n\nUnverified before crash"
     );
     assert_eq!(
         retry.messages.last().unwrap().phase,
@@ -433,14 +537,20 @@ pub(super) async fn verify(
         owner,
         ws,
         article,
-        vec![Step::Text("Unverified before stop"), Step::Stop(false)],
+        vec![
+            Step::Text("**Title**\n\nUnverified before stop"),
+            Step::Stop(false),
+        ],
     )
     .await;
     service.work_once().await.unwrap();
     let stopped = service.chat(owner, id).await.unwrap();
     assert_eq!(stopped.status, ChatStatus::Cancelled);
     assert_eq!(provider.inputs.lock().unwrap().len(), 2);
-    assert_eq!(stopped.messages[0].content, "Unverified before stop");
+    assert_eq!(
+        stopped.messages[0].content,
+        "**Title**\n\nUnverified before stop"
+    );
     assert!(stopped.provider_calls.iter().all(|c| c.usage.is_some()));
 
     // Repository boundaries independently reject publishing a raw draft,
@@ -461,11 +571,39 @@ pub(super) async fn verify(
         Err(AiError::Conflict)
     ));
     assert!(matches!(
-        store.begin_call(&claim, GenerationPhase::Verifying).await,
+        store
+            .begin_call(
+                &claim,
+                GenerationPhase::Verifying,
+                &reader_ai::SpendReservation::new(
+                    "0.1".into(),
+                    "3".into(),
+                    reader_ai::SpendMode::Summary
+                )
+                .unwrap(),
+                &reader_ai::CallModel::new(
+                    reader_ai::DeepSeekModel::Flash,
+                    claim.record.review.cost_rates.clone()
+                ),
+            )
+            .await,
         Err(AiError::Conflict)
     ));
     let call = store
-        .begin_call(&claim, GenerationPhase::Generating)
+        .begin_call(
+            &claim,
+            GenerationPhase::Generating,
+            &reader_ai::SpendReservation::new(
+                "0.1".into(),
+                "3".into(),
+                reader_ai::SpendMode::Summary,
+            )
+            .unwrap(),
+            &reader_ai::CallModel::new(
+                reader_ai::DeepSeekModel::Flash,
+                claim.record.cost_rates.clone(),
+            ),
+        )
         .await
         .unwrap();
     assert!(matches!(
@@ -492,8 +630,23 @@ pub(super) async fn verify(
     ));
     service.stop(owner, id).await.unwrap();
     assert!(matches!(
-        store.begin_call(&claim, GenerationPhase::Verifying).await,
+        store
+            .begin_call(
+                &claim,
+                GenerationPhase::Verifying,
+                &reader_ai::SpendReservation::new(
+                    "0.1".into(),
+                    "3".into(),
+                    reader_ai::SpendMode::Summary
+                )
+                .unwrap(),
+                &reader_ai::CallModel::new(
+                    reader_ai::DeepSeekModel::Flash,
+                    claim.record.review.cost_rates.clone()
+                ),
+            )
+            .await,
         Err(AiError::Cancelled)
     ));
-    titles::verify(store, owner, ws, article).await;
+    review::verify(pool, store, owner, ws, article).await;
 }

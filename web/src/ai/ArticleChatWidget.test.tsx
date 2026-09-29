@@ -81,7 +81,11 @@ it("gates generation without credentials but retains access to saved chats", asy
   render(
     <Harness
       client={new AiClient(transport)}
-      configured={{ configured: false, enabled: false }}
+      configured={{
+        models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+        configured: false,
+        enabled: false,
+      }}
     />,
   );
   await user.click(screen.getByRole("button", { name: "Summarize A" }));
@@ -205,7 +209,7 @@ it("preserves an uncertain accepted message operation across reconnect and artic
   expect(
     screen.getByRole("button", { name: "Send", exact: true }),
   ).toBeDisabled();
-  expect(screen.getByRole("button", { name: "New summary" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "New summary" })).toBeNull();
   fireEvent.keyDown(screen.getByLabelText("Message DeepSeek"), {
     key: "Enter",
     ctrlKey: true,
@@ -294,7 +298,11 @@ it("never turns Reconnect into a paid initial summary after key setup", async ()
   const view = render(
     <Harness
       client={client}
-      configured={{ configured: false, enabled: false }}
+      configured={{
+        models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+        configured: false,
+        enabled: false,
+      }}
     />,
   );
   await user.click(screen.getByRole("button", { name: "Summarize A" }));
@@ -384,7 +392,7 @@ it("polls only an active visible conversation and reconnects without a paid requ
   }
 });
 
-it("opens latest saved summary without a version picker and regenerates only explicitly", async () => {
+it("opens latest saved summary without a version picker or regeneration action", async () => {
   const old = saved("old"),
     newest = {
       ...saved("new"),
@@ -409,9 +417,7 @@ it("opens latest saved summary without a version picker and regenerates only exp
   expect(screen.queryByRole("combobox")).toBeNull();
   expect(screen.queryByLabelText("Provider request costs")).toBeNull();
   expect(mutations).toHaveLength(0);
-  await user.click(screen.getByRole("button", { name: "New summary" }));
-  await waitFor(() => expect(mutations).toHaveLength(1));
-  expect(mutations[0]).toMatchObject({ regenerate: true, workspaceId: "ws" });
+  expect(screen.queryByRole("button", { name: "New summary" })).toBeNull();
 });
 
 it.each(["failed", "interrupted", "cancelled"] as const)(
@@ -439,7 +445,7 @@ it.each(["failed", "interrupted", "cancelled"] as const)(
       screen.queryByRole("button", { name: "Stop", exact: true }),
     ).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Retry", exact: true }),
+      screen.getByRole("button", { name: "Retry verification", exact: true }),
     ).toBeEnabled();
   },
 );

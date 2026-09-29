@@ -15,18 +15,15 @@ fn invalid_provider_credentials_do_not_expire_the_reader_session() {
 }
 
 #[tokio::test]
-async fn changed_summary_title_has_a_stable_actionable_error() {
-    let response = ApiFailure::Ai(reader_ai::AiError::OriginalTitleChanged).into_response();
+async fn incomplete_review_has_a_stable_actionable_error() {
+    let response = ApiFailure::Ai(reader_ai::AiError::Review).into_response();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     let bytes = axum::body::to_bytes(response.into_body(), 4096)
         .await
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(body["code"], "original_title_changed");
-    assert_eq!(
-        body["message"],
-        reader_ai::AiError::OriginalTitleChanged.to_string()
-    );
+    assert_eq!(body["code"], "ai_review_incomplete");
+    assert_eq!(body["message"], reader_ai::AiError::Review.to_string());
 }
 
 #[tokio::test]
@@ -349,7 +346,7 @@ fn workspace_and_subscription_dtos_expose_reasons_without_domain_layout() {
     assert_eq!(json["unreadCount"], 4);
     assert_eq!(json["sourceTitle"], "Feed");
     assert_eq!(json["customName"], serde_json::Value::Null);
-    assert_eq!(json["personalNote"], "");
+    assert!(json.get("personalNote").is_none());
     assert_eq!(json["sourceUrl"], "https://example.test/feed");
     assert_eq!(json["sourceType"], "feed");
     assert_eq!(json["needsAttention"], false);
@@ -484,6 +481,7 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         revision: 0,
     };
     let mut presentation = reader_application::ArticlePresentation {
+        marked_read_at: None,
         publication: Vec::new(),
         description_media_type: None,
         article,
@@ -643,18 +641,6 @@ async fn subscription_routes_hide_cross_user_detail_and_mutations() {
         Err(ApiFailure::Repository(RepositoryError::NotFound))
     ));
     assert!(matches!(
-        save_subscription_note(
-            State(state.clone()),
-            headers.clone(),
-            Path(id),
-            Json(SaveSubscriptionNoteRequest {
-                note: "secret".into()
-            })
-        )
-        .await,
-        Err(ApiFailure::Repository(RepositoryError::NotFound))
-    ));
-    assert!(matches!(
         preview_subscription_source_url(
             State(state.clone()),
             headers.clone(),
@@ -794,6 +780,21 @@ impl reader_application::ArticleRepository for RouteRepository {
         &self,
         _: WorkspaceId,
     ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
+        route_unused()
+    }
+    async fn reading_activity(
+        &self,
+        _: WorkspaceId,
+        _: &str,
+    ) -> Result<Option<Vec<reader_application::ReadingDay>>, RepositoryError> {
+        route_unused()
+    }
+    async fn source_activity(
+        &self,
+        _: WorkspaceId,
+        _: &str,
+        _: reader_application::SourceActivityPeriod,
+    ) -> Result<Option<Vec<reader_application::SourceActivityDay>>, RepositoryError> {
         route_unused()
     }
     async fn save_article(
@@ -1121,6 +1122,7 @@ async fn article_command_resolves_ownership_before_any_article_access() {
 fn description_rendering_uses_declared_format_without_changing_source() {
     let source = "<p>Rust &amp; <strong>SQL</strong></p><p>Next</p><script>bad()</script>";
     let mut value = reader_application::ArticlePresentation {
+        marked_read_at: None,
         publication: Vec::new(),
         article: reader_core::Article {
             id: ArticleId::new(),
@@ -1154,5 +1156,50 @@ fn description_rendering_uses_declared_format_without_changing_source() {
         let view = article_view(&value);
         assert_eq!(view.excerpt, "Vec<T> x < 3 & literal <b>code</b>");
         assert!(view.body_html.is_none());
+    }
+}
+
+#[test]
+fn reading_history_wire_requires_both_valid_ordered_bounds() {
+    let start = chrono::DateTime::parse_from_rfc3339("2026-09-28T21:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    assert!(read_period(Some(start), None).is_err());
+    assert!(read_period(None, Some(start)).is_err());
+    assert!(read_period(Some(start), Some(start)).is_err());
+    assert!(read_period(None, None).unwrap().is_none());
+    assert!(serde_json::from_value::<ArticleListQuery>(
+        serde_json::json!({"workspace_id":Uuid::new_v4(),"read_from":"invalid"})
+    )
+    .is_err());
+}
+
+#[async_trait::async_trait]
+impl reader_application::FocusedReadingRepository for RouteRepository {
+    async fn reading_state(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+    ) -> Result<reader_application::ReadingState, reader_application::RepositoryError> {
+        Err(reader_application::RepositoryError::NotFound)
+    }
+    async fn complete_reading(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+        _: reader_application::CompleteReading,
+    ) -> Result<reader_application::ReadingCompletion, reader_application::RepositoryError> {
+        Err(reader_application::RepositoryError::NotFound)
+    }
+    async fn undo_reading(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+        _: uuid::Uuid,
+    ) -> Result<reader_application::ReadingCompletion, reader_application::RepositoryError> {
+        Err(reader_application::RepositoryError::NotFound)
     }
 }

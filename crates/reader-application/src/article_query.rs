@@ -1,5 +1,33 @@
 use crate::{ArticlePageCursor, ArticlePageDirection};
+use chrono::{DateTime, Utc};
 use reader_core::SubscriptionId;
+
+/// Explicit half-open read-event interval [start, end), in UTC.
+/// Constructed from the selected local calendar day, including DST boundaries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReadPeriod {
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+}
+impl ReadPeriod {
+    pub fn new(start: DateTime<Utc>, end: DateTime<Utc>) -> Result<Self, &'static str> {
+        if !start.timestamp_subsec_nanos().is_multiple_of(1000)
+            || !end.timestamp_subsec_nanos().is_multiple_of(1000)
+        {
+            return Err("read period supports microsecond precision");
+        }
+        if start >= end {
+            return Err("read period must end after its start");
+        }
+        Ok(Self { start, end })
+    }
+    pub fn start(self) -> DateTime<Utc> {
+        self.start
+    }
+    pub fn end(self) -> DateTime<Utc> {
+        self.end
+    }
+}
 
 /// Closed selection: a subscription id is required only for subscription history.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +88,7 @@ pub struct ArticlePageRequest {
     cursor: Option<ArticlePageCursor>,
     direction: ArticlePageDirection,
     limit: SelectionLimit,
+    read_period: Option<ReadPeriod>,
 }
 impl ArticlePageRequest {
     pub fn new(
@@ -76,7 +105,18 @@ impl ArticlePageRequest {
             cursor,
             direction,
             limit,
+            read_period: None,
         })
+    }
+    pub fn with_read_period(mut self, period: Option<ReadPeriod>) -> Result<Self, &'static str> {
+        if period.is_some() && self.scope != ArticleScope::Feed {
+            return Err("read period requires Feed without a subscription");
+        }
+        self.read_period = period;
+        Ok(self)
+    }
+    pub fn read_period(&self) -> Option<ReadPeriod> {
+        self.read_period
     }
     pub fn scope(&self) -> ArticleScope {
         self.scope

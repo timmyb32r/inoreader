@@ -7,6 +7,29 @@ use uuid::Uuid;
 /// accepts an administrative bypass or an unscoped page identity.
 #[async_trait]
 pub trait Store: Send + Sync {
+    async fn collection(
+        &self,
+        actor: Uuid,
+        namespace: Uuid,
+        kind: Collection,
+        offset: u32,
+    ) -> Result<PageList, Error>;
+    async fn organization(
+        &self,
+        actor: Uuid,
+        namespace: Uuid,
+        page: Uuid,
+        offset: u32,
+    ) -> Result<Organization, Error>;
+    async fn favorite(
+        &self,
+        actor: Uuid,
+        namespace: Uuid,
+        page: Uuid,
+        favorite: bool,
+    ) -> Result<(), Error>;
+    async fn subscription_root(&self, actor: Uuid, namespace: Uuid) -> Result<Page, Error>;
+
     async fn revision(
         &self,
         actor: Uuid,

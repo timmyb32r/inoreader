@@ -242,3 +242,9 @@ Wiki API не возвращает обратный список подписо�
 Существенных вопросов для продолжения интервью не осталось. Согласованные
 контракты реализованы; эксплуатационные лимиты заданы явно в конфигурации.
 Архитектура, индексы и проверенные границы описаны в [архитектуре Wiki](wiki-architecture.md).
+
+## Organization update · 2026-09-29
+
+[Wiki organization](wiki-organization.md) specifies namespace-local parent/child
+relationships with history, private favorites, standalone-page collections and
+the Subscriptions parent. It is the current contract for these additions.

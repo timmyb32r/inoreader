@@ -63,6 +63,8 @@ pub fn extract_publication(html: &str, url: &Url) -> Vec<PublicationEvidence> {
             Some("oxide.computer") => {
                 Some("main > article .text-mono-sm.text-secondary > span.inline-block")
             }
+            Some("bbs.huaweicloud.com") if url.path().starts_with("/blogs/") => Some(".article-write-time.isPc"),
+            Some("www.huaweicloud.com") if url.path().starts_with("/intl/en-us/news/") => Some("body > time[datetime]"),
             Some("tech.meituan.com") => Some(".vp-post-meta .vp-post-date"),
             Some("postgrespro.ru") => Some("span.description > time[datetime]"),
             Some("research.yandex.com") => Some("aside [class*='PostHead_date__'] > [class*='ArticleProps_value__']"),
@@ -73,7 +75,12 @@ pub fn extract_publication(html: &str, url: &Url) -> Vec<PublicationEvidence> {
             let selector = Selector::parse(selector).expect("static publisher selector");
             let nodes: Vec<_> = document.select(&selector).collect();
             if nodes.len() == 1 {
-                evidence.push(node_date(nodes[0], "html:publisher-byline"));
+                let source = if url.host_str() == Some("bbs.huaweicloud.com") {
+                    "html:huawei-blog-byline"
+                } else {
+                    "html:publisher-byline"
+                };
+                evidence.push(node_date(nodes[0], source));
             }
         }
     }

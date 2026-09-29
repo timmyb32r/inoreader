@@ -85,3 +85,46 @@
     display: inline-flex;
   }
 }
+
+@media (max-width: 760px) {
+  .reader-toolbar-button.reader-toolbar-button--labelled {
+    width: 36px;
+    padding: 0;
+    gap: 0;
+  }
+  .reader-toolbar-button__label {
+    display: none;
+  }
+}
+
+.reader-source-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.reader-wiki-slot {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+}
+.reader-wiki-link {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font:
+    22px Georgia,
+    serif;
+}
+.reader-wiki-link:hover,
+.reader-wiki-link:focus-visible {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+}
+.reader-wiki-link:active {
+  background: var(--line);
+}

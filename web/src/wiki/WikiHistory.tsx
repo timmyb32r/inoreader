@@ -73,10 +73,30 @@ export function WikiHistory({
         <div class="wiki-comparison">
           <div>
             <h3>Selected revision</h3>
+            <p>
+              Parent:{" "}
+              {selected?.parent ? (
+                <a href={`/wiki/${page.namespace}/page/${selected.parent}`}>
+                  Open parent
+                </a>
+              ) : (
+                "None"
+              )}
+            </p>
             <pre>{selected?.markdown ?? "Select a revision"}</pre>
           </div>
           <div>
             <h3>Current revision</h3>
+            <p>
+              Parent:{" "}
+              {page.parent ? (
+                <a href={`/wiki/${page.namespace}/page/${page.parent}`}>
+                  Open parent
+                </a>
+              ) : (
+                "None"
+              )}
+            </p>
             <pre>{page.markdown}</pre>
           </div>
         </div>

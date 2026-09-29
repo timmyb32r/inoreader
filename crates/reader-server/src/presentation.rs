@@ -64,7 +64,6 @@ pub(super) fn subscription_view(
         name: value.title().to_owned(),
         source_title: value.source_title().to_owned(),
         custom_name: value.custom_name().map(str::to_owned),
-        personal_note: value.personal_note().to_owned(),
         source_url: value.source_url_exact().to_owned(),
         icon_data_url: stats.icon_data_url.clone(),
         source_type: source_type_view(stats.source_type),
@@ -140,6 +139,7 @@ pub(super) fn article_view(value: &reader_application::ArticlePresentation) -> A
         reader_application::ContentStatus::Failed => FullTextStatus::Failed,
     };
     view.full_text_reason = value.failure_reason.clone();
+    view.marked_read_at = value.marked_read_at;
     view
 }
 
@@ -188,7 +188,10 @@ pub(super) fn article_page_view(page: reader_application::ArticlePage) -> Articl
 pub(super) fn article_cursor(value: &reader_application::ArticlePresentation) -> String {
     format!(
         "{}.{}",
-        value.article.first_arrived_at.timestamp_micros(),
+        value
+            .marked_read_at
+            .unwrap_or(value.article.first_arrived_at)
+            .timestamp_micros(),
         value.article.id.as_uuid()
     )
 }
@@ -219,6 +222,7 @@ pub(super) fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         .unwrap_or_default()
         .to_owned();
     ArticleView {
+        marked_read_at: None,
         id: value.id.as_uuid(),
         url,
         source: "Unknown source".to_owned(),
@@ -274,5 +278,20 @@ pub(super) fn source_type_view(value: reader_application::SourceType) -> SourceT
         reader_application::SourceType::Feed => SourceTypeView::Feed,
         reader_application::SourceType::Web => SourceTypeView::Web,
         reader_application::SourceType::BuiltIn => SourceTypeView::BuiltIn,
+    }
+}
+
+pub(super) fn read_period(
+    from: Option<chrono::DateTime<chrono::Utc>>,
+    until: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Option<reader_application::ReadPeriod>, ApiFailure> {
+    match (from, until) {
+        (None, None) => Ok(None),
+        (Some(start), Some(end)) => reader_application::ReadPeriod::new(start, end)
+            .map(Some)
+            .map_err(ApiFailure::Validation),
+        _ => Err(ApiFailure::Validation(
+            "both read_from and read_until are required",
+        )),
     }
 }

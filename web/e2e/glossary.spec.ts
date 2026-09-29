@@ -63,7 +63,11 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
       });
     if (path === "/api/ai/profile")
       return route.fulfill({
-        json: wireFixture({ enabled: true, configured: true }),
+        json: wireFixture({
+          models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+          enabled: true,
+          configured: true,
+        }),
       });
     if (path === "/api/articles")
       return route.fulfill({ json: wireFixture(articlePage) });
@@ -146,6 +150,7 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
     return route.fulfill({ json: wireFixture([]) });
   });
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Close chat" }).click();
   const trigger = page.getByRole("button", { name: "Terms", exact: true });
   const before = await trigger.boundingBox();
   await trigger.click();

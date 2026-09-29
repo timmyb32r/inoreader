@@ -1,21 +1,30 @@
+import { useLayoutEffect, useRef } from "preact/hooks";
 import { AutofillResistantField } from "../ui/fields";
 import { Icon } from "../ui/Icon";
 /** The shared search entry keeps input and submit coordinates stable while busy. */
 export function SearchField({
+  autoFocus = false,
   value,
   onInput,
   onSubmit,
   busy = false,
   label = "Search news and wiki",
 }: {
+  autoFocus?: boolean;
   value: string;
   onInput: (v: string) => void;
   onSubmit: () => void;
   busy?: boolean;
   label?: string;
 }) {
+  const form = useRef<HTMLFormElement>(null);
+  useLayoutEffect(() => {
+    if (autoFocus)
+      form.current?.querySelector("input")?.focus({ preventScroll: true });
+  }, [autoFocus]);
   return (
     <form
+      ref={form}
       class="unified-search-field"
       onSubmit={(e) => {
         e.preventDefault();
@@ -24,6 +33,7 @@ export function SearchField({
     >
       <Icon name="search" />
       <AutofillResistantField
+        autoFocus={autoFocus}
         type="search"
         aria-label={label}
         placeholder={label}

@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import type { ApiClient, ArticlePage, Bootstrap } from "../api/client";
+import type {
+  ApiClient,
+  ArticlePage,
+  Bootstrap,
+  ReadPeriod,
+} from "../api/client";
 import type { Article, Subscription } from "../api/viewModels";
 import {
   readArticlePagePosition,
   writeArticlePagePosition,
+  writeSelectedArticle,
   type View,
 } from "./readerLocation";
 
@@ -16,8 +22,10 @@ export function useReaderController(
   _subscriptions: Subscription[],
   announce: (message: string) => void,
   onOpenArticle: () => void,
+  onRestoreWorkspace?: (value: Bootstrap) => void,
 ) {
   const initialPagePosition = useRef(readArticlePagePosition()).current;
+  const navigationRevision = useRef(0);
   const epoch = useRef(0),
     pageRequest = useRef(0),
     pageLock = useRef(false),
@@ -32,12 +40,22 @@ export function useReaderController(
   );
   const [pageGeneration, setPageGeneration] = useState(0);
   const [contentGeneration, setContentGeneration] = useState(0);
+  const [readPeriod, setReadPeriod] = useState<ReadPeriod | undefined>(
+    initialPagePosition.readPeriod,
+  );
   const [view, setView] = useState<View>(initialPagePosition.view);
   const [articles, setArticles] = useState<Article[]>(
     bootstrap.articlePage.articles,
   );
   const [selectedId, setSelectedId] = useState(
-    bootstrap.articlePage.articles[0]?.id ?? "",
+    initialPagePosition.articleId ??
+      bootstrap.articlePage.articles[0]?.id ??
+      "",
+  );
+  // A directly linked read article may be outside the current unread batch.
+  // Keep it in the entity store for mutations, without adding a phantom list row.
+  const [pageIds, setPageIds] = useState(
+    () => new Set(bootstrap.articlePage.articles.map((a) => a.id)),
   );
   const [selectedSubscriptionId, setSelectedSubscriptionId] = useState<
     string | null
@@ -80,12 +98,13 @@ export function useReaderController(
     () =>
       articles.filter(
         (a) =>
-          !selectedSubscriptionId ||
-          a.subscriptionIds?.includes(selectedSubscriptionId),
+          pageIds.has(a.id) &&
+          (!selectedSubscriptionId ||
+            a.subscriptionIds?.includes(selectedSubscriptionId)),
       ),
-    [articles, selectedSubscriptionId],
+    [articles, selectedSubscriptionId, pageIds],
   );
-  const selected = filtered.find((a) => a.id === selectedId) ?? filtered[0];
+  const selected = articles.find((a) => a.id === selectedId);
   filteredRef.current = filtered;
   selectedIdRef.current = selectedId;
   selectedRef.current = selected;
@@ -112,7 +131,11 @@ export function useReaderController(
             return;
           }
           setArticles((current) =>
-            current.map((article) => (article.id === next.id ? next : article)),
+            current.map((article) =>
+              article.id === next.id
+                ? { ...next, markedReadAt: article.markedReadAt }
+                : article,
+            ),
           );
           if (next.fullText !== "pending") return;
           delay = Math.min(Math.max(delay, 1000) * 2, 30000);
@@ -248,6 +271,7 @@ export function useReaderController(
   };
   const open = (id: string) => {
     setSelectedId(id);
+    writeSelectedArticle(id, workspaceId);
     update(id, { read: true });
     onOpenArticle();
   };
@@ -262,6 +286,7 @@ export function useReaderController(
     setMarkingAll(false);
     articlesRef.current = page.articles;
     setArticles(page.articles);
+    setPageIds(new Set(page.articles.map((a) => a.id)));
     setSelectedId(page.articles[0]?.id ?? "");
     setPageTotal(page.total);
     setUnreadTotal(page.unreadTotal);
@@ -276,11 +301,14 @@ export function useReaderController(
     direction?: "older" | "newer",
     batch = 1,
     articleId?: string,
+    nextReadPeriod?: ReadPeriod,
+    restoreLocation = false,
   ) => {
     if (pageLock.current || !workspaceId) return;
     pageLock.current = true;
     setPaging(true);
     const scope = epoch.current,
+      navigation = navigationRevision.current,
       request = ++pageRequest.current;
     try {
       let page: ArticlePage;
@@ -294,25 +322,39 @@ export function useReaderController(
           subscriptionId ?? undefined,
           cursor,
           direction,
+          nextReadPeriod,
         );
         if (scope !== epoch.current) return;
         if (version === writeVersion.current) break;
       }
       if (scope !== epoch.current) return;
+      const detail =
+        articleId && !page.articles.some((a) => a.id === articleId)
+          ? await client.getArticle(workspaceId, articleId)
+          : undefined;
+      if (scope !== epoch.current) return;
+      if (navigation !== navigationRevision.current) return;
       applyPage(page, batch);
+      if (detail) setArticles([...page.articles, detail]);
       setView(nextView);
+      setReadPeriod(nextReadPeriod);
       setSelectedSubscriptionId(subscriptionId);
-      if (articleId && page.articles.some((a) => a.id === articleId)) {
+      if (articleId) {
         setSelectedId(articleId);
         onOpenArticle();
       }
-      writeArticlePagePosition(
-        nextView,
-        subscriptionId,
-        cursor,
-        direction,
-        batch,
-      );
+      if (!restoreLocation && window.location.pathname === "/reader")
+        writeArticlePagePosition(
+          nextView,
+          subscriptionId,
+          cursor,
+          direction,
+          batch,
+          nextReadPeriod,
+          articleId ?? page.articles[0]?.id,
+          workspaceId,
+        );
+      return true;
     } catch (e) {
       if (scope === epoch.current) announce((e as Error).message);
     } finally {
@@ -322,8 +364,104 @@ export function useReaderController(
       }
     }
   };
+  const restoreRef = useRef<() => Promise<unknown>>();
+  restoreRef.current = async () => {
+    if (location.pathname !== "/reader") return;
+    const position = readArticlePagePosition();
+    if (position.workspaceId && position.workspaceId !== workspaceId) {
+      const navigation = navigationRevision.current;
+      const scope = epoch.current;
+      const request = ++pageRequest.current;
+      pageLock.current = true;
+      setPaging(true);
+      try {
+        await waitForWrites();
+        const restored = await client.bootstrap(position);
+        const detail =
+          position.articleId &&
+          !restored.articlePage.articles.some(
+            (a) => a.id === position.articleId,
+          )
+            ? await client.getArticle(
+                restored.activeWorkspaceId,
+                position.articleId,
+              )
+            : undefined;
+        if (
+          navigation !== navigationRevision.current ||
+          scope !== epoch.current
+        )
+          return;
+        applyPage(restored.articlePage, position.batch);
+        if (detail) setArticles([...restored.articlePage.articles, detail]);
+        setWorkspaceId(restored.activeWorkspaceId);
+        setView(position.view);
+        setSelectedSubscriptionId(position.subscriptionId);
+        setReadPeriod(position.readPeriod);
+        if (position.articleId) {
+          setSelectedId(position.articleId);
+          onOpenArticle();
+        }
+        onRestoreWorkspace?.(restored);
+      } catch (error) {
+        if (navigation === navigationRevision.current)
+          announce((error as Error).message);
+      } finally {
+        if (request === pageRequest.current) {
+          pageLock.current = false;
+          setPaging(false);
+        }
+      }
+      return;
+    }
+    return loadPage(
+      position.view,
+      position.subscriptionId,
+      position.cursor,
+      position.direction,
+      position.batch,
+      position.articleId,
+      position.readPeriod,
+      true,
+    );
+  };
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    const restore = () => {
+      if (disposed) return;
+      if (pageLock.current) {
+        timer = window.setTimeout(restore, 25);
+        return;
+      }
+      void restoreRef.current?.();
+    };
+    const pop = () => {
+      navigationRevision.current++;
+      window.clearTimeout(timer);
+      // Let the navigation guard accept/reject the history change first.
+      timer = window.setTimeout(restore, 0);
+    };
+    window.addEventListener("popstate", pop);
+    if (initialPagePosition.articleId) pop();
+    else if (
+      location.pathname === "/reader" &&
+      bootstrap.articlePage.articles[0]
+    )
+      writeSelectedArticle(
+        bootstrap.articlePage.articles[0].id,
+        bootstrap.activeWorkspaceId,
+        true,
+      );
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", pop);
+    };
+  }, []);
   const markAllRead = () => {
-    if (bulkLock.current || pending.current.size || !workspaceId) return;
+    if (readPeriod || bulkLock.current || pending.current.size || !workspaceId)
+      return;
     const requestWorkspace = workspaceId;
     const scope = epoch.current;
     const affected = new Set(
@@ -388,8 +526,18 @@ export function useReaderController(
     setWorkspaceId(id);
     applyPage(page, 1);
     setView("feed");
+    setReadPeriod(undefined);
     setSelectedSubscriptionId(null);
-    writeArticlePagePosition("feed", null);
+    writeArticlePagePosition(
+      "feed",
+      null,
+      undefined,
+      undefined,
+      1,
+      undefined,
+      page.articles[0]?.id,
+      id,
+    );
   };
   return {
     forgetSubscription(id: string) {
@@ -403,6 +551,7 @@ export function useReaderController(
       );
     },
     workspaceId,
+    readPeriod,
     view,
     articles,
     selectedId,

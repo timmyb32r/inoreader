@@ -8,6 +8,10 @@ use crate::{AiError, CostRates, GenerationMode};
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AiConfig {
+    pub daily_limit_usd: String,
+    pub automatic_summaries: bool,
+    pub automatic_attempts: u32,
+    pub automatic_retry_seconds: u64,
     pub prompt_approved: bool,
 
     pub prompt_path: String,
@@ -19,8 +23,6 @@ pub struct AiConfig {
     pub enabled_accounts: Vec<Uuid>,
 
     pub encryption_key_file_env: String,
-
-    pub model: String,
 
     pub generation_mode: GenerationMode,
 
@@ -51,21 +53,12 @@ pub struct AiConfig {
     /// Maximum expired jobs recovered per transaction and work class.
     pub recovery_batch: u32,
 
-    pub input_usd_per_million_tokens: String,
-
-    pub cached_input_usd_per_million_tokens: String,
-
-    pub output_usd_per_million_tokens: String,
+    pub models: crate::ModelRates,
 }
 
 impl AiConfig {
     pub fn validate(&self) -> Result<(), AiError> {
-        if self.model.is_empty()
-            || !self
-                .model
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-            || self.prompt_version.is_empty()
+        if self.prompt_version.is_empty()
             || !self
                 .prompt_version
                 .bytes()
@@ -102,7 +95,17 @@ impl AiConfig {
         {
             return Err(AiError::Configuration);
         }
-        self.cost_rates()?;
+        crate::SpendReservation::new(
+            "1".into(),
+            self.daily_limit_usd.clone(),
+            crate::SpendMode::Summary,
+        )?;
+        if self.automatic_attempts == 0
+            || self.automatic_retry_seconds == 0
+            || self.automatic_retry_seconds > i64::MAX as u64
+        {
+            return Err(AiError::Configuration);
+        }
         self.review.validate(self.context_tokens)?;
         if self
             .framing_tokens_base
@@ -113,14 +116,6 @@ impl AiConfig {
         }
         Ok(())
     }
-
-    fn cost_rates(&self) -> Result<CostRates, AiError> {
-        CostRates::new(
-            self.input_usd_per_million_tokens.clone(),
-            self.cached_input_usd_per_million_tokens.clone(),
-            self.output_usd_per_million_tokens.clone(),
-        )
-    }
 }
 
 /// Validated execution policy; raw configuration cannot instantiate a worker.
@@ -129,8 +124,6 @@ pub struct AiPolicy {
     config: AiConfig,
 
     prompt: String,
-
-    cost_rates: CostRates,
 
     review_prompt: String,
 }
@@ -141,11 +134,9 @@ impl AiPolicy {
         if config.prompt_approved && (prompt.trim().is_empty() || review_prompt.trim().is_empty()) {
             return Err(AiError::Configuration);
         }
-        let cost_rates = config.cost_rates()?;
         Ok(Self {
             config,
             prompt,
-            cost_rates,
             review_prompt,
         })
     }
@@ -156,16 +147,16 @@ impl AiPolicy {
         &self.prompt
     }
     pub fn cost_rates(&self) -> &CostRates {
-        &self.cost_rates
+        &self.config.models.flash
     }
     pub fn review_snapshot(&self) -> Result<ReviewSnapshot, AiError> {
         Ok(ReviewSnapshot {
-            system_prompt: format!("{}\n{}", self.review_prompt, crate::TRANSPORT_INSTRUCTION),
+            system_prompt: format!("{}\n{}", self.review_prompt, crate::REVIEW_TRANSPORT),
             prompt_version: self.config.review.prompt_version.clone(),
-            model: self.config.review.model.clone(),
+            model: crate::DeepSeekModel::Flash.id().into(),
             generation_mode: self.config.review.generation_mode,
             max_output_tokens: self.config.review.max_output_tokens,
-            cost_rates: self.config.review.cost_rates()?,
+            cost_rates: self.config.models.flash.clone(),
         })
     }
     pub fn allowed(&self, account: Uuid) -> bool {
@@ -185,31 +176,23 @@ impl AiPolicy {
 /// Raw second-request settings; validation belongs to AiPolicy construction.
 /// Both prompts share the explicit approval gate. A review is always required
 /// for initial summaries; there is deliberately no silent single-call fallback.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReviewConfig {
     pub prompt_path: String,
 
     pub prompt_version: String,
 
-    pub model: String,
-
     pub generation_mode: GenerationMode,
 
     pub max_output_tokens: usize,
-
-    pub input_usd_per_million_tokens: String,
-
-    pub cached_input_usd_per_million_tokens: String,
-
-    pub output_usd_per_million_tokens: String,
 }
 impl ReviewConfig {
     fn validate(&self, context: usize) -> Result<(), AiError> {
         if self.prompt_path.is_empty()
             || self.max_output_tokens == 0
             || self.max_output_tokens >= context
-            || [&self.model, &self.prompt_version].iter().any(|s| {
+            || [&self.prompt_version].iter().any(|s| {
                 s.is_empty()
                     || !s
                         .bytes()
@@ -218,15 +201,7 @@ impl ReviewConfig {
         {
             return Err(AiError::Configuration);
         }
-        self.cost_rates()?;
         Ok(())
-    }
-    fn cost_rates(&self) -> Result<CostRates, AiError> {
-        CostRates::new(
-            self.input_usd_per_million_tokens.clone(),
-            self.cached_input_usd_per_million_tokens.clone(),
-            self.output_usd_per_million_tokens.clone(),
-        )
     }
 }
 

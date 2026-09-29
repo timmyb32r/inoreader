@@ -47,6 +47,8 @@ export class AiClient {
   profile = () => this.transport("/api/ai/profile", undefined, "AiProfile");
   saveKey = (apiKey: string) =>
     this.transport("/api/ai/profile", json("PUT", { apiKey }), "AiProfile");
+  saveModels = (models: AiProfile["models"]) =>
+    this.transport("/api/ai/models", json("PUT", models), "AiProfile");
   removeKey = () =>
     this.transport("/api/ai/profile", { method: "DELETE" }, "AiProfile");
   balance = () =>

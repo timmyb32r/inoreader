@@ -37,6 +37,12 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     reader_storage_postgres::verify_schema(pool).await.unwrap();
 
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DELETE FROM schema_releases WHERE version=12; INSERT INTO schema_releases(version,release) VALUES(11,'targeted-ai-review-2026-09-29')")
+        .execute(pool).await.unwrap();
+    reader_storage_postgres::upgrade_schema(pool, std::num::NonZeroU32::new(50).unwrap())
+        .await
+        .unwrap();
+    reader_storage_postgres::verify_schema(pool).await.unwrap();
     binary_roundtrip(pool).await;
 }
 
@@ -278,7 +284,7 @@ pub async fn subscription_upgrade(pool: &PgPool) {
         .await
         .unwrap();
     sqlx::raw_sql(
-        "DROP TABLE search_content; DROP INDEX search_article_title,search_article_description,search_origins_record",
+        "DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DROP TABLE wiki_favorites,wiki_subscription_roots; ALTER TABLE wiki_pages DROP COLUMN parent; ALTER TABLE wiki_revisions DROP COLUMN parent; DROP TRIGGER ai_new_article ON articles; DROP TRIGGER ai_new_fulltext ON content_manifests; DROP FUNCTION reader_ai_article_candidate(); DROP FUNCTION reader_ai_content_candidate(); DROP TABLE ai_call_models,ai_model_preferences,ai_budget_overrides; DROP TABLE ai_summary_queue,ai_automatic_accounts,ai_spending; ALTER TABLE ai_chats DROP COLUMN priority_at; DROP TABLE article_read_events; DROP TABLE search_content; DROP INDEX search_article_title,search_article_description,search_origins_record",
     )
     .execute(&isolated)
     .await
@@ -286,6 +292,15 @@ pub async fn subscription_upgrade(pool: &PgPool) {
     assert!(reader_storage_postgres::verify_schema(&isolated)
         .await
         .is_err());
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    // Exercise the immediately preceding deployed release independently too.
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DROP TABLE wiki_favorites,wiki_subscription_roots; ALTER TABLE wiki_pages DROP COLUMN parent; ALTER TABLE wiki_revisions DROP COLUMN parent; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(9,'ai-model-preferences-2026-09-29')").execute(&isolated).await.unwrap();
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(10,'wiki-organization-2026-09-29')").execute(&isolated).await.unwrap();
     reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
         .await
         .unwrap();
@@ -310,6 +325,47 @@ pub async fn subscription_upgrade(pool: &PgPool) {
     )
     .await
     .is_err());
+    // Rehearse the exact deployed 6 -> 7 path without rebuilding search or source rows.
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DROP TABLE wiki_favorites,wiki_subscription_roots; ALTER TABLE wiki_pages DROP COLUMN parent; ALTER TABLE wiki_revisions DROP COLUMN parent; DROP TRIGGER ai_new_article ON articles; DROP TRIGGER ai_new_fulltext ON content_manifests; DROP FUNCTION reader_ai_article_candidate(); DROP FUNCTION reader_ai_content_candidate(); DROP TABLE ai_call_models,ai_model_preferences,ai_budget_overrides; DROP TABLE ai_summary_queue,ai_automatic_accounts,ai_spending; ALTER TABLE ai_chats DROP COLUMN priority_at; DROP TABLE article_read_events; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(6,'unified-search-2026-09-28');")
+        .execute(&isolated).await.unwrap();
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    let events: i64 = sqlx::query_scalar("SELECT count(*) FROM article_read_events")
+        .fetch_one(&isolated)
+        .await
+        .unwrap();
+    assert_eq!(
+        events, 0,
+        "never invent timestamps for existing read articles"
+    );
+    let after: String = sqlx::query_scalar("SELECT document FROM subscriptions WHERE id='exact'")
+        .fetch_one(&isolated)
+        .await
+        .unwrap();
+    assert_eq!(after, exact);
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DROP TABLE wiki_favorites,wiki_subscription_roots; ALTER TABLE wiki_pages DROP COLUMN parent; ALTER TABLE wiki_revisions DROP COLUMN parent; DROP TRIGGER ai_new_article ON articles; DROP TRIGGER ai_new_fulltext ON content_manifests; DROP FUNCTION reader_ai_article_candidate(); DROP FUNCTION reader_ai_content_candidate(); DROP TABLE ai_call_models,ai_model_preferences,ai_budget_overrides; DROP TABLE ai_summary_queue,ai_automatic_accounts,ai_spending; ALTER TABLE ai_chats DROP COLUMN priority_at; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(7,'daily-read-activity-2026-09-29');").execute(&isolated).await.unwrap();
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM ai_spending")
+            .fetch_one(&isolated)
+            .await
+            .unwrap(),
+        0
+    );
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DROP TABLE ai_call_responses; DROP TABLE wiki_favorites,wiki_subscription_roots; ALTER TABLE wiki_pages DROP COLUMN parent; ALTER TABLE wiki_revisions DROP COLUMN parent; DROP TABLE ai_call_models,ai_model_preferences,ai_budget_overrides; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(8,'automatic-ai-budget-2026-09-29');").execute(&isolated).await.unwrap();
+    reader_storage_postgres::upgrade_schema(&isolated, std::num::NonZeroU32::new(1).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT document FROM subscriptions WHERE id='exact'")
+            .fetch_one(&isolated)
+            .await
+            .unwrap(),
+        exact
+    );
     isolated.close().await;
     sqlx::query("DROP SCHEMA subscription_upgrade_fixture CASCADE")
         .execute(pool)

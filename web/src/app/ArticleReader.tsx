@@ -1,14 +1,18 @@
-import { useState } from "preact/hooks";
+import { useCallback, useRef, useState } from "preact/hooks";
 import "../ai/deepseek.css";
 import "./article-toolbar.css";
+import { ArticleWikiLink } from "./ArticleWikiLink";
+import type { WikiClient } from "../api/wiki";
 import type { AiClient } from "../api/ai";
 import { ParagraphReader } from "../translation/ParagraphReader";
+import { CopyButton } from "../ui/CopyButton";
 import { AsyncButton } from "../ui/AsyncButton";
 import { Icon, type IconName } from "../ui/Icon";
 import { ArticleDates } from "../ui/ArticleDates";
 import type { Article } from "../api/viewModels";
 
 export function ArticleReader({
+  focused = false,
   article,
   pending,
   className,
@@ -22,9 +26,12 @@ export function ArticleReader({
   onDefinitions,
   definitionsPending,
   aiClient,
+  wikiClient,
+  onNavigate,
   workspaceId,
   translationEnabled,
 }: {
+  focused?: boolean;
   article: Article;
   pending: Set<string>;
   className: string;
@@ -38,9 +45,27 @@ export function ArticleReader({
   onDefinitions: () => void;
   definitionsPending: boolean;
   aiClient: AiClient;
+  wikiClient: WikiClient;
+  onNavigate: (path: string) => void;
   workspaceId: string;
   translationEnabled: boolean;
 }) {
+  const articleRoot = useRef<HTMLElement>(null);
+  const copyText = useCallback(() => {
+    const content =
+      articleRoot.current?.querySelector<HTMLElement>(".article-content");
+    if (!content || article.fullText !== "ready")
+      throw new Error("Full article unavailable");
+    return [article.title, article.excerpt, content.innerText]
+      .filter((value) => value !== "")
+      .join("\n\n");
+  }, [
+    article.title,
+    article.excerpt,
+    article.bodyHtml,
+    article.body,
+    article.fullText,
+  ]);
   const [translating, setTranslating] = useState(false);
   // The displayed source and the first subscription ID share the same origin.
   const sourceSubscriptionId = article.subscriptionIds?.[0];
@@ -54,7 +79,11 @@ export function ArticleReader({
     </>
   );
   return (
-    <article class={`article-reader ${className}`} aria-label="Article reader">
+    <article
+      ref={articleRoot}
+      class={`article-reader ${className}`}
+      aria-label="Article reader"
+    >
       <header class="reader-toolbar">
         <button
           class="reader-toolbar-button reader-toolbar-button--icon reader-back"
@@ -64,13 +93,15 @@ export function ArticleReader({
           <span aria-hidden="true">←</span>
         </button>
         <div class="reader-toolbar__states">
-          <StateButton
-            icon="unread"
-            label={article.read ? "Mark unread" : "Mark read"}
-            active={!article.read}
-            pending={pending.has(`${article.id}:read`)}
-            onClick={() => onUpdate({ read: !article.read })}
-          />
+          {!focused && (
+            <StateButton
+              icon="unread"
+              label={article.read ? "Mark unread" : "Mark read"}
+              active={!article.read}
+              pending={pending.has(`${article.id}:read`)}
+              onClick={() => onUpdate({ read: !article.read })}
+            />
+          )}
           <StateButton
             icon="later"
             label={article.later ? "Remove from later" : "Read later"}
@@ -79,8 +110,10 @@ export function ArticleReader({
             onClick={() => onUpdate({ later: !article.later })}
           />
           <button
-            class="reader-toolbar-button"
-            disabled={summaryPending}
+            class="reader-toolbar-button reader-toolbar-button--labelled"
+            aria-label="Summarize"
+            title="Summarize"
+            disabled={summaryPending || article.fullText !== "ready"}
             aria-busy={summaryPending}
             onClick={onSummarize}
           >
@@ -89,7 +122,7 @@ export function ArticleReader({
             ) : (
               <Icon name="chat" size={16} />
             )}
-            Summarize
+            <span class="reader-toolbar-button__label">Summarize</span>
           </button>
           <button
             class="reader-toolbar-button reader-toolbar-button--icon toolbar-tooltip"
@@ -112,7 +145,7 @@ export function ArticleReader({
             </span>
           </button>
           <button
-            class="reader-toolbar-button toolbar-tooltip"
+            class="reader-toolbar-button reader-toolbar-button--labelled toolbar-tooltip"
             aria-label="Terms"
             disabled={definitionsPending}
             aria-disabled={
@@ -145,8 +178,20 @@ export function ArticleReader({
             ) : (
               <Icon name="book" size={16} />
             )}
-            Terms
+            <span class="reader-toolbar-button__label">Terms</span>
           </button>
+          <CopyButton
+            text={copyText}
+            label="Copy full article"
+            visibleLabel="Copy article"
+            className="reader-toolbar-button reader-toolbar-button--labelled ai-copy"
+            disabled={article.fullText !== "ready"}
+            hint={
+              article.fullText !== "ready"
+                ? "Full article text is not available yet"
+                : undefined
+            }
+          />
         </div>
         <a
           class="reader-toolbar-button reader-toolbar-button--icon toolbar-tooltip toolbar-tooltip--right"
@@ -160,29 +205,39 @@ export function ArticleReader({
         </a>
       </header>
       <div class="reader-body">
-        {sourceSubscriptionId ? (
-          <a
-            class="reader-meta reader-meta--link"
-            href={`/subscriptions/${encodeURIComponent(sourceSubscriptionId)}`}
-            aria-label={`Open subscription ${article.source}`}
-            onClick={(event) => {
-              if (
-                event.button !== 0 ||
-                event.metaKey ||
-                event.ctrlKey ||
-                event.shiftKey ||
-                event.altKey
-              )
-                return;
-              event.preventDefault();
-              onOpenSubscription(sourceSubscriptionId);
-            }}
-          >
-            {sourceMeta}
-          </a>
-        ) : (
-          <div class="reader-meta">{sourceMeta}</div>
-        )}
+        <div class="reader-source-row">
+          {sourceSubscriptionId ? (
+            <a
+              class="reader-meta reader-meta--link"
+              href={`/subscriptions/${encodeURIComponent(sourceSubscriptionId)}`}
+              aria-label={`Open subscription ${article.source}`}
+              onClick={(event) => {
+                if (
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                onOpenSubscription(sourceSubscriptionId);
+              }}
+            >
+              {sourceMeta}
+            </a>
+          ) : (
+            <div class="reader-meta">{sourceMeta}</div>
+          )}
+          {sourceSubscriptionId && (
+            <ArticleWikiLink
+              client={wikiClient}
+              subscription={sourceSubscriptionId}
+              name={article.source}
+              onNavigate={onNavigate}
+            />
+          )}
+        </div>
         <ParagraphReader
           client={aiClient}
           workspaceId={workspaceId}

@@ -82,10 +82,9 @@ impl IntoResponse for ApiFailure {
                     AiError::Unavailable | AiError::PromptPending | AiError::MissingKey => {
                         (StatusCode::CONFLICT, "ai_unavailable")
                     }
+                    AiError::Budget => (StatusCode::TOO_MANY_REQUESTS, "ai_daily_budget"),
                     AiError::RateLimit => (StatusCode::TOO_MANY_REQUESTS, "ai_rate_limit"),
-                    AiError::OriginalTitleChanged => {
-                        (StatusCode::UNPROCESSABLE_ENTITY, "original_title_changed")
-                    }
+                    AiError::Review => (StatusCode::UNPROCESSABLE_ENTITY, "ai_review_incomplete"),
                     AiError::Provider => (StatusCode::BAD_GATEWAY, "ai_provider_error"),
                     AiError::Storage | AiError::Encryption | AiError::Configuration => {
                         (StatusCode::INTERNAL_SERVER_ERROR, "ai_internal_error")

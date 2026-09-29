@@ -12,44 +12,6 @@ use std::{
 use uuid::Uuid;
 
 #[test]
-fn summary_title_requires_exact_standalone_bold_source_title_without_normalization() {
-    let title = "Original\u{00a0}title";
-    for valid in [
-        "**Original\u{00a0}title**",
-        "**Original\u{00a0}title**\n\nSummary",
-    ] {
-        validate_summary_title(valid, title).unwrap();
-    }
-    for invalid in [
-        "**Original title**\n\nSummary",
-        "Original\u{00a0}title\n\nSummary",
-        " **Original\u{00a0}title**\n\nSummary",
-        "**Original\u{00a0}title** extra",
-        "**Original\u{00a0}title!**\n\nSummary",
-        "Summary\n\n**Original\u{00a0}title**",
-        "**Original\u{00a0}title**\nSummary",
-        "**Original\u{00a0}title**\r\n\r\nSummary",
-    ] {
-        assert!(matches!(
-            validate_summary_title(invalid, title),
-            Err(AiError::OriginalTitleChanged)
-        ));
-    }
-    // Ordinary transport completion deliberately accepts title-less/different
-    // drafts and replies; only summary acceptance applies the title contract.
-    let envelope = r#"{"segments":[{"kind":"text","content":"A reply without a title"}]}"#;
-    let usage = Usage {
-        prompt_tokens: 1,
-        completion_tokens: 1,
-        prompt_cache_hit_tokens: 0,
-        prompt_cache_miss_tokens: 1,
-        estimated_cost_usd: None,
-    };
-    let completed = CompletedGeneration::new(envelope.into(), usage, "source", 1024).unwrap();
-    assert_eq!(completed.content(), "A reply without a title");
-}
-
-#[test]
 fn generation_mode_rejects_invalid_or_contradictory_parameters_at_construction() {
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.01, 2.01] {
         assert!(GenerationMode::standard(value).is_err());
@@ -220,7 +182,7 @@ fn cost_rate_snapshot_validates_all_construction_paths_and_preserves_exact_strin
         .cost(&Usage {
             prompt_tokens: u64::MAX,
             completion_tokens: u64::MAX,
-            prompt_cache_hit_tokens: u64::MAX,
+            prompt_cache_hit_tokens: 0,
             prompt_cache_miss_tokens: u64::MAX,
             estimated_cost_usd: None,
         })
@@ -618,6 +580,14 @@ async fn provider_rejects_bad_key_and_absent_usage_without_retry() {
 
 pub(super) fn translation_config() -> AiConfig {
     AiConfig {
+        models: ModelRates {
+            flash: CostRates::new("1".into(), "1".into(), "1".into()).unwrap(),
+            pro: CostRates::new("1.32".into(), "0.044".into(), "3.96".into()).unwrap(),
+        },
+        daily_limit_usd: "3".into(),
+        automatic_summaries: false,
+        automatic_attempts: 3,
+        automatic_retry_seconds: 60,
         recovery_batch: 2,
         prompt_approved: true,
         prompt_path: "test".into(),
@@ -625,16 +595,11 @@ pub(super) fn translation_config() -> AiConfig {
         review: ReviewConfig {
             prompt_path: "review".into(),
             prompt_version: "review".into(),
-            model: "deepseek-pro".into(),
             generation_mode: GenerationMode::standard(0.0).unwrap(),
             max_output_tokens: 100,
-            input_usd_per_million_tokens: "1".into(),
-            cached_input_usd_per_million_tokens: "1".into(),
-            output_usd_per_million_tokens: "1".into(),
         },
         enabled_accounts: vec![],
         encryption_key_file_env: "TEST".into(),
-        model: "deepseek-flash".into(),
         generation_mode: GenerationMode::standard(0.3).unwrap(),
         context_tokens: 10000,
         framing_tokens_per_message: 64,
@@ -648,9 +613,6 @@ pub(super) fn translation_config() -> AiConfig {
         workers: 1,
         poll_milliseconds: 10,
         lease_seconds: 30,
-        input_usd_per_million_tokens: "1".into(),
-        cached_input_usd_per_million_tokens: "1".into(),
-        output_usd_per_million_tokens: "1".into(),
     }
 }
 #[tokio::test]
@@ -735,7 +697,7 @@ fn paragraph_input_limits_fail_before_provider_without_truncation() {
     c.context_tokens = 1100;
     assert!(TranslationInput::new(&c, "磁盘").is_err());
     c.context_tokens = 10000;
-    c.model = "".into();
+    c.prompt_version = "".into();
     assert!(TranslationInput::new(&c, "磁盘").is_err());
 }
 
@@ -856,4 +818,123 @@ fn recovery_batch_is_required_and_positive_before_policy_construction() {
     let mut config = translation_config();
     config.recovery_batch = 0;
     assert!(AiPolicy::new(config, "prompt".into(), "review".into()).is_err());
+}
+
+#[test]
+fn budget_contract_rejects_invalid_amounts_and_inconsistent_usage() {
+    for amount in ["0", "-1", "NaN", "1e3", ""] {
+        assert!(SpendReservation::new(amount.into(), "3".into(), SpendMode::Summary).is_err());
+        assert!(SpendReservation::new("1".into(), amount.into(), SpendMode::Summary).is_err());
+    }
+    let mut config = translation_config();
+    config.daily_limit_usd = "0".into();
+    assert!(config.validate().is_err());
+    config = translation_config();
+    config.automatic_attempts = 0;
+    assert!(config.validate().is_err());
+    let rates = CostRates::new("0.3".into(), "0.006".into(), "1.2".into()).unwrap();
+    assert!(rates
+        .cost(&Usage {
+            prompt_tokens: 1,
+            prompt_cache_hit_tokens: 1,
+            prompt_cache_miss_tokens: 1,
+            completion_tokens: 1,
+            estimated_cost_usd: None
+        })
+        .is_err());
+}
+
+#[test]
+fn model_preferences_are_closed_and_default_to_flash() {
+    assert_eq!(
+        ModelPreferences::default(),
+        ModelPreferences {
+            summary: DeepSeekModel::Flash,
+            verification: DeepSeekModel::Flash
+        }
+    );
+    for bad in [
+        r#"{"summary":"unknown","verification":"deepseek-flash"}"#,
+        r#"{"summary":"deepseek-flash"}"#,
+        r#"{"summary":"deepseek-flash","verification":"deepseek-flash","extra":true}"#,
+    ] {
+        assert!(serde_json::from_str::<ModelPreferences>(bad).is_err());
+    }
+    let preferences = ModelPreferences {
+        summary: DeepSeekModel::Pro,
+        verification: DeepSeekModel::Flash,
+    };
+    assert_eq!(
+        serde_json::from_str::<ModelPreferences>(&serde_json::to_string(&preferences).unwrap())
+            .unwrap(),
+        preferences
+    );
+    assert!(serde_json::from_str::<ModelRates>(r#"{"flash":{"input_usd_per_million_tokens":"1","cached_input_usd_per_million_tokens":"1","output_usd_per_million_tokens":"1"}}"#).is_err());
+    assert!(serde_json::from_str::<CallModel>(r#"{"model":"deepseek-flash","rates":{"input_usd_per_million_tokens":"-1","cached_input_usd_per_million_tokens":"1","output_usd_per_million_tokens":"1"}}"#).is_err());
+}
+
+#[derive(Default)]
+struct ReviewProgress {
+    responses: Vec<String>,
+    bills: Vec<Usage>,
+    published: Vec<String>,
+}
+#[async_trait]
+impl GenerationProgress for ReviewProgress {
+    async fn check_active(&mut self) -> Result<(), AiError> {
+        Ok(())
+    }
+    async fn publish(&mut self, text: &str) -> Result<(), AiError> {
+        self.published.push(text.into());
+        Ok(())
+    }
+    async fn usage(&mut self, usage: &Usage) -> Result<(), AiError> {
+        self.bills.push(usage.clone());
+        Ok(())
+    }
+    async fn response(&mut self, content: &str, _: &str) -> Result<(), AiError> {
+        self.responses.push(content.into());
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn review_stream_retains_paid_output_and_usage_before_validation_without_partial_publication()
+{
+    for (text, reason, valid) in [
+        (r#"{"verdict":"unchanged"}"#, "stop", true),
+        (
+            r#"{"verdict":"corrections","changes":[{"segment":0,"before":"draft","after":"checked","reason":"fixture"}]}"#,
+            "stop",
+            true,
+        ),
+        (
+            r#"{"verdict":"corrections","changes":[{"segment":99,"before":"draft","after":"checked","reason":"fixture"}]}"#,
+            "stop",
+            false,
+        ),
+        (r#"{"verdict":"corrections","changes":[]}"#, "stop", false),
+        (r#"{"verdict":"corrections""#, "length", false),
+    ] {
+        let response = format!(
+            "{}{}{}data: [DONE]\n\n",
+            event(serde_json::json!({"choices":[{"delta":{"content":text},"finish_reason":null}]})),
+            event(serde_json::json!({"choices":[{"delta":{},"finish_reason":reason}]})),
+            event(
+                serde_json::json!({"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":100,"prompt_cache_hit_tokens":2,"prompt_cache_miss_tokens":10}})
+            )
+        );
+        let (provider, requests) = provider(response, StatusCode::OK);
+        let mut input = input();
+        input.review_draft = Some(r#"{"segments":[{"kind":"text","content":"draft"}]}"#.into());
+        let mut progress = ReviewProgress::default();
+        let result = provider.generate("test-key", input, &mut progress).await;
+        assert_eq!(result.is_ok(), valid, "{text}");
+        assert_eq!(progress.responses, vec![text]);
+        assert_eq!(progress.bills.len(), 1, "usage arrives after finish_reason");
+        assert!(
+            progress.published.is_empty(),
+            "patches must not stream into prose"
+        );
+        assert_eq!(requests.lock().unwrap().len(), 1);
+    }
 }

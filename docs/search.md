@@ -61,3 +61,7 @@ Tests cover literal matching, CJK, account isolation, admin exclusion, membershi
 revocation, trash exclusion, pagination, projection replacement/rollback, real
 HTTP/wiki search, backup restore, stale UI responses, double submission, fixed
 control coordinates and browser Back.
+
+The reader sidebar contains the single global search entry. The duplicate topbar
+button is removed; Ctrl/⌘ K remains. Opening search focuses its query field once,
+without stealing focus after results or preview updates.

@@ -29,7 +29,11 @@ const exampleChat = (articleId = "a", id = "chat-a"): ArticleChat => ({
 
 async function fixture(
   page: Page,
-  initialProfile: AiProfile = { configured: true, enabled: true },
+  initialProfile: AiProfile = {
+    models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+    configured: true,
+    enabled: true,
+  },
 ) {
   const state = {
     profile: initialProfile,
@@ -79,11 +83,18 @@ async function fixture(
     );
     if (article)
       return route.fulfill({ json: wireFixture({ ...article, ...body }) });
+    if (path === "/api/ai/models") {
+      while (state.hold)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      state.profile = { ...state.profile, models: body };
+      return route.fulfill({ json: wireFixture(state.profile) });
+    }
     if (path === "/api/ai/profile" || path === "/api/ai/balance") {
       while (state.hold && request.method() === "PUT")
         await new Promise((resolve) => setTimeout(resolve, 25));
       if (request.method() === "PUT")
         state.profile = {
+          models: { summary: "deepseek-flash", verification: "deepseek-flash" },
           configured: true,
           enabled: true,
           balance: {
@@ -100,7 +111,11 @@ async function fixture(
           },
         };
       if (request.method() === "DELETE")
-        state.profile = { configured: false, enabled: false };
+        state.profile = {
+          models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+          configured: false,
+          enabled: false,
+        };
       return route.fulfill({ json: wireFixture(state.profile) });
     }
     if (path.endsWith("/chats"))
@@ -163,12 +178,10 @@ test("chat drag, response, collapse and viewport resize keep reader/composer tar
     exact: true,
   });
   await expect(summarize).toBeVisible();
-  expect(
-    state.mutations.filter((call) => call.path.includes("/chat")),
-  ).toHaveLength(0);
+
   const toolbar = page.locator(".reader-toolbar"),
     before = await toolbar.boundingBox();
-  await summarize.dblclick();
+
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -258,7 +271,11 @@ test("chat drag, response, collapse and viewport resize keep reader/composer tar
 test("profile key saving and balance updates preserve controls and never store the secret in the browser", async ({
   page,
 }) => {
-  const state = await fixture(page, { configured: false, enabled: false });
+  const state = await fixture(page, {
+    models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+    configured: false,
+    enabled: false,
+  });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", { name: "Article chat: Article A" });
@@ -299,43 +316,39 @@ test("profile key saving and balance updates preserve controls and never store t
   expect(storage).not.toContain("test-ui-secret");
 });
 
-test("chat stays bound to its article and reopens without generation; waiting full text can be stopped", async ({
+test("article switching follows the selected chat; reopening preserves stopped work", async ({
   page,
 }) => {
   const state = await fixture(page);
   state.status = "waiting_content";
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  const chat = page.getByRole("dialog", {
+  const first = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
   });
-  await expect(chat.getByRole("status")).toContainText(
+  await expect(first.getByRole("status")).toContainText(
     "Waiting for the full article",
   );
+  await first.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(first.getByRole("status")).toContainText("Stopped");
+  await first.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("heading", { name: "Article B", level: 2 }).click();
-  await expect(chat).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Article B", level: 1 }),
-  ).toBeVisible();
-  await chat.getByRole("button", { name: "Stop", exact: true }).click();
-  await expect(chat.getByRole("status")).toContainText("Stopped");
-  await expect(
-    chat.getByRole("button", { name: "Retry", exact: true }),
-  ).toBeEnabled();
-  await chat.getByRole("button", { name: "Close chat" }).click();
+  const second = page.getByRole("dialog", {
+    name: "Article chat: Article B",
+    exact: true,
+  });
+  await expect(second).toBeVisible();
+  await second.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("heading", { name: "Article A", level: 2 }).click();
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  await expect(chat.getByRole("status")).toContainText("Stopped");
+  await expect(first.getByRole("status")).toContainText("Stopped");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   await page.reload();
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
-  await expect(chat.getByRole("status")).toContainText("Stopped");
+  await expect(first.getByRole("status")).toContainText("Stopped");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
 });
 
 test("lost message acknowledgements retain one operation and stable controls until explicit recovery", async ({
@@ -358,7 +371,6 @@ test("lost message acknowledgements retain one operation and stable controls unt
     return route.fulfill({ json: wireFixture(state.versions[0]) });
   });
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -382,9 +394,9 @@ test("lost message acknowledgements retain one operation and stable controls unt
     "request outcome is unknown",
   );
   await expect(send).toBeDisabled();
-  await expect(
-    chat.getByRole("button", { name: "New summary" }),
-  ).toBeDisabled();
+  await expect(chat.getByRole("button", { name: "New summary" })).toHaveCount(
+    0,
+  );
   await chat.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(send).toBeDisabled();
@@ -404,7 +416,11 @@ test("lost message acknowledgements retain one operation and stable controls unt
 test("closing Profile during key save still enables the account when saving completes", async ({
   page,
 }) => {
-  const state = await fixture(page, { configured: false, enabled: false });
+  const state = await fixture(page, {
+    models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+    configured: false,
+    enabled: false,
+  });
   await page.goto("/reader");
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", { name: "Article chat: Article A" });
@@ -420,8 +436,6 @@ test("closing Profile during key save still enables the account when saving comp
   await profile.getByRole("button", { name: "Done", exact: true }).click();
   state.hold = false;
   await expect(profile).not.toBeVisible();
-  await chat.getByRole("button", { name: "Close chat" }).click();
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Writing summary");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
@@ -452,7 +466,6 @@ test("early summary is readable while checking; final replacement preserves read
   };
   state.versions.push(current);
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -485,9 +498,9 @@ test("early summary is readable while checking; final replacement preserves read
     chat.getByRole("button", { name: "Profile", exact: true }),
   ).toHaveCount(0);
   await expect(send).toBeDisabled();
-  await expect(
-    chat.getByRole("button", { name: "New summary" }),
-  ).toBeDisabled();
+  await expect(chat.getByRole("button", { name: "New summary" })).toHaveCount(
+    0,
+  );
   expect(await send.boundingBox()).toEqual(before.send);
   expect(await composer.boundingBox()).toEqual(before.composer);
   await page.screenshot({ path: test.info().outputPath("early-summary.png") });
@@ -519,9 +532,6 @@ test("early summary is readable while checking; final replacement preserves read
   await page.screenshot({
     path: test.info().outputPath("simplified-chat.png"),
   });
-  expect(
-    state.mutations.filter((call) => call.path.includes("/chat")),
-  ).toHaveLength(0);
 });
 
 test("failed verification keeps the preview; retry and stop give immediate feedback without shifting the composer", async ({
@@ -573,14 +583,18 @@ test("failed verification keeps the preview; retry and stop give immediate feedb
     await route.fulfill({ json: wireFixture(current) });
   });
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
   });
-  const retry = chat.getByRole("button", { name: "Retry", exact: true }),
+  const retry = chat.getByRole("button", {
+      name: "Retry verification",
+      exact: true,
+    }),
     composer = chat.getByLabel("Message DeepSeek");
-  await expect(chat.getByRole("status")).toContainText("Verification failed");
+  await expect(chat.getByRole("status")).toContainText(
+    "Verification not completed",
+  );
   await expect(chat.getByRole("status")).toHaveAttribute(
     "title",
     "Verification provider timeout",
@@ -638,7 +652,6 @@ test("verification cannot replace selected text until the reader releases the se
     ],
   });
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -734,4 +747,125 @@ test("Zhihu profile keeps control geometry through save, check, confirmation and
       JSON.stringify({ ...localStorage, ...sessionStorage }),
     ),
   ).not.toContain("z_c0");
+});
+
+test("independent model choices persist with immediate pending and stable geometry", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  await page.goto("/reader");
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
+  const profile = page.getByRole("dialog", { name: "Profile", exact: true });
+  const summary = profile.getByLabel("Summary model"),
+    checker = profile.getByLabel("Fact-check model");
+  await expect(summary).toHaveValue("deepseek-flash");
+  await expect(checker).toHaveValue("deepseek-flash");
+  await expect(summary).toBeEnabled();
+  await summary.selectOption("deepseek-v4-pro");
+  const save = profile.getByRole("button", {
+    name: "Save models",
+    exact: true,
+  });
+  await save.scrollIntoViewIfNeeded();
+  const before = await save.boundingBox(),
+    fields = await checker.boundingBox();
+  state.hold = true;
+  await save.dblclick();
+  await expect(
+    profile.getByRole("button", { name: "Saving…", exact: true }),
+  ).toBeDisabled();
+  await expect(checker).toBeDisabled();
+  expect(await checker.boundingBox()).toEqual(fields);
+  expect(
+    state.mutations.filter((v) => v.path === "/api/ai/models"),
+  ).toHaveLength(1);
+  state.hold = false;
+  await expect(save).toBeVisible();
+  expect(await save.boundingBox()).toEqual(before);
+  expect(await checker.boundingBox()).toEqual(fields);
+  expect(state.profile.models).toEqual({
+    summary: "deepseek-v4-pro",
+    verification: "deepseek-flash",
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
+  await expect(summary).toHaveValue("deepseek-v4-pro");
+  await expect(checker).toHaveValue("deepseek-flash");
+  await checker.selectOption("deepseek-v4-pro");
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(
+    profile.getByText("Models saved", { exact: true }),
+  ).toBeVisible();
+  expect(state.profile.models).toEqual({
+    summary: "deepseek-v4-pro",
+    verification: "deepseek-v4-pro",
+  });
+});
+
+test("summary and terms share one draggable frame without losing chat state", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  state.status = "completed";
+  state.versions = [exampleChat()];
+  await page.route("**/api/articles/a/definitions**", (route) =>
+    route.fulfill({
+      json: {
+        channel: {
+          channel: "reading_data_news",
+          configured: false,
+          indexReady: true,
+          revision: 1,
+          posts: 1529,
+          definitions: 400,
+          unindexed: 0,
+          pending: 0,
+          conflicts: 0,
+          historyIncomplete: true,
+          coverageNote: "Fixture",
+          syncPending: false,
+          generationAllowed: false,
+        },
+        known: [],
+        job: null,
+      },
+    }),
+  );
+  await page.goto("/reader");
+  const chat = page.getByRole("dialog", { name: "Article chat: Article A" });
+  await expect(chat).toBeVisible();
+  await page.getByRole("button", { name: "Terms", exact: true }).click();
+  const terms = page.getByRole("dialog", { name: "Термины статьи" });
+  await expect(terms).toBeVisible();
+  const dock = page.locator(".panel-dock");
+  await expect(dock).toBeVisible();
+  const beforeChat = (await chat.boundingBox())!,
+    beforeTerms = (await terms.boundingBox())!;
+  expect(beforeTerms.x).toBeCloseTo(beforeChat.x + beforeChat.width + 1, 0);
+  expect(beforeTerms.y).toBeCloseTo(beforeChat.y, 0);
+  const handle = chat.getByRole("button", {
+    name: "Move chat with arrow keys or drag",
+  });
+  await handle.focus();
+  await handle.press("ArrowDown");
+  expect((await chat.boundingBox())!.y - beforeChat.y).toBeCloseTo(
+    (await terms.boundingBox())!.y - beforeTerms.y,
+    0,
+  );
+  await page.setViewportSize({ width: 540, height: 800 });
+  const tabs = page.getByRole("navigation", {
+    name: "Article assistant panes",
+  });
+  await expect(tabs).toBeVisible();
+  await tabs.getByRole("button", { name: "Summary" }).click();
+  await expect(chat).toBeVisible();
+  await expect(terms).not.toBeVisible();
+  await tabs.getByRole("button", { name: "Terms" }).click();
+  await expect(terms).toBeVisible();
+  await terms.getByRole("button", { name: /Закрыть/ }).click();
+  await expect(chat).toBeVisible();
+  await expect(chat).toContainText("Kafka");
 });

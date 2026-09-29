@@ -14,6 +14,7 @@ import {
   defaultWidths,
   formatKind,
   isProblem,
+  inCatalogView,
   labels,
   move,
   readLayout,
@@ -103,13 +104,7 @@ export function SubscriptionCatalog({
   const rows = useMemo(
     () =>
       subscriptions
-        .filter((item) =>
-          view === "archived"
-            ? item.status === "archived"
-            : view === "attention"
-              ? item.status !== "archived" && isProblem(item)
-              : item.status !== "archived",
-        )
+        .filter((item) => inCatalogView(item, view))
         .filter((item) => status === "all" || item.status === status)
         .filter((item) => kind === "all" || item.sourceType === kind)
         .filter(
@@ -117,7 +112,7 @@ export function SubscriptionCatalog({
             health === "all" || (health === "problem") === isProblem(item),
         )
         .filter((item) =>
-          `${item.name} ${item.sourceUrl ?? ""} ${item.personalNote ?? ""}`
+          `${item.name} ${item.sourceUrl ?? ""}`
             .toLocaleLowerCase()
             .includes(query.toLocaleLowerCase()),
         )
@@ -194,15 +189,25 @@ export function SubscriptionCatalog({
           >
             {item === "attention"
               ? "Needs attention"
-              : item[0].toUpperCase() + item.slice(1)}
+              : item[0].toUpperCase() + item.slice(1)}{" "}
+            <span class="catalog-tab-count">
+              (
+              {
+                subscriptions.filter((subscription) =>
+                  inCatalogView(subscription, item),
+                ).length
+              }
+              )
+            </span>
           </button>
         ))}
       </nav>
       <div class="catalog-toolbar">
         <AutofillResistantField
           aria-label="Search subscriptions"
+          data-subscription-search
           type="search"
-          placeholder="Search name, URL or personal note"
+          placeholder="Search name or URL"
           value={query}
           onInput={(e) => setQuery(e.currentTarget.value)}
         />
@@ -639,8 +644,6 @@ function cell(s: Subscription, c: Column, onOpenDetail?: (id: string) => void) {
       return s.unreadCount ?? 0;
     case "url":
       return s.sourceUrl || "—";
-    case "note":
-      return s.personalNote || "—";
     case "interval":
       return s.pollingInterval || "—";
     case "error":

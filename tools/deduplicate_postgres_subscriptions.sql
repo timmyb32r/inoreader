@@ -37,9 +37,7 @@ BEGIN
         FROM subscription_dedup_map AS mapping
         JOIN subscriptions AS duplicate ON duplicate.id = mapping.duplicate_id
         JOIN subscriptions AS canonical ON canonical.id = mapping.canonical_id
-        WHERE coalesce(duplicate.document::jsonb ->> 'personal_note', '')
-                <> coalesce(canonical.document::jsonb ->> 'personal_note', '')
-           OR coalesce(duplicate.document::jsonb ->> 'custom_name', '')
+        WHERE coalesce(duplicate.document::jsonb ->> 'custom_name', '')
                 <> coalesce(canonical.document::jsonb ->> 'custom_name', '')
            OR duplicate.document::jsonb -> 'status' <> canonical.document::jsonb -> 'status'
            OR coalesce(duplicate.document::jsonb -> 'history', '[]'::jsonb)

@@ -188,7 +188,12 @@ test("private wiki persists exact Markdown, rejects stale writes, and has stable
   await expect(page).toHaveURL(new RegExp(`/subscriptions/${subscription}$`));
   await page.getByRole("button", { name: "Close subscriptions" }).click();
   await expect(page).toHaveURL(
-    new RegExp(`/reader\\?view=subscription&subscription=${subscription}$`),
+    (url) =>
+      url.pathname === "/reader" &&
+      url.searchParams.get("view") === "subscription" &&
+      url.searchParams.get("subscription") === subscription &&
+      url.searchParams.has("article") &&
+      url.searchParams.get("workspace") === bootstrap.activeWorkspaceId,
   );
   await expect(
     page.getByRole("dialog", { name: "Subscription details" }),

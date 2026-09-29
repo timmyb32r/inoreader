@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("subscription catalog navigates to durable details and explicitly saves a note", async ({
+test("subscription catalog navigates to durable details without the retired note editor", async ({
   page,
 }) => {
   await page.goto("/");
@@ -28,20 +28,14 @@ test("subscription catalog navigates to durable details and explicitly saves a n
     page.getByRole("link", { name: "This Week in Rust" }).click(),
   ]);
   await expect(page).toHaveURL(/\/subscriptions\/sub$/);
-  const note = page.getByRole("textbox", { name: "Personal note" });
-  const savedNote =
-    `${await note.inputValue()} Follow for Rust ecosystem changes`.trim();
-  await note.fill(savedNote);
-  await expect(page.getByText("Unsaved changes")).toBeVisible();
-  const save = page.getByRole("button", { name: "Save note" });
-  await expect(save).toBeEnabled();
-  await save.click();
-  await expect(page.getByText("All changes saved")).toBeVisible();
-
+  await expect(
+    page.getByRole("textbox", { name: "Personal note" }),
+  ).toHaveCount(0);
+  await expect(page.getByText("Wiki page", { exact: true })).toBeVisible();
   await page.reload();
   await expect(
     page.getByRole("textbox", { name: "Personal note" }),
-  ).toHaveValue(savedNote);
+  ).toHaveCount(0);
 });
 
 test("latest articles query owns its subscription scope and keeps controls fixed while loading", async ({

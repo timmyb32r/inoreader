@@ -21,6 +21,7 @@ impl AiService {
         log::info!("ai_submission operation_id={operation}");
         self.policy.generation_allowed(owner)?;
         self.key(owner).await?;
+        self.manual_budget(owner).await?;
         let ArticleInput::Ready(snapshot) =
             self.store.article_input(owner, workspace, article).await?
         else {
@@ -57,6 +58,17 @@ impl AiService {
                 let response = async {
                     self.policy.generation_allowed(claim.record.owner())?;
                     let key = self.key(claim.record.owner()).await?;
+                    let reservation = SpendReservation::new(
+                        claim
+                            .record
+                            .input()
+                            .budget_cost(claim.record.cost_rates())?,
+                        self.policy.config().daily_limit_usd.clone(),
+                        SpendMode::Terms,
+                    )?;
+                    self.store
+                        .reserve(claim.record.owner(), claim.lease, &reservation)
+                        .await?;
                     reader_runtime::observe(
                         reader_runtime::Stage::DefinitionsProvider,
                         self.provider
@@ -78,6 +90,16 @@ impl AiService {
                         let mut usage = reply.usage();
                         if let Some(value) = &mut usage {
                             value.estimated_cost_usd = Some(claim.record.cost_rates().cost(value)?);
+                            self.store
+                                .settle(
+                                    claim.record.owner(),
+                                    claim.lease,
+                                    value
+                                        .estimated_cost_usd
+                                        .as_deref()
+                                        .ok_or(AiError::Storage)?,
+                                )
+                                .await?;
                         }
                         let state = match reader_runtime::observe_sync(
                             reader_runtime::Stage::DefinitionsValidation,

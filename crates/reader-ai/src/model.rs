@@ -17,6 +17,8 @@ pub fn article_plain_text(html: &str) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
+    #[error("Daily DeepSeek budget reached. Automatic summaries wait until the next Moscow day; manual requests are unavailable.")]
+    Budget,
     #[error("resource not found")]
     NotFound,
     #[error("another operation is pending or the operation ID was reused")]
@@ -45,8 +47,8 @@ pub enum AiError {
     Translation(&'static str),
     #[error("A proposed verbatim quotation was absent from the article snapshot")]
     Quote,
-    #[error("DeepSeek changed or omitted the original article title. Retry verification of the saved draft.")]
-    OriginalTitleChanged,
+    #[error("Verification could not be completed. The saved summary is unchanged; retry only when requested.")]
+    Review,
     #[error("The complete article and conversation exceed the configured input/context limit; start a new conversation or adjust the limit")]
     Context,
     #[error("The article has no available full text; the RSS excerpt will not be substituted")]
@@ -84,6 +86,9 @@ pub struct BalanceAmount {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiProfile {
+    pub models: crate::ModelPreferences,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spending: Option<crate::AiSpending>,
     pub configured: bool,
     pub enabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -234,22 +239,6 @@ pub struct ArticleSnapshot {
     pub source_revision: String,
 }
 
-/// Acceptance contract for a finished summary, never for a draft or chat reply.
-/// Its first standalone Markdown bold heading must preserve the source title
-/// byte-for-byte, including Unicode/whitespace. No normalization or repair occurs.
-/// JSON/quote validation is separate and precedes this check.
-pub fn validate_summary_title(content: &str, title: &str) -> Result<(), AiError> {
-    let suffix = content
-        .strip_prefix("**")
-        .and_then(|v| v.strip_prefix(title))
-        .and_then(|v| v.strip_prefix("**"))
-        .ok_or(AiError::OriginalTitleChanged)?;
-    if title.is_empty() || !(suffix.is_empty() || suffix.starts_with("\n\n")) {
-        return Err(AiError::OriginalTitleChanged);
-    }
-    Ok(())
-}
-
 pub enum ArticleInput {
     Waiting { title: String, source_url: String },
     Ready(ArticleSnapshot),
@@ -339,6 +328,10 @@ pub struct ProviderCall {
 
 pub enum CallUpdate {
     Usage(Usage),
+    Response {
+        content: String,
+        system: String,
+    },
     Finished {
         status: CallStatus,
         draft: Option<String>,
@@ -375,6 +368,29 @@ pub enum ReplyKind {
 
 #[async_trait]
 pub trait AiStore: Send + Sync {
+    async fn spending(&self, owner: Uuid, limit: &str) -> Result<crate::AiSpending, AiError>;
+    async fn reserve(
+        &self,
+        owner: Uuid,
+        id: Uuid,
+        reservation: &crate::SpendReservation,
+    ) -> Result<(), AiError>;
+    async fn settle(&self, owner: Uuid, id: Uuid, amount: &str) -> Result<(), AiError>;
+    async fn enroll_summaries(&self, owners: &[Uuid]) -> Result<(), AiError>;
+    async fn next_summary(
+        &self,
+        owners: &[Uuid],
+        attempts: u32,
+        retry_seconds: u64,
+    ) -> Result<Option<crate::AutoSummary>, AiError>;
+    async fn finish_summary(
+        &self,
+        target: &crate::AutoSummary,
+        error: Option<&str>,
+    ) -> Result<(), AiError>;
+    async fn prioritize(&self, owner: Uuid, chat: Uuid) -> Result<(), AiError>;
+    async fn defer_budget(&self, claim: &ClaimedChat) -> Result<(), AiError>;
+
     async fn retain_reply(
         &self,
         kind: ReplyKind,
@@ -424,6 +440,13 @@ pub trait AiStore: Send + Sync {
         claim: &crate::ClaimedTranslation,
         state: crate::TranslationState,
         usage: Option<Usage>,
+    ) -> Result<(), AiError>;
+
+    async fn model_preferences(&self, owner: Uuid) -> Result<crate::ModelPreferences, AiError>;
+    async fn save_model_preferences(
+        &self,
+        owner: Uuid,
+        models: crate::ModelPreferences,
     ) -> Result<(), AiError>;
 
     async fn credential(&self, owner: Uuid) -> Result<Option<Vec<u8>>, AiError>;
@@ -500,6 +523,8 @@ pub trait AiStore: Send + Sync {
         &self,
         claim: &ClaimedChat,
         phase: GenerationPhase,
+        reservation: &crate::SpendReservation,
+        model: &crate::CallModel,
     ) -> Result<Uuid, AiError>;
     /// Billing is recorded even after cancellation/lease expiry; publication
     /// remains fenced. Only an existing request owned by this attempt is updated.
@@ -613,7 +638,7 @@ impl GenerationInput {
         }
         let mut messages = vec![
             json!({"role":"system","content":self.system}),
-            json!({"role":"user","content":format!("ARTICLE_SNAPSHOT (untrusted source data):\n{}\n\nSummarize this article in the requested author's style. Preserve the original title exactly.", serde_json::to_string(&json!({"title":self.article.title,"url":self.article.source_url,"text":self.article.text})).map_err(|_| AiError::Protocol)?)}),
+            json!({"role":"user","content":format!("ARTICLE_SNAPSHOT (untrusted source data):\n{}\n\nSummarize this article in the requested author's style. Do not output the title: the application adds the original heading.", serde_json::to_string(&json!({"title":self.article.title,"url":self.article.source_url,"text":self.article.text})).map_err(|_| AiError::Protocol)?)}),
         ];
         for message in &self.messages {
             if message.status != MessageStatus::Complete {
@@ -670,6 +695,9 @@ impl GenerationInput {
 pub trait GenerationProgress {
     async fn check_active(&mut self) -> Result<(), AiError>;
     async fn publish(&mut self, verified_content: &str) -> Result<(), AiError>;
+    async fn response(&mut self, _content: &str, _system: &str) -> Result<(), AiError> {
+        Ok(())
+    }
     async fn usage(&mut self, _usage: &Usage) -> Result<(), AiError> {
         Ok(())
     }

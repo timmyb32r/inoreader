@@ -6,6 +6,7 @@ import type { Transport } from "../api/client";
 import { DeepSeekProfile } from "./DeepSeekProfile";
 
 const configured: AiProfile = {
+  models: { summary: "deepseek-flash", verification: "deepseek-flash" },
   configured: true,
   enabled: true,
   balance: {
@@ -34,7 +35,11 @@ it("validates/saves once, clears the key input and preserves exact balance strin
       return (await new Promise<AiProfile>((resolve) => {
         resolveSave = resolve;
       })) as unknown as ResponseValue<C>;
-    return { configured: false, enabled: false } as unknown as ResponseValue<C>;
+    return {
+      models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+      configured: false,
+      enabled: false,
+    } as unknown as ResponseValue<C>;
   };
   const user = userEvent.setup(),
     onProfile = vi.fn();
@@ -97,7 +102,11 @@ it("requires explicit removal confirmation and keeps chat data outside credentia
   ) => {
     calls.push(`${init?.method ?? "GET"} ${path}`);
     return (init?.method === "DELETE"
-      ? { configured: false, enabled: false }
+      ? {
+          models: { summary: "deepseek-flash", verification: "deepseek-flash" },
+          configured: false,
+          enabled: false,
+        }
       : configured) as unknown as ResponseValue<C>;
   };
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);

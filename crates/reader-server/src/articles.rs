@@ -17,7 +17,9 @@ pub(super) async fn list_articles<R: ReaderRepository + 'static>(
                 query.subscription_id.map(SubscriptionId::from_uuid),
                 query.cursor.as_deref(),
                 query.direction.as_deref(),
-            )?,
+            )?
+            .with_read_period(read_period(query.read_from, query.read_until)?)
+            .map_err(ApiFailure::Validation)?,
         )
         .await?;
     Ok(Json(article_page_view(values)))
@@ -126,4 +128,59 @@ pub(super) async fn mark_all_read<R: ReaderRepository + 'static>(
         }
     })?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ReadingActivityQuery {
+    timezone: String,
+}
+pub(super) async fn reading_activity<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<ReadingActivityQuery>,
+) -> Result<Response, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let workspace = WorkspaceId::from_uuid(id);
+    owned_workspace(&s, workspace, actor.account.id).await?;
+    let days = s
+        .repository
+        .reading_activity(workspace, &query.timezone)
+        .await?
+        .ok_or(ApiFailure::Validation("unsupported activity timezone"))?;
+    let mut response = Json(ReadingActivityView { days }).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct SourceActivityQuery {
+    timezone: String,
+    from: chrono::NaiveDate,
+    until: chrono::NaiveDate,
+}
+pub(super) async fn source_activity<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Query(query): Query<SourceActivityQuery>,
+) -> Result<Response, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    let workspace = WorkspaceId::from_uuid(id);
+    owned_workspace(&s, workspace, actor.account.id).await?;
+    let period = reader_application::SourceActivityPeriod::new(query.from, query.until)
+        .map_err(ApiFailure::Validation)?;
+    let days = s
+        .repository
+        .source_activity(workspace, &query.timezone, period)
+        .await?
+        .ok_or(ApiFailure::Validation("unsupported activity timezone"))?;
+    let mut response = Json(SourceActivityView { days }).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
 }

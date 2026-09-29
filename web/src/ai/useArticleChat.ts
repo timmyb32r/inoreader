@@ -24,8 +24,8 @@ const targetScope = (target: ChatTarget) =>
 const orderedVersions = (values: ArticleChat[]) =>
   [...values].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 
-/** An explicit button owns each paid action. Opening or reconnecting an existing
- * conversation only reads its persisted state. Drafts are account-local memory. */
+/** Article selection ensures one persisted summary and promotes pending work.
+ * Switching targets fences stale responses; drafts remain account-local. */
 export function useArticleChat(
   client: AiClient,
   accountId: string,
@@ -48,6 +48,7 @@ export function useArticleChat(
   // operation ID receives an acknowledgement. A GET cannot resolve a lost POST.
   const pendingRequests = useRef(new Map<string, UnresolvedRequest>());
   const trigger = useRef<HTMLElement | null>(null);
+  const openingScope = useRef("");
   const current = useRef(chat);
   current.current = chat;
   const draft = chat ? (drafts[chat.id] ?? "") : "";
@@ -149,7 +150,9 @@ export function useArticleChat(
   const open = async (nextTarget: ChatTarget, generateIfMissing = true) => {
     setVisible(true);
     setCollapsed(false);
-    if (lock.current) return;
+    const incomingScope = targetScope(nextTarget);
+    if (lock.current && openingScope.current === incomingScope) return;
+    openingScope.current = incomingScope;
     trigger.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -279,20 +282,6 @@ export function useArticleChat(
         ),
     });
   };
-  const regenerate = () => {
-    if (
-      !target ||
-      !profile?.enabled ||
-      isChatActive(chat) ||
-      pendingRequests.current.get(scope)?.uncertain
-    )
-      return;
-    const operationId = crypto.randomUUID();
-    void command("Starting new summary", {
-      run: () =>
-        client.open(target.workspaceId, target.articleId, operationId, true),
-    });
-  };
   const retry = () => {
     const pendingRequest = pendingRequests.current.get(scope);
     if (pendingRequest) {
@@ -349,7 +338,6 @@ export function useArticleChat(
     open,
     close,
     send,
-    regenerate,
     retry,
     stop,
     reconnect,

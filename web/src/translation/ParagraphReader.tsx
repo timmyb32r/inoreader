@@ -9,6 +9,7 @@ import type {
 import { Icon } from "../ui/Icon";
 import { annotate, clearAnnotations, paragraphs } from "./annotations";
 import "./translation.css";
+import { ParagraphTranslationPanel } from "./ParagraphTranslationPanel";
 
 type Word = Extract<TranslationSegment, { kind: "word" }>;
 type Props = {
@@ -296,22 +297,10 @@ export function ParagraphReader({
         </div>
       </div>
       {enabled && selection && (
-        <section
-          class="paragraph-result"
-          role="region"
-          aria-label="Paragraph translation"
-          aria-busy={pending}
+        <ParagraphTranslationPanel
+          pending={pending}
+          onClose={() => setSelection("")}
         >
-          <header>
-            <strong>Перевод абзаца</strong>
-            <button
-              class="icon-button"
-              aria-label="Close paragraph translation"
-              onClick={() => setSelection("")}
-            >
-              <Icon name="close" />
-            </button>
-          </header>
           <div class="paragraph-result-body" aria-live="polite">
             {pending ? (
               <div class="paragraph-wait">
@@ -339,7 +328,7 @@ export function ParagraphReader({
               Повторить
             </button>
           </footer>
-        </section>
+        </ParagraphTranslationPanel>
       )}
       {enabled && error && !selection && (
         <div class="paragraph-error" role="alert">

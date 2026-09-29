@@ -22,6 +22,8 @@ pub(super) async fn begin(
     pool: &PgPool,
     claim: &ClaimedChat,
     phase: GenerationPhase,
+    reservation: &SpendReservation,
+    model: &CallModel,
 ) -> Result<Uuid, AiError> {
     let mut tx = pool.begin().await.map_err(storage)?;
     let mut state =
@@ -43,6 +45,17 @@ pub(super) async fn begin(
     }
     let assistant_id = attempt.assistant_id;
     let id = Uuid::new_v4();
+    budget::reserve(&mut tx, claim.record.owner, id, reservation).await?;
+    sqlx::query("INSERT INTO ai_call_models(id,owner,document) VALUES($1,$2,$3)")
+        .bind(id)
+        .bind(claim.record.owner)
+        .bind(encode(model)?)
+        .execute(&mut *tx)
+        .await
+        .map_err(storage)?;
+    if phase == GenerationPhase::Generating {
+        record.view.model = model.model().id().into();
+    }
     record.view.provider_calls.push(ProviderCall {
         id,
         assistant_id,
@@ -58,6 +71,7 @@ pub(super) async fn begin(
         .ok_or(AiError::Storage)?;
     message.phase = Some(phase);
     message.status = MessageStatus::Streaming;
+    record.view.error = None;
     record.view.status = match phase {
         GenerationPhase::Generating => ChatStatus::Generating,
         GenerationPhase::Verifying => ChatStatus::Verifying,
@@ -84,18 +98,15 @@ pub(super) async fn update(
         .ok_or(AiError::Storage)?
         .assistant_id;
     if let CallUpdate::Usage(usage) = &update {
-        let phase = record
-            .view
-            .provider_calls
-            .iter()
-            .find(|c| c.id == id && c.assistant_id == assistant_id)
-            .ok_or(AiError::Conflict)?
-            .phase;
-        let rates = if phase == GenerationPhase::Verifying {
-            &claim.record.review.cost_rates
-        } else {
-            &claim.record.cost_rates
-        };
+        let raw: String =
+            sqlx::query_scalar("SELECT document FROM ai_call_models WHERE id=$1 AND owner=$2")
+                .bind(id)
+                .bind(claim.record.owner)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(storage)?;
+        let model: CallModel = decode(&raw)?;
+        let rates = model.rates();
         if usage
             .prompt_cache_hit_tokens
             .checked_add(usage.prompt_cache_miss_tokens)
@@ -112,6 +123,16 @@ pub(super) async fn update(
         .find(|c| c.id == id && c.assistant_id == assistant_id)
         .ok_or(AiError::Conflict)?;
     match update {
+        CallUpdate::Response { content, system } => {
+            if content.len() > claim.record.limits.max_response_bytes || system.is_empty() {
+                return Err(AiError::Conflict);
+            }
+            let changed = sqlx::query("INSERT INTO ai_call_responses(id,owner,content,system_prompt) VALUES($1,$2,$3,$4) ON CONFLICT(id) DO UPDATE SET content=EXCLUDED.content WHERE ai_call_responses.owner=EXCLUDED.owner AND ai_call_responses.content=EXCLUDED.content AND ai_call_responses.system_prompt=EXCLUDED.system_prompt")
+                .bind(id).bind(claim.record.owner).bind(content).bind(system).execute(&mut *tx).await.map_err(storage)?.rows_affected();
+            if changed != 1 {
+                return Err(AiError::Conflict);
+            }
+        }
         CallUpdate::Usage(usage) => {
             if call.usage.as_ref().is_some_and(|old| old != &usage) {
                 return Err(AiError::Conflict);

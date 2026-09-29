@@ -4,6 +4,22 @@ use serde::Deserialize;
 pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
     Router::new()
         .route(
+            "/api/wiki/{namespace}/collections/{kind}",
+            get(collection::<R>),
+        )
+        .route(
+            "/api/wiki/{namespace}/pages/{page}/organization",
+            get(organization::<R>),
+        )
+        .route(
+            "/api/wiki/{namespace}/pages/{page}/favorite",
+            put(favorite::<R>),
+        )
+        .route(
+            "/api/wiki/{namespace}/subscription-root",
+            post(subscription_root::<R>),
+        )
+        .route(
             "/api/wiki/{namespace}/pages/{page}/history/{revision}",
             get(revision::<R>),
         )
@@ -318,6 +334,67 @@ async fn revision<R: ReaderRepository + 'static>(
         service(&s)?
             .0
             .revision(a, n, p, v)
+            .await
+            .map_err(ApiFailure::Wiki)?,
+    ))
+}
+
+async fn collection<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    h: HeaderMap,
+    Path((ns, kind)): Path<(Uuid, reader_wiki::Collection)>,
+    Query(q): Query<Listing>,
+) -> Result<Json<WikiPages>, ApiFailure> {
+    let a = auth(&s, &h).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .0
+            .collection(a, ns, kind, q.offset)
+            .await
+            .map_err(ApiFailure::Wiki)?,
+    ))
+}
+async fn organization<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    h: HeaderMap,
+    Path((ns, page)): Path<(Uuid, Uuid)>,
+    Query(q): Query<Listing>,
+) -> Result<Json<WikiOrganization>, ApiFailure> {
+    let a = auth(&s, &h).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .0
+            .organization(a, ns, page, q.offset)
+            .await
+            .map_err(ApiFailure::Wiki)?,
+    ))
+}
+async fn favorite<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    h: HeaderMap,
+    Path((ns, page)): Path<(Uuid, Uuid)>,
+    Json(q): Json<WikiFavorite>,
+) -> Result<StatusCode, ApiFailure> {
+    csrf(&s, &h)?;
+    let a = auth(&s, &h).await?.account.id.as_uuid();
+    service(&s)?
+        .0
+        .favorite(a, ns, page, q.favorite)
+        .await
+        .map_err(ApiFailure::Wiki)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn subscription_root<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    h: HeaderMap,
+    Path(ns): Path<Uuid>,
+) -> Result<Json<WikiPage>, ApiFailure> {
+    csrf(&s, &h)?;
+    let a = auth(&s, &h).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?
+            .0
+            .subscription_root(a, ns)
             .await
             .map_err(ApiFailure::Wiki)?,
     ))

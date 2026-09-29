@@ -46,3 +46,26 @@ it("reports clipboard failures on the same control", async () => {
     "Copy failed — select the text to copy",
   );
 });
+
+it("resolves article content only on activation and respects unavailable full text", async () => {
+  const content = vi.fn(() => "Entire article\n\nLast paragraph");
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  const { rerender } = render(
+    <CopyButton text={content} label="Copy full article" disabled />,
+  );
+  const button = screen.getByRole("button", { name: "Copy full article" });
+  fireEvent.click(button);
+  expect(content).not.toHaveBeenCalled();
+  rerender(<CopyButton text={content} label="Copy full article" />);
+  fireEvent.click(button);
+  await waitFor(() =>
+    expect(button).toHaveAttribute("data-copy-state", "copied"),
+  );
+  expect(writeText).toHaveBeenCalledExactlyOnceWith(
+    "Entire article\n\nLast paragraph",
+  );
+});

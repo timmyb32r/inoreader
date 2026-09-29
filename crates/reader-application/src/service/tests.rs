@@ -80,6 +80,21 @@ impl crate::ArticleRepository for Repository {
     ) -> Result<Vec<ArticlePresentation>, RepositoryError> {
         unused()
     }
+    async fn reading_activity(
+        &self,
+        _: WorkspaceId,
+        _: &str,
+    ) -> Result<Option<Vec<crate::ReadingDay>>, RepositoryError> {
+        unused()
+    }
+    async fn source_activity(
+        &self,
+        _: WorkspaceId,
+        _: &str,
+        _: crate::SourceActivityPeriod,
+    ) -> Result<Option<Vec<crate::SourceActivityDay>>, RepositoryError> {
+        unused()
+    }
     async fn save_article(
         &self,
         _: WorkspaceId,
@@ -545,4 +560,34 @@ async fn workspace_restore_does_not_resume_an_individually_paused_subscription()
         .unwrap();
     assert!(repository.refreshes.lock().unwrap().is_empty());
     assert!(repository.saved_subscription.lock().unwrap().is_empty());
+}
+
+#[async_trait::async_trait]
+impl crate::FocusedReadingRepository for Repository {
+    async fn reading_state(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+    ) -> Result<crate::ReadingState, crate::RepositoryError> {
+        Err(crate::RepositoryError::NotFound)
+    }
+    async fn complete_reading(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+        _: crate::CompleteReading,
+    ) -> Result<crate::ReadingCompletion, crate::RepositoryError> {
+        Err(crate::RepositoryError::NotFound)
+    }
+    async fn undo_reading(
+        &self,
+        _: reader_core::AccountId,
+        _: reader_core::WorkspaceId,
+        _: reader_core::ArticleId,
+        _: uuid::Uuid,
+    ) -> Result<crate::ReadingCompletion, crate::RepositoryError> {
+        Err(crate::RepositoryError::NotFound)
+    }
 }

@@ -145,6 +145,7 @@ export function SearchApplication({
           <h1>Search</h1>
         </div>
         <SearchField
+          autoFocus
           value={draft}
           onInput={setDraft}
           onSubmit={() => change(draft)}

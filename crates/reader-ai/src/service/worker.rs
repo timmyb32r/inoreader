@@ -4,6 +4,19 @@ use std::time::Duration;
 
 impl AiService {
     pub fn spawn_workers(self: &Arc<Self>, supervisor: &mut reader_runtime::TaskSupervisor) {
+        let scheduler = self.clone();
+        supervisor.spawn("ai-scheduler", move |mut stop| async move {
+            while !stop.requested() {
+                if let Err(error) = scheduler.schedule_once().await {
+                    log::error!("ai_scheduler outcome=failed classification={error}");
+                }
+                stop.sleep(Duration::from_millis(
+                    scheduler.policy.config().poll_milliseconds,
+                ))
+                .await;
+            }
+            Ok(())
+        });
         // Separate work classes share one FIFO permit pool: slow definitions do
         // not force every chat to wait behind a definition and a translation.
         let slots = Arc::new(tokio::sync::Semaphore::new(self.policy.config().workers));
@@ -45,6 +58,15 @@ impl AiService {
         )
         .scope(async {
             if let Err(error) = self.generate_claim(&mut claim).await {
+                if matches!(error, AiError::Budget)
+                    && matches!(
+                        claim.record.operations.last().map(|op| &op.task),
+                        Some(AttemptTask::Summary { .. })
+                    )
+                {
+                    self.store.defer_budget(&claim).await?;
+                    return Ok(true);
+                }
                 if !matches!(error, AiError::Cancelled) {
                     let state = if matches!(
                         error,
@@ -148,9 +170,9 @@ impl AiService {
                 record.generation_mode
             },
             system: if review {
-                settings.system_prompt.clone()
+                self.policy.review_snapshot()?.system_prompt
             } else {
-                record.system_prompt.clone()
+                format!("{}\nFor the initial summary, omit the heading/title segment: the application supplies the exact source title. All other style rules remain in force.", record.system_prompt)
             },
             article: record.snapshot.clone().ok_or(AiError::FullText)?,
             messages: if review {
@@ -185,14 +207,41 @@ impl AiService {
         } else {
             GenerationPhase::Generating
         };
-        let input = self.input(claim, draft)?;
-        input.validate_context()?;
-        let rates = if phase == GenerationPhase::Verifying {
-            &claim.record.review.cost_rates
+        let mut input = self.input(claim, draft)?;
+        let call_system = input.system.clone();
+        let preferences = self.store.model_preferences(claim.record.owner).await?;
+        let model = if phase == GenerationPhase::Verifying {
+            preferences.verification
         } else {
-            &claim.record.cost_rates
+            preferences.summary
         };
-        let call = self.store.begin_call(claim, phase).await?;
+        let selection = CallModel::new(model, self.policy.config().models.get(model).clone());
+        input.model = model.id().into();
+        input.validate_context()?;
+        let rates = selection.rates();
+        let mode = if phase == GenerationPhase::Verifying {
+            SpendMode::Verification
+        } else if matches!(
+            claim.record.operations.last().map(|op| &op.task),
+            Some(AttemptTask::Reply)
+        ) {
+            SpendMode::Chat
+        } else {
+            SpendMode::Summary
+        };
+        let amount = crate::budget::bound_cost(
+            &input.messages_json()?,
+            input.framing_tokens_per_message,
+            input.framing_tokens_base,
+            input.max_output_tokens,
+            rates,
+        )?;
+        let reservation =
+            SpendReservation::new(amount, self.policy.config().daily_limit_usd.clone(), mode)?;
+        let call = self
+            .store
+            .begin_call(claim, phase, &reservation, &selection)
+            .await?;
         let mut progress = StoredProgress {
             store: self.store.as_ref(),
             claim,
@@ -209,30 +258,20 @@ impl AiService {
         {
             Ok(output) => {
                 progress.usage(&output.usage).await?;
+                progress.response(&output.envelope, &call_system).await?;
                 if phase == GenerationPhase::Verifying {
                     progress.check_active().await?;
-                    if let Err(error) = validate_summary_title(
-                        &output.content,
-                        &claim
-                            .record
-                            .snapshot
-                            .as_ref()
-                            .ok_or(AiError::FullText)?
-                            .title,
-                    ) {
-                        self.store
-                            .update_call(
-                                claim,
-                                call,
-                                CallUpdate::Finished {
-                                    status: CallStatus::Failed,
-                                    draft: None,
-                                },
-                            )
-                            .await?;
-                        return Err(error);
-                    }
                 }
+                let output = if private_draft {
+                    let source = claim.record.snapshot.as_ref().ok_or(AiError::FullText)?;
+                    output.with_source_title(
+                        &source.title,
+                        &source.text,
+                        claim.record.limits.max_response_bytes,
+                    )?
+                } else {
+                    output
+                };
                 if !private_draft {
                     progress.publish(&output.content).await?;
                 }
@@ -315,9 +354,31 @@ impl GenerationProgress for StoredProgress<'_> {
             )
             .await
     }
+    async fn response(&mut self, content: &str, system: &str) -> Result<(), AiError> {
+        self.store
+            .update_call(
+                self.claim,
+                self.call,
+                CallUpdate::Response {
+                    content: content.into(),
+                    system: system.into(),
+                },
+            )
+            .await
+    }
     async fn usage(&mut self, usage: &Usage) -> Result<(), AiError> {
         let mut usage = usage.clone();
         usage.estimated_cost_usd = Some(self.rates.cost(&usage)?);
+        self.store
+            .settle(
+                self.claim.record.owner,
+                self.call,
+                usage
+                    .estimated_cost_usd
+                    .as_deref()
+                    .ok_or(AiError::Storage)?,
+            )
+            .await?;
         self.store
             .update_call(self.claim, self.call, CallUpdate::Usage(usage))
             .await

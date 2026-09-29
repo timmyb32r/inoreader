@@ -88,3 +88,9 @@ in the local PostgreSQL acceptance fixture (environment-specific measurement).
 The final release gate passed: Rust fmt/Clippy/tests, generated contracts,
 real PostgreSQL/browser and backup/restore acceptance, Chromium acceptance,
 180 frontend tests, 53 browser tests, architecture and operational checks.
+
+## Organization update · 2026-09-29
+
+[Wiki organization](wiki-organization.md) specifies namespace-local parent/child
+relationships with history, private favorites, standalone-page collections and
+the Subscriptions parent. It is the current contract for these additions.

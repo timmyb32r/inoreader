@@ -1,0 +1,100 @@
+.panel-dock--inactive,
+.panel-dock--inactive > div {
+  display: contents;
+}
+.panel-dock {
+  --chat-width: min(1000px, calc(100vw - 16px));
+  --chat-height: min(700px, calc(100dvh - 32px));
+  position: fixed;
+  z-index: 110;
+  right: 8px;
+  bottom: 16px;
+  width: var(--chat-width);
+  height: var(--chat-height);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.panel-dock > div {
+  min-width: 0;
+  min-height: 0;
+}
+.panel-dock .ai-chat,
+.panel-dock .glossary-panel {
+  position: static;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.panel-dock-terms {
+  border-left: 1px solid var(--line);
+}
+.panel-dock--inactive .panel-dock-terms {
+  border: 0;
+}
+.panel-dock .ai-chat__header {
+  height: 72px;
+  flex: 0 0 72px;
+}
+.panel-dock .ai-chat__header > button[aria-expanded] {
+  display: none;
+}
+.panel-dock-tabs {
+  display: none;
+}
+@media (max-width: 760px) {
+  .panel-dock {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 40px minmax(0, 1fr);
+  }
+  .panel-dock-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel-dock-tabs button {
+    flex: 1;
+    color: var(--text-muted);
+    background: var(--surface-muted);
+    border: 0;
+  }
+  .panel-dock-tabs button[aria-pressed="true"] {
+    color: var(--accent-deep);
+    background: var(--accent-soft);
+  }
+  .panel-dock-tabs button:active {
+    background: var(--line);
+  }
+  .panel-dock[data-tab="summary"] > .panel-dock-terms,
+  .panel-dock[data-tab="terms"] > .panel-dock-summary {
+    display: none;
+  }
+  .panel-dock-terms {
+    border: 0;
+  }
+}
+
+.panel-dock-summary > div {
+  height: 100%;
+}
+/* A shared reading scale makes the two panes feel like one assistant. */
+.panel-dock .ai-markdown,
+.panel-dock .glossary-paragraph {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.panel-dock .ai-chat__handle strong,
+.panel-dock .glossary-handle strong {
+  font-size: 14px;
+}
+.panel-dock .ai-chat__handle small,
+.panel-dock .glossary-handle small {
+  font-size: 11px;
+  color: var(--text-muted);
+}

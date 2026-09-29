@@ -150,6 +150,7 @@ describe("reader application", () => {
       undefined,
       "older-1",
       "older",
+      undefined,
     );
     expect(window.location.search).toContain("cursor=older-1");
     expect(window.location.search).toContain("batch=2");
@@ -442,49 +443,13 @@ describe("reader application", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("exposes two enabled entries to unified search", async () => {
+  it("exposes one enabled entry to unified search", async () => {
     renderApp();
     const search = await screen.findAllByRole("button", { name: /Search/ });
-    expect(search).toHaveLength(2);
+    expect(search).toHaveLength(1);
     search.forEach((item) => expect(item).toBeEnabled());
     expect(screen.queryByText("Coming later")).not.toBeInTheDocument();
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
-  });
-
-  it("guards internal and browser navigation while a personal note is dirty", async () => {
-    history.replaceState({}, "", "/subscriptions/sub");
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const user = userEvent.setup();
-    const subscription = {
-      id: "sub",
-      name: "This Week in Rust",
-      sourceTitle: "This Week in Rust",
-      sourceUrl: "https://example.com/feed",
-      sourceType: "feed" as const,
-      personalNote: "",
-      count: 3,
-      unreadCount: 2,
-      status: "active" as const,
-    };
-    const client = mockClient({ "/api/subscriptions/sub": subscription });
-    const signOut = vi.spyOn(client, "signOut");
-    const view = render(<App client={client} />);
-    await user.type(
-      await screen.findByRole("textbox", { name: "Personal note" }),
-      "keep me",
-    );
-    await user.click(screen.getByRole("button", { name: "← Back" }));
-    expect(window.location.pathname).toBe("/subscriptions/sub");
-    history.pushState({}, "", "/");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-    expect(window.location.pathname).toBe("/subscriptions/sub");
-    await user.click(screen.getByRole("button", { name: "Account menu" }));
-    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
-    expect(signOut).not.toHaveBeenCalled();
-    expect(confirm).toHaveBeenCalledTimes(3);
-    view.unmount();
-    confirm.mockRestore();
-    history.replaceState({}, "", "/");
   });
 
   it("uses a generic accessible name for every subscription options menu", async () => {

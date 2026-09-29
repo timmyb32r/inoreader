@@ -84,3 +84,60 @@ a fixed-height status row, independent result/preview scroll areas and fixed
 pagination. Query, scope and selection are URL-addressable. At narrow widths the
 same two panes stack with explicit fixed viewport fractions. Trigram matches are
 highlighted with the semantic accent tokens; server text never becomes markup.
+
+Home's reading calendar measures distinct articles marked read per local day, not
+elapsed time. Its server-backed summary, calendar and reserved status line retain
+fixed geometry while loading or failing; unknown loading values use an em dash,
+not a fabricated zero. Daily counts include explicit bulk marking.
+
+The Home flow chart uses adjacent slate (`--text-muted`) arrivals and teal
+(`--accent`) reads on one integer scale. Tooltip overlays never move either chart
+or the reading calendar. The plot reserves 180px height during loading and zero days.
+
+Feed exposes its unread total in the browser title. Subscription category tabs
+show category totals independent of search/filter results, with reserved numeric
+width. Copy full article uses the shared icon-only clipboard control and copies
+the title, excerpt and full rendered body once full text is ready. Its pending,
+success and error states preserve toolbar geometry. On narrow screens Summarize
+and Terms retain their accessible names but show icons to keep all actions visible.
+
+Article selection opens its persisted DeepSeek chat automatically. Chat remains a
+fixed overlay and is hidden beneath settings and outside Reader. Every article
+selection reopens its own conversation; no regeneration control is offered.
+DeepSeek spending reserves a fixed-height 30-day plot and summary region; mode
+segments use semantic colors, and exact-value hover cards are overlays. Unknown
+billing is a separate reservation, never rendered as known zero spending.
+
+Reading history reuses Feed. Home's read card, Read series and calendar days are
+links into the selected local day, with immediate pending feedback. The Feed
+filter uses the shared protected date field, a clear action and Back to Home.
+Once displayed, its 128px region remains reserved when cleared or loading;
+article rows show the matching read time separately from source dates.
+
+DeepSeek settings reserve two native shared model selectors and a fixed-size Save
+models control. Both start at Flash. Saving immediately locks both selectors and
+shows a spinner within the existing button; success/error use the existing fixed
+status area. Refreshing usage must not overwrite unsaved selections.
+
+Reader assistants may dock into one movable frame when summary and terms belong
+to the same article. `PanelDock` owns the shared position and proportional columns;
+on narrow screens explicit Summary/Terms tabs retain both pane states. Pane headers
+move the entire dock. Standalone panes retain their own positions. Paragraph
+translation uses the same floating-position hook and a dedicated drag handle.
+Source analytics uses a single teal treemap palette: area represents contribution,
+not color. Hover details, chart height and date controls reserve their footprints.
+
+Failed or interrupted factual checks keep the summary preview and the fixed status
+row. The recovery icon is labelled “Retry verification”; it locks immediately with
+aria-busy on activation. No automatic paid retry follows a failed check.
+
+Focused reading (`/reading`) is a separate Feed-launched workspace: the original
+occupies roughly two thirds of desktop width and the assistant has its own fixed
+column. Summary (the summary and its complete conversation) and Terms share that column; the chat's content and
+controller are reused without a floating shell or a new generation request.
+On narrow screens Article/Assistant tabs share one body viewport. The article
+must use static positioning here, overriding the ordinary mobile reader overlay.
+A fixed footer holds the explicit personal-value rating (1–10), Read & next and
+a permanently reserved status/recovery row. Selecting a score changes only
+color/border inside a stable box. Pending completion disables repeat activation;
+next article starts without a selected score unless it already has a saved rating.

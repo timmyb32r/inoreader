@@ -42,12 +42,12 @@ describe("subscription catalog contracts", () => {
   });
   it("adds the mandatory attention column without losing saved order or widths", () => {
     writeLayout("layout-existing", {
-      columns: ["url", "name", "note"],
-      widths: { name: 320, note: 240 },
+      columns: ["url", "name", "unread"],
+      widths: { name: 320, unread: 240 },
     });
     const layout = readLayout("layout-existing");
-    expect(layout.columns).toEqual(["url", "attention", "name", "note"]);
-    expect(layout.widths).toEqual({ name: 320, note: 240 });
+    expect(layout.columns).toEqual(["url", "attention", "name", "unread"]);
+    expect(layout.widths).toEqual({ name: 320, unread: 240 });
     writeLayout("layout-existing", layout);
     expect(readLayout("layout-existing")).toEqual(layout);
   });

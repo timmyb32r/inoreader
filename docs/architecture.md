@@ -153,3 +153,20 @@ pending operations lock synchronously and partial retries skip completed items.
 
 The obsolete DELETE route is rejected (405). A stale browser that used DELETE
 for reversible archiving cannot accidentally trigger permanent subscription removal.
+
+### Focused reading
+
+`app/reading` is application composition for a separate `/reading` route. It uses
+`ArticleReader`, embedded `ArticleChatContent` and `GlossaryPanel`; the existing
+account-scoped chat controller owns requests, drafts and saved conversations.
+Entering the mode only reads saved conversations. The queue controller never uses
+ordinary reader selection's automatic mark-read command.
+
+`FocusedReadingRepository` is the application port for validated 1–10 personal
+ratings, revision-checked atomic read completion and exact-operation undo.
+PostgreSQL locks the owned article, writes its read state, rating, read event and
+operation receipt in one transaction. Replays return the saved outcome; undo
+restores the prior projection only if no later article mutation occurred. Ratings
+live outside ingest article documents and are neither inferred nor cleared by
+ordinary read/unread operations. See [focused reading](focused-reading-spec.md)
+for API, retention, queue and interaction contracts.

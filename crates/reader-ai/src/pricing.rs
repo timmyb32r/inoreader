@@ -31,7 +31,22 @@ impl CostRates {
         })
     }
 
+    pub fn maximum(&self, input: u64, output: u64) -> Result<String, AiError> {
+        // Reserve both input tariffs: a conservative bound even with unusual tariffs.
+        DecimalRate::cost(&[
+            (&self.0.input_usd_per_million_tokens, input),
+            (&self.0.cached_input_usd_per_million_tokens, input),
+            (&self.0.output_usd_per_million_tokens, output),
+        ])
+    }
     pub fn cost(&self, usage: &Usage) -> Result<String, AiError> {
+        if usage
+            .prompt_cache_hit_tokens
+            .checked_add(usage.prompt_cache_miss_tokens)
+            != Some(usage.prompt_tokens)
+        {
+            return Err(AiError::Protocol);
+        }
         DecimalRate::cost(&[
             (
                 &self.0.input_usd_per_million_tokens,

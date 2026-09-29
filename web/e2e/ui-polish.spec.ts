@@ -174,7 +174,9 @@ test("collapsed subscription count opens the catalog and returns to the same rea
       page.getByRole("dialog", { name: "Subscriptions", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Close subscriptions" }).click();
-    await expect(page).toHaveURL("/reader");
+    await expect(page).toHaveURL(
+      (url) => url.pathname === "/reader" && url.searchParams.has("article"),
+    );
     await expect(subscriptions).toBeFocused();
     expect(await subscriptions.boundingBox()).toEqual(before);
     expect(await settings.boundingBox()).toEqual(settingsBefore);

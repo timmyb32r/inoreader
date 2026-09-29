@@ -155,10 +155,9 @@ pub async fn verify(
     );
     let record: TranslationRecord = serde_json::from_str(&document).unwrap();
     let mut other_model = policy(owner).config().clone();
-    other_model.model = "another-model".into();
+    other_model.max_output_tokens += 1;
     let mut changed = record.clone();
     changed.job.id = Uuid::new_v4();
-    changed.job.model = other_model.model.clone();
     changed.job.state = TranslationState::Queued;
     changed.input = Some(TranslationInput::new(&other_model, &changed.job.source).unwrap());
     let changed_id = changed.job.id;

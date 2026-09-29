@@ -44,14 +44,12 @@ preview available, with its non-complete status and explicit error. GET/list,
 retry, stop and idempotent responses use this same projection. No schema change
 or deletion of original drafts/older conversations is involved.
 Follow-up `purpose:"chat"` uses one request and displays streamed content normally.
-Final summary acceptance requires the original snapshot title byte-for-byte as
-the first standalone `**bold heading**`, including non-breaking spaces. A title
-changed or omitted by DeepSeek produces terminal `failed` and the stable message
-`DeepSeek changed or omitted the original article title. Retry verification of the saved draft.`
-The API classification is `original_title_changed` (422). Existing `chat.error`
-presentation and Retry expose the reason and recovery; both request costs remain.
-Draft titles are not rejected before verification, and follow-up chat has no
-heading requirement. No title is silently normalized, substituted or repaired.
+New summaries receive the original heading from the application, not the model.
+Verification returns atomic segment-scoped corrections. Invalid corrections produce
+`ai_review_incomplete` (422), preserve the unchecked preview and require a manual
+retry. No rejected check is automatically resubmitted. Exact response/prompt and
+reported usage are retained privately. See [targeted review](targeted-review.md).
+
 
 - POST `/api/articles/{id}/chat` body `{workspaceId:string,operationId:string,
   regenerate?:boolean}`: return existing latest conversation, or create one when
@@ -74,3 +72,19 @@ errors for missing credentials/full text, context limits and provider failures.
 Client-generated operation IDs identify retries of a local action. Database
 constraints prevent duplicate jobs across concurrent devices. Provider transport
 streams into durable state; polling transports progress to the browser.
+
+Automatic summaries and budgeting (schema 8): `AiProfile.spending`, when AI is
+configured on the server, returns dailyLimitUsd, today, resetsAt, spentUsd,
+reservedUsd, remainingUsd and days[{day,mode,spentUsd,reservedUsd}]. Money is exact
+USD decimal strings; dates use Moscow. Every mode shares one daily budget.
+`ai_daily_budget` is HTTP 429. Chat list reads promote the most recent conversation;
+background scheduling uses private store reads, without interactive priority.
+See [the current automatic-summary contract](automatic-summaries.md).
+
+## Account model preferences
+
+`GET /api/ai/profile` includes `models: {summary, verification}`.
+`PUT /api/ai/models` accepts exactly those two fields and returns the profile.
+Both accept only `deepseek-flash` or `deepseek-v4-pro`; unknown/missing fields
+are rejected. Authentication, account enablement and same-origin CSRF apply.
+Missing stored preferences mean Flash/Flash. Saving never regenerates a summary.

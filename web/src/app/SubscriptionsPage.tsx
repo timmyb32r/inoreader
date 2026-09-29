@@ -19,7 +19,6 @@ export function SubscriptionsPage({
   onChanged,
   onRemoved,
   onEditRecipe,
-  onDirtyNoteChange,
   onOpenWiki,
 }: {
   client: ApiClient;
@@ -36,7 +35,6 @@ export function SubscriptionsPage({
   onChanged?: (item: Subscription) => void;
   onRemoved?: (id: string) => void;
   onEditRecipe?: (recipe: WebFeedRecipeView) => void;
-  onDirtyNoteChange?: (dirty: boolean) => void;
   onOpenWiki?: (path: string) => boolean;
 }) {
   const overlay = useRef<HTMLDivElement>(null);
@@ -67,6 +65,12 @@ export function SubscriptionsPage({
       trigger?.focus();
     };
   }, []);
+  useLayoutEffect(() => {
+    if (!subscriptionId)
+      overlay.current
+        ?.querySelector<HTMLInputElement>("[data-subscription-search]")
+        ?.focus({ preventScroll: true });
+  }, [subscriptionId]);
   return (
     <div
       ref={overlay}
@@ -104,7 +108,6 @@ export function SubscriptionsPage({
               onChanged,
               onRemoved,
               onEditRecipe,
-              onDirtyNoteChange,
             }}
           />
         )}
