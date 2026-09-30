@@ -136,12 +136,23 @@ impl AiService {
             AttemptTask::Summary { draft } => {
                 // Reject a review that cannot even fit its source before paying
                 // for a draft. The actual full draft is checked again below.
-                self.input(claim, Some("{\"segments\":[]}".into()))?
-                    .validate_context()?;
+                if self
+                    .store
+                    .model_preferences(claim.record.owner)
+                    .await?
+                    .verification
+                    .is_some()
+                {
+                    self.input(claim, Some("{\"segments\":[]}".into()))?
+                        .validate_context()?;
+                }
                 let draft = match draft {
                     Some(saved) => saved,
                     None => self.run_call(claim, None, true).await?,
                 };
+                if self.store.finish_unchecked(claim).await? {
+                    return Ok(());
+                }
                 self.run_call(claim, Some(draft), false).await?;
             }
         }
@@ -211,7 +222,7 @@ impl AiService {
         let call_system = input.system.clone();
         let preferences = self.store.model_preferences(claim.record.owner).await?;
         let model = if phase == GenerationPhase::Verifying {
-            preferences.verification
+            preferences.verification.ok_or(AiError::Conflict)?
         } else {
             preferences.summary
         };

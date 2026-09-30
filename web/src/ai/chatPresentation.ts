@@ -4,7 +4,7 @@ import type { ArticleChat, ChatMessage } from "../api/ai";
  * Partial verifier output is never returned. Status distinguishes it from final. */
 export const visibleMessageContent = (message: ChatMessage) => message.content;
 
-export const hasVerifiedSummary = (chat: ArticleChat | null) =>
+export const hasCompletedSummary = (chat: ArticleChat | null) =>
   !!chat?.messages.some(
     (message) =>
       message.role === "assistant" &&

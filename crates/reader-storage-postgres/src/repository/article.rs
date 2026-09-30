@@ -45,7 +45,7 @@ impl reader_application::ArticleRepository for PostgresRepository {
         // Keep the partial-index predicate literal even after PostgreSQL switches
         // a prepared statement to a generic plan. User input never becomes SQL.
         let state_predicate = match request.scope() {
-            ArticleScope::Feed => "NOT a.is_read",
+            ArticleScope::Feed | ArticleScope::SubscriptionUnread(_) => "NOT a.is_read",
             ArticleScope::Later => "a.is_later",
             ArticleScope::Subscription(_) => "true",
         };

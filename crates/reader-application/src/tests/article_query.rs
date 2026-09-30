@@ -7,6 +7,7 @@ fn scope_and_limits_reject_invalid_execution_inputs() {
         ("feed", Some(id)),
         ("later", Some(id)),
         ("subscription", None),
+        ("subscription-unread", None),
     ] {
         assert!(ArticleScope::from_wire(view, subscription).is_err());
     }
@@ -70,4 +71,12 @@ fn read_period_is_validated_and_cannot_leak_into_other_scopes() {
     .unwrap();
     assert_eq!(request.clone().read_period(), Some(period));
     assert_eq!(request.with_read_period(None).unwrap().read_period(), None);
+}
+
+#[test]
+fn unread_subscription_scope_preserves_identity() {
+    let id = SubscriptionId::new();
+    let scope = ArticleScope::from_wire("subscription-unread", Some(id)).unwrap();
+    assert_eq!(scope, ArticleScope::SubscriptionUnread(id));
+    assert_eq!(scope.subscription(), Some(id));
 }

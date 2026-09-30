@@ -1,3 +1,4 @@
+import { ReadingBackButton } from "./ReadingBackButton";
 import { useEffect, useState } from "preact/hooks";
 import type { ApiClient } from "../../api/client";
 import type { AiProfile } from "../../api/ai";
@@ -9,6 +10,7 @@ import type { useGlossary } from "../../glossary/useGlossary";
 import { Icon } from "../../ui/Icon";
 import { StatusRegion } from "../../ui/StatusRegion";
 import { useFocusedReading } from "./useFocusedReading";
+import { RatingReasonDialog } from "./RatingReasonDialog";
 import "./focused-reading.css";
 
 type Props = {
@@ -35,6 +37,11 @@ export function FocusedReading({
 }: Props) {
   const reading = useFocusedReading(client, owner, workspace);
   const { article, state, busy, score } = reading;
+  const [confirming, setConfirming] = useState<string | null>(null);
+  useEffect(() => {
+    if (!article || (state?.read && !reading.uncertain && !busy))
+      setConfirming(null);
+  }, [article?.id, state?.read, reading.uncertain, busy]);
   const [tab, setTab] = useState<"summary" | "terms">("summary");
   const [mobile, setMobile] = useState<"article" | "assistant">("article");
   useEffect(() => {
@@ -79,10 +86,8 @@ export function FocusedReading({
       aria-label="Focused reading"
       aria-busy={!!busy}
     >
-      <header class="focused-reading__header">
-        <button class="text-button" onClick={() => onExit(article?.id)}>
-          ← Back to Feed
-        </button>
+      <header class="focused-reading__header reading-navigation">
+        <ReadingBackButton onClick={() => onExit(article?.id)} />
         <span>Reading mode</span>
         <div class="focused-reading__mobile-tabs" aria-label="Reading pane">
           <button
@@ -250,7 +255,7 @@ export function FocusedReading({
           disabled={!!busy || !state || (!state.read && score === null)}
           onClick={() => {
             if (state?.read && !reading.uncertain) void reading.continue();
-            else void reading.complete();
+            else if (article) setConfirming(article.id);
           }}
         >
           <span>
@@ -303,6 +308,21 @@ export function FocusedReading({
           </button>
         </div>
       </footer>
+      {article &&
+        confirming === article.id &&
+        score !== null &&
+        (!state?.read || !!busy || reading.uncertain) && (
+          <RatingReasonDialog
+            score={score}
+            reason={reading.reason}
+            onReason={reading.setReason}
+            busy={!!busy}
+            uncertain={reading.uncertain}
+            error={reading.error || reading.draftError}
+            onClose={() => setConfirming(null)}
+            onSave={() => void reading.complete()}
+          />
+        )}
     </section>
   );
 }

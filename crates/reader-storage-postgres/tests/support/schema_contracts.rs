@@ -37,12 +37,13 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     reader_storage_postgres::verify_schema(pool).await.unwrap();
 
-    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DELETE FROM schema_releases WHERE version=12; INSERT INTO schema_releases(version,release) VALUES(11,'targeted-ai-review-2026-09-29')")
+    sqlx::raw_sql("DROP TABLE article_ratings,reading_completions; DELETE FROM schema_releases WHERE version=13; INSERT INTO schema_releases(version,release) VALUES(11,'targeted-ai-review-2026-09-29')")
         .execute(pool).await.unwrap();
     reader_storage_postgres::upgrade_schema(pool, std::num::NonZeroU32::new(50).unwrap())
         .await
         .unwrap();
     reader_storage_postgres::verify_schema(pool).await.unwrap();
+    super::rating_reason_upgrade::verify(pool).await;
     binary_roundtrip(pool).await;
 }
 

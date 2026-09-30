@@ -1,3 +1,4 @@
+import type { CompleteReading } from "../api/focusedReading";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type {
   ApiClient,
@@ -186,14 +187,19 @@ export function useReaderController(
     return request;
   };
 
-  const update = (
+  const mutate = (
     id: string,
     patch: Partial<Pick<Article, "read" | "later">>,
-  ) => {
+    save?: () => Promise<Pick<Article, "read">>,
+  ): Promise<void> => {
     const before = articlesRef.current.find((item) => item.id === id);
-    if (!before || !workspaceId || bulkLock.current) return;
+    if (!before || !workspaceId || bulkLock.current)
+      return Promise.reject(
+        new Error("Article unavailable or another update is pending."),
+      );
     const mutationKeys = Object.keys(patch).map((key) => `${id}:${key}`);
-    if (mutationKeys.some((key) => pending.current.has(key))) return;
+    if (mutationKeys.some((key) => pending.current.has(key)))
+      return Promise.reject(new Error("Article update is already pending."));
     writeVersion.current++;
     mutationKeys.forEach((key) => pending.current.add(key));
     setPendingArticleMutations(new Set(pending.current));
@@ -214,7 +220,9 @@ export function useReaderController(
     const previous = mutationQueue.current.get(id) ?? Promise.resolve();
     const request = previous
       .catch(() => undefined)
-      .then(() => client.updateArticle(requestWorkspace, id, patch))
+      .then(() =>
+        save ? save() : client.updateArticle(requestWorkspace, id, patch),
+      )
       .then((saved) => {
         if (scope === epoch.current)
           setArticles((items) =>
@@ -225,7 +233,7 @@ export function useReaderController(
                     ...Object.fromEntries(
                       Object.keys(patch).map((key) => [
                         key,
-                        saved[key as keyof typeof patch],
+                        saved[key as keyof typeof saved],
                       ]),
                     ),
                   }
@@ -234,7 +242,7 @@ export function useReaderController(
           );
       })
       .catch((error: Error) => {
-        if (scope !== epoch.current) return;
+        if (scope !== epoch.current) throw error;
         if (scope === epoch.current)
           setArticles((items) =>
             items.map((item) =>
@@ -252,10 +260,10 @@ export function useReaderController(
             ),
           );
         setUnreadTotal((total) => total - unreadDelta);
-        announce(error.message);
+        throw error;
       })
       .finally(() => {
-        inFlightWrites.current.delete(request);
+        inFlightWrites.current.delete(tracked);
         if (scope !== epoch.current) return;
         mutationKeys.forEach((key) => pending.current.delete(key));
         setPendingArticleMutations((keys) => {
@@ -267,8 +275,22 @@ export function useReaderController(
           mutationQueue.current.delete(id);
       });
     mutationQueue.current.set(id, request);
-    inFlightWrites.current.add(request);
+    const tracked = request.catch(() => {});
+    inFlightWrites.current.add(tracked);
+    return request;
   };
+  const update = (
+    id: string,
+    patch: Partial<Pick<Article, "read" | "later">>,
+  ) => {
+    void mutate(id, patch).catch((error: Error) => announce(error.message));
+  };
+  const completeReading = (id: string, command: CompleteReading) =>
+    mutate(id, { read: true }, async () => {
+      const result = await client.reading.complete(workspaceId, id, command);
+      return { read: result.state.read };
+    });
+  const markReadWithoutRating = (id: string) => mutate(id, { read: true });
   const open = (id: string) => {
     setSelectedId(id);
     writeSelectedArticle(id, workspaceId);
@@ -573,6 +595,8 @@ export function useReaderController(
     update,
     loadPage,
     markAllRead,
+    completeReading,
+    markReadWithoutRating,
     replaceWorkspace,
     waitForWrites,
     refreshFullText,

@@ -19,6 +19,7 @@ pub(crate) use chat_document::backfill_public_views;
 mod definitions;
 mod quarantine;
 mod translations;
+mod unchecked;
 
 pub const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS ai_definitions (
@@ -841,6 +842,9 @@ impl AiStore for PostgresAiStore {
         update: CallUpdate,
     ) -> Result<(), AiError> {
         calls::update(&self.pool, claim, id, update).await
+    }
+    async fn finish_unchecked(&self, claim: &ClaimedChat) -> Result<bool, AiError> {
+        unchecked::finish(&self.pool, claim).await
     }
     async fn update_claim(
         &self,

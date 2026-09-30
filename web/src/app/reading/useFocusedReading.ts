@@ -25,6 +25,11 @@ export function useFocusedReading(
 ) {
   const [article, setArticle] = useState<Article | null>(null);
   const [state, setState] = useState<ReadingState | null>(null);
+  const [reason, setReasonValue] = useState("");
+  const [draftError, setDraftError] = useState("");
+  const reasonDrafts = useRef(new Map<string, string>());
+  const reasonKey = (id: string) =>
+    `reading-reason:${owner}:${workspace}:${id}`;
   const [score, setScore] = useState<number | null>(null);
   const [busy, setBusy] = useState("Loading article");
   const [error, setError] = useState("");
@@ -57,6 +62,13 @@ export function useFocusedReading(
     );
   const selectUrl = (id: string | null, replace = false) => {
     const query = new URLSearchParams({ workspace });
+    if (new URLSearchParams(location.search).get("from") === "digest") {
+      query.set("from", "digest");
+      const subscription = new URLSearchParams(location.search).get(
+        "digestSubscription",
+      );
+      if (subscription) query.set("digestSubscription", subscription);
+    }
     if (id) query.set("article", id);
     else query.set("done", "1");
     const next = `/reading?${query}`;
@@ -85,6 +97,8 @@ export function useFocusedReading(
     setArticle(null);
     setState(null);
     setScore(null);
+    setReasonValue("");
+    setDraftError("");
     setDone(false);
     setUncertain(false);
     let disposed = false;
@@ -113,12 +127,24 @@ export function useFocusedReading(
         if (disposed || token !== epoch.current) return;
         setArticle(item);
         setState(read);
+        const key = reasonKey(id);
+        try {
+          setReasonValue(
+            reasonDrafts.current.get(key) ?? sessionStorage.getItem(key) ?? "",
+          );
+        } catch {
+          setReasonValue(reasonDrafts.current.get(key) ?? "");
+          setDraftError(
+            "This browser cannot retain your explanation after reload. Save it before leaving.",
+          );
+        }
         // Each visit requires a deliberate selection; a previous rating is shown
         // separately so a late load cannot enable completion under a repeat click.
         setScore(null);
         if (pending.current?.article === id) {
           setUncertain(true);
           setScore(pending.current.command.rating);
+          setReasonValue(pending.current.command.reason ?? "");
           setError(
             "The previous save needs confirmation. Retry uses the same operation.",
           );
@@ -163,9 +189,25 @@ export function useFocusedReading(
     const nextArticle = remaining.current.shift();
     if (token === epoch.current) selectUrl(nextArticle?.id ?? null);
   };
+  const setReason = (value: string) => {
+    if (!article || lock.current || uncertain) return;
+    setReasonValue(value);
+    const key = reasonKey(article.id);
+    reasonDrafts.current.set(key, value);
+    try {
+      sessionStorage.setItem(key, value);
+      setDraftError("");
+    } catch {
+      setDraftError(
+        "This browser cannot retain your explanation after reload. Save it before leaving.",
+      );
+    }
+  };
   const complete = () =>
     run("Saving rating", async (token) => {
       if (!article || !state || score === null) return;
+      if (reason.includes("\0"))
+        throw Error("Explanation cannot contain U+0000.");
       const request =
         pending.current?.article === article.id
           ? pending.current
@@ -175,6 +217,7 @@ export function useFocusedReading(
                 operationId: crypto.randomUUID(),
                 expectedRevision: state.revision,
                 rating: score,
+                reason: reason === "" ? null : reason,
               },
             };
       pending.current = request;
@@ -208,6 +251,14 @@ export function useFocusedReading(
       });
       setUndo(result.undone ? null : result);
       setState(result.state);
+      const key = reasonKey(article.id);
+      reasonDrafts.current.delete(key);
+      try {
+        sessionStorage.removeItem(key);
+      } catch {
+        /* The committed server copy is authoritative. */
+      }
+      setReasonValue("");
       if (result.undone) {
         setScore(result.state.rating ?? null);
         return;
@@ -256,6 +307,9 @@ export function useFocusedReading(
     state,
     score,
     setScore,
+    reason,
+    setReason,
+    draftError,
     busy,
     error,
     done,

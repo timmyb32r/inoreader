@@ -55,6 +55,53 @@ pub async fn verify(
                 .execute(pool).await.unwrap();
         }
     }
+
+    // The digest selects unread articles across the entire source, not just a feed batch.
+    let unread_request = |subscription| {
+        reader_application::ArticlePageRequest::new(
+            reader_application::ArticleScope::SubscriptionUnread(subscription),
+            None,
+            reader_application::ArticlePageDirection::Older,
+            reader_application::SelectionLimit::new(50).unwrap(),
+        )
+        .unwrap()
+    };
+    let selected = repository
+        .article_summary_page(workspace, unread_request(subscriptions[0].id()))
+        .await
+        .unwrap();
+    assert_eq!(selected.total, 1);
+    assert_eq!(
+        selected.articles.len(),
+        1,
+        "duplicate origins must not duplicate an article"
+    );
+    assert_eq!(selected.articles[0].article.id, articles[0].id);
+    assert!(repository
+        .article_summary_page(foreign, unread_request(subscriptions[0].id()))
+        .await
+        .unwrap()
+        .articles
+        .is_empty());
+    let mut read = articles[0].clone();
+    read.state.read = true;
+    read.revision += 1;
+    repository
+        .save_article(workspace, Some(articles[0].revision), read.clone())
+        .await
+        .unwrap();
+    assert!(repository
+        .article_summary_page(workspace, unread_request(subscriptions[0].id()))
+        .await
+        .unwrap()
+        .articles
+        .is_empty());
+    read.state.read = false;
+    read.revision += 1;
+    repository
+        .save_article(workspace, Some(read.revision - 1), read)
+        .await
+        .unwrap();
     let days = repository
         .source_activity(workspace, "UTC", range)
         .await
@@ -105,6 +152,13 @@ pub async fn verify(
     boundary.revision += 1;
     repository
         .save_article(workspace, Some(boundary.revision - 1), boundary)
+        .await
+        .unwrap();
+    // Remove this check's read event before the shared bulk-read assertions.
+    sqlx::query("DELETE FROM article_read_events WHERE workspace_id=$1 AND article_id=$2")
+        .bind(workspace.as_uuid().to_string())
+        .bind(articles[0].id.as_uuid().to_string())
+        .execute(pool)
         .await
         .unwrap();
     // Remove fixture provenance so subsequent bulk-read checks retain their setup.

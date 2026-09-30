@@ -4,6 +4,8 @@ use tokio::sync::Notify;
 
 #[path = "ai_review.rs"]
 mod review;
+#[path = "ai_unchecked.rs"]
+mod unchecked;
 
 enum Step {
     Text(&'static str),
@@ -181,7 +183,7 @@ pub(super) async fn verify(
             owner,
             ModelPreferences {
                 summary: DeepSeekModel::Pro,
-                verification: DeepSeekModel::Pro,
+                verification: Some(DeepSeekModel::Pro),
             },
         )
         .await
@@ -291,7 +293,7 @@ pub(super) async fn verify(
             owner,
             ModelPreferences {
                 summary: DeepSeekModel::Flash,
-                verification: DeepSeekModel::Pro,
+                verification: Some(DeepSeekModel::Pro),
             },
         )
         .await
@@ -648,5 +650,6 @@ pub(super) async fn verify(
             .await,
         Err(AiError::Cancelled)
     ));
+    unchecked::verify(pool, store.clone(), owner, ws, article).await;
     review::verify(pool, store, owner, ws, article).await;
 }

@@ -14,7 +14,6 @@ test("toolbar has consistent neutral controls and stable toggle/press styles in 
     }),
   );
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Close chat" }).click();
   const toolbar = page.locator(".reader-toolbar");
   const summarize = toolbar.getByRole("button", { name: "Summarize" });
   const terms = toolbar.getByRole("button", { name: "Terms" });

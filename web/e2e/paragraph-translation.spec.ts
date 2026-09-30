@@ -91,7 +91,6 @@ test("paragraph translation preserves article geometry and links, deduplicates c
     return route.fulfill({ json: wireFixture([]) });
   });
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Close chat" }).click();
   const content = page.locator(".article-content"),
     paragraph = content.locator("p").first(),
     following = content.locator("p").nth(1),
@@ -268,7 +267,6 @@ for (const target of [
       return route.fulfill({ json: wireFixture([]) });
     });
     await page.goto("/reader");
-    await page.getByRole("button", { name: "Close chat" }).click();
     const block = page.locator(".reader-body").locator(target),
       following = page.locator(".article-content p"),
       toolbar = page.locator(".reader-toolbar");

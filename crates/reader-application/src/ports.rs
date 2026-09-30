@@ -225,6 +225,7 @@ pub trait ArticleRepository: Send + Sync {
                                         .is_some_and(|at| at >= period.start() && at < period.end())
                             })
                     }
+                    ArticleScope::SubscriptionUnread(_) => !value.article.state.read,
                     ArticleScope::Later => value.article.state.later,
                     _ => true,
                 }

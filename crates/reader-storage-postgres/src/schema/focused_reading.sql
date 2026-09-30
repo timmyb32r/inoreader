@@ -4,7 +4,8 @@
 CREATE TABLE article_ratings (
  article_key TEXT PRIMARY KEY REFERENCES articles(id) DEFERRABLE INITIALLY DEFERRED,
  rating SMALLINT NOT NULL CHECK(rating BETWEEN 1 AND 10),
- rated_at TIMESTAMPTZ NOT NULL
+ rated_at TIMESTAMPTZ NOT NULL,
+ reason TEXT
 );
 -- Exact commands and outcomes retain replay/undo evidence; no cascading deletion.
 CREATE TABLE reading_completions (

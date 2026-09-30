@@ -23,7 +23,7 @@ const chat = (articleId: string): ArticleChat => ({
     },
   ],
 });
-test("article selection automatically opens its saved chat after closing the previous one, without generating again or shifting controls", async ({
+test("article selection keeps the widget closed; Summarize opens its saved chat without generation or layout shift", async ({
   page,
 }) => {
   await page.route("**/api/articles?*", async (route) => {
@@ -62,6 +62,8 @@ test("article selection automatically opens its saved chat after closing the pre
   await page.goto("/reader");
   const list = page.locator(".article-list");
   const chatPanel = page.getByRole("dialog", { name: /Article chat/ });
+  await expect(chatPanel).toBeHidden();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(
     page.getByText("Prepared summary for 1", { exact: true }),
   ).toBeVisible();
@@ -73,6 +75,8 @@ test("article selection automatically opens its saved chat after closing the pre
       exact: true,
     })
     .click();
+  await expect(chatPanel).toBeHidden();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(
     page.getByText("Prepared summary for 2", { exact: true }),
   ).toBeVisible();
@@ -201,6 +205,7 @@ for (const state of ["failed", "pending"] as const) {
       return route.fulfill({ json: chat("2") });
     });
     await page.goto("/reader");
+    await page.getByRole("button", { name: "Summarize", exact: true }).click();
     await expect(
       page.getByRole("dialog", { name: /Article chat/ }),
     ).toBeVisible();
@@ -226,6 +231,10 @@ for (const state of ["failed", "pending"] as const) {
         exact: true,
       })
       .click();
+    await expect(
+      page.getByRole("dialog", { name: /Article chat/ }),
+    ).toBeHidden();
+    await page.getByRole("button", { name: "Summarize", exact: true }).click();
     await expect(
       page.getByRole("dialog", { name: /Article chat/ }),
     ).toBeVisible();

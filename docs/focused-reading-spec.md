@@ -211,3 +211,87 @@
   текущей статьи из базы; frontend не округляет дату для курсора.
 - Проверки: `tests/support/focused_reading.rs` в PostgreSQL Docker acceptance,
   доменные тесты `reader-application` и `web/e2e/focused-reading.spec.ts`.
+
+## Пояснение к оценке — 2026-09-30
+
+Выбран вариант 3: **Read & next** после выбора числа открывает отдельное окно
+«Почему N из 10?». Статья ещё не помечена прочитанной. Поле пояснения
+необязательное; **Save & next** подтверждает оценку, пояснение и завершение
+чтения одной транзакцией. «Назад к статье», крестик и Escape закрывают окно без
+записи на сервер. Во время сохранения закрытие и повторная отправка блокируются.
+
+Черновик пояснения хранится в текущей вкладке отдельно для account/workspace/article
+и переживает закрытие окна и обновление страницы. Следующая статья получает своё
+пустое поле. Пустое поле означает отсутствие пояснения (`null`); пробелы, переводы
+строк и Unicode непустого текста сохраняются как введены, без trim или пересказа.
+Недоступность browser storage отображается явно; текст остаётся в памяти и может
+быть сохранён на сервер. U+0000 отклоняется на границе конструктора/API, поскольку
+его не поддерживает PostgreSQL TEXT. Другого отдельного лимита на поле нет; общий
+настроенный лимит HTTP body продолжает действовать.
+
+При неопределённом результате сохраняется исходная команда, включая пояснение:
+повтор использует тот же operation ID и тот же текст. До подтверждения результата
+редактирование блокируется. Undo восстанавливает предыдущие оценку, пояснение и
+время, сохраняя квитанцию отменённой операции. При конфликте с более новой версией
+отмена не перезаписывает чужие изменения.
+
+Схема 13 добавляет nullable `article_ratings.reason`. Существующие оценки получают
+отсутствие пояснения; исторические квитанции не переписываются. Пояснение есть и в
+текущем ReadingState, и в исходной команде/результате reading_completions вместе с
+владельцем, статьёй, оценкой, временем и признаком отмены. Это материал для будущего
+обучения; обучение и новое ранжирование этой функцией не запускаются.
+
+## Дайджест подписок — 2026-09-30
+
+Выбран вариант 1 нового режима `/digest`: источник → список карточек, готовый
+пересказ слева, оценка 1–10 и необязательное пояснение справа. В Feed кнопка
+Reading mode открывает дайджест; One by one сохраняет прежний `/reading`.
+
+Используется текущая курсорная подборка непрочитанных Feed (до 50 статей по
+существующему API). Подпись явно показывает размер подборки; счётчики групп
+относятся только к ней. Группы следуют первому появлению в подборке; внутри них
+сохраняется порядок Feed. Статья нескольких подписок показывается один раз,
+по первой subscription ID, как источник обычного reader. Для сохранённой статьи
+без подписки используется её исходное имя источника. Общие итоги по всем статьям
+подписки здесь не изображаются. Новее/Старее используют серверные курсоры;
+URL и Back/Forward сохраняют позицию подборки.
+
+Существующие пересказы загружаются только при приближении карточек к видимой
+области. Вход, прокрутка и обновление пересказа выполняют исключительно GET и не
+создают платных запросов или продвижения очереди. У превью фиксированная высота
+и явная подпись; «Весь пересказ» открывает полный неизменённый Markdown в модале.
+Нет fulltext/пересказа — показывается соответствующее отсутствие, исходный excerpt
+не подменяет пересказ. «Читать и обсудить» открывает существующий режим с чатом;
+выход из него возвращает к дайджесту.
+
+Оценка обязательна для действия «Прочитано». Число и пояснение сохраняются
+существующим атомарным endpoint с revision и operationId. Общая форма
+ArticleFeedback используется также обычным Mark read; в дайджесте нет действия
+«без оценки». Account/workspace/article-черновики и неопределённые операции
+используют тот же формат, поэтому переход между режимами не теряет ввод.
+Карточка после успеха остаётся на месте с отметкой; явное обновление подборки
+исключает уже прочитанные. Во время записи заблокированы повтор, редактирование,
+пагинация и обновление. Возврат в Feed обновляет его данные и счётчик.
+
+
+### Selected subscription digest (variant 2, supersedes batch grouping)
+The digest shows a source navigation list and unread posts for one selected
+subscription. `subscription-unread` is an explicit article scope requiring a
+subscription ID, retaining workspace authorization, pagination and origin-based
+membership. Duplicate origins do not duplicate articles. Empty sources remain
+selectable. Counts in the navigation are the workspace subscription snapshot;
+the content status reports the live selection total.
+URL selection survives reload and browser navigation; switching source resets
+its cursor and retains per-article rating drafts. Opening focused discussion and
+returning retains the selected subscription. Summary preview and rating controls
+are stacked across the card width. No new AI requests are created by the digest.
+
+
+### Complete inline summaries and source ordering
+Sources with zero unread articles are hidden; visible sources are sorted by
+unread count descending. The default is the first source in that ordering.
+Complete saved summaries are loaded with four concurrent GET workers before
+publishing the page, so rating controls cannot move when text arrives. A failed
+GET leaves an explicit card-level error; refreshing the selection retries it.
+There is no clipped preview or separate full-summary modal. All text remains
+inline, with the page itself scrolling. No AI generation is triggered.

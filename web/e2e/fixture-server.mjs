@@ -137,6 +137,17 @@ createServer(async (request, response) => {
           (item) => url.pathname === `/api/articles/${item.id}`,
         ),
       );
+    if (
+      /^\/api\/articles\/[^/]+\/reading$/.test(url.pathname) &&
+      request.method === "GET"
+    )
+      return json(response, 200, {
+        revision: "0",
+        read: false,
+        rating: null,
+        ratedAt: null,
+        reason: null,
+      });
     if (/\/api\/articles\/[^/]+\/state/.test(url.pathname)) {
       const patch = await body(request);
       const item = articles.find((value) => url.pathname.includes(value.id));

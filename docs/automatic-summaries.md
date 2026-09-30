@@ -16,11 +16,10 @@ historical conversations are retained; the latest is reopened, never regenerated
 The selected summary model produces a complete preview; the independently selected
 fact-check model checks it. Both default to Flash.
 Review replaces the preview without changing scroll position or active targets.
-Opening a post with ready full text opens that article's chat and promotes its queued work.
-Pending or failed full text never opens a chat, hides the preceding article's
-chat, and disables Summarize. Once full text becomes ready, automatic opening
-becomes eligible.
-Closing it affects that article only; the next selection opens its own chat.
+In ordinary Reader, selecting a post does not open a chat or promote work. Summarize
+explicitly opens the saved conversation. Pending or failed full text disables
+Summarize. Changing articles or returning from focused reading closes the floating
+widget. Focused reading still loads the saved chat in its dedicated assistant pane.
 Other pages and modal settings hide the chat. Follow-up questions stay in it.
 
 `automatic_attempts` (production 3) and `automatic_retry_seconds` (production 60)
@@ -70,7 +69,7 @@ restored-copy rehearsal. Queue and ledger are included in backup/restore tests.
 Tests cover concurrent admission, account isolation, idempotent settlement,
 unknown reservations, Moscow rollover, no calls while deferred, single unread
 backfill, new arrivals, complete automatic two-stage execution and reuse. Browser
-coverage checks automatic switching, closing/reopening, stable targets, existing
+coverage checks explicit opening and article switching, closing/reopening, stable targets, existing
 translation/wiki flows, preview replacement and per-mode graph data.
 
 ## Date-specific limit exceptions (schema 9)

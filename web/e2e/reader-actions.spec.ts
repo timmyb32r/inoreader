@@ -12,6 +12,7 @@ test("browser tab follows Feed unread count and clears it on Home", async ({
     .locator(".reader-toolbar")
     .getByRole("button", { name: "Mark read", exact: true })
     .click();
+  await page.getByRole("button", { name: "Без оценки", exact: true }).click();
   await expect(feed).not.toHaveText(initial);
   await expect(page).toHaveTitle(`${await feed.innerText()} · Reader`);
   await page.getByRole("button", { name: "Home", exact: true }).click();

@@ -13,7 +13,10 @@ pub(super) fn interrupt(view: &mut ArticleChat) {
     }
 }
 
-async fn fenced(tx: &mut Transaction<'_, Postgres>, claim: &ClaimedChat) -> Result<bool, AiError> {
+pub(super) async fn fenced(
+    tx: &mut Transaction<'_, Postgres>,
+    claim: &ClaimedChat,
+) -> Result<bool, AiError> {
     sqlx::query_scalar("SELECT COALESCE(lease=$2 AND lease_until>now() AND status IN ('queued','waiting_content','generating','verifying'),false) FROM ai_chats WHERE id=$1")
         .bind(claim.record.view.id).bind(claim.lease).fetch_one(&mut **tx).await.map_err(storage)
 }

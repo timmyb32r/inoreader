@@ -201,16 +201,24 @@ export function DeepSeekProfile({
             <label key={stage}>
               {stage === "summary" ? "Summary model" : "Fact-check model"}
               <AutofillResistantSelect
-                value={models[stage]}
+                value={models[stage] ?? "off"}
                 disabled={!!pending || !profile}
                 onChange={(event) => {
                   const value = event.currentTarget.value;
-                  if (value === "deepseek-flash" || value === "deepseek-v4-pro")
+                  if (stage === "verification" && value === "off")
+                    setModels({ ...models, verification: null });
+                  else if (
+                    value === "deepseek-flash" ||
+                    value === "deepseek-v4-pro"
+                  )
                     setModels({ ...models, [stage]: value });
                 }}
               >
                 <option value="deepseek-flash">DeepSeek Flash · cheaper</option>
                 <option value="deepseek-v4-pro">DeepSeek Pro</option>
+                {stage === "verification" && (
+                  <option value="off">Off · no fact-check</option>
+                )}
               </AutofillResistantSelect>
             </label>
           ))}
@@ -245,7 +253,8 @@ export function DeepSeekProfile({
         <p>
           Applies to the next request, including queued summaries. Running
           requests and saved summaries stay unchanged. Chat replies use the
-          summary model.
+          summary model. Select Off to use the first summary without a second,
+          paid fact-check request.
         </p>
       </div>
       <div class="ai-balance">

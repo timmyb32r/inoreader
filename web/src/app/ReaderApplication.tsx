@@ -1,3 +1,4 @@
+import { ReadingDigest } from "./reading/ReadingDigest";
 import { FocusedReading } from "./reading/FocusedReading";
 import { SourceActivityPage } from "./SourceActivityPage";
 import { PanelDock } from "../ui/PanelDock";
@@ -5,6 +6,7 @@ import { readPeriodForDay } from "./readPeriod";
 import { SearchApplication } from "../search/SearchApplication";
 import { CountdownTimer } from "./timer/CountdownTimer";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { MarkReadDialog } from "./reading/MarkReadDialog";
 import { ArticleChatWidget } from "../ai/ArticleChatWidget";
 import { ZhihuProfile } from "../profile/ZhihuProfile";
 import { DeepSeekProfile } from "../ai/DeepSeekProfile";
@@ -192,31 +194,23 @@ export function ReaderApplication({
     )
       glossary.close();
   }, [selected?.id]);
-  const automaticTarget = useRef("");
   useEffect(() => {
-    if (locationPath !== "/reader") {
-      automaticTarget.current = "";
-      return;
+    if (locationPath === "/reader") chat.hide();
+  }, [locationPath, selected?.id, workspaceId]);
+  const readingLayout = readerPath === "/reading" || readerPath === "/digest";
+  const [ratingTarget, setRatingTarget] = useState<string | null>(null);
+  useEffect(() => {
+    if (locationPath !== "/reader" || !selected) return;
+    try {
+      const saved = sessionStorage.getItem(
+        `mark-read-feedback:${account.id}:${workspaceId}:${selected.id}`,
+      );
+      if (saved && JSON.parse(saved).pending) setRatingTarget(selected.id);
+    } catch {
+      /* A user-triggered dialog reports unavailable or invalid draft storage. */
     }
-    if (!selected || selected.fullText !== "ready" || !aiProfile?.configured) {
-      automaticTarget.current = "";
-      return;
-    }
-    const identity = `${workspaceId}/${selected.id}`;
-    if (automaticTarget.current === identity) return;
-    automaticTarget.current = identity;
-    void chat.open({
-      articleId: selected.id,
-      workspaceId,
-      title: selected.title,
-    });
-  }, [
-    locationPath,
-    workspaceId,
-    selected?.id,
-    selected?.fullText,
-    aiProfile?.configured,
-  ]);
+  }, [locationPath, workspaceId, selected?.id, account.id]);
+
   const subscriptionCommands = useSubscriptionCommands(
     client,
     account.id,
@@ -345,7 +339,7 @@ export function ReaderApplication({
   return (
     <div class={`app theme-${theme}`} data-theme={theme}>
       <header class="topbar">
-        {readerPath !== "/reading" && (
+        {!readingLayout && (
           <button
             class="mobile-menu icon-button"
             aria-label="Open navigation"
@@ -429,10 +423,10 @@ export function ReaderApplication({
         </div>
       </header>
       <main
-        class={`reader-grid${readerPath === "/reading" ? " reader-grid--focused" : ""}${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" || readerPath === "/source-activity" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
+        class={`reader-grid${readingLayout ? " reader-grid--focused" : ""}${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" || readerPath === "/source-activity" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
       >
         <>
-          {readerPath !== "/reading" && (
+          {!readingLayout && (
             <ReaderSidebar
               key={`${account.id}/${workspaceId}`}
               {...{
@@ -474,7 +468,22 @@ export function ReaderApplication({
               onRefresh={subscriptionCommands.refresh}
             />
           )}
-          {readerPath === "/reading" ? (
+          {readerPath === "/digest" ? (
+            <ReadingDigest
+              key={`${account.id}/${workspaceId}`}
+              client={client}
+              owner={account.id}
+              workspace={workspaceId}
+              subscriptions={subscriptions}
+              navigate={navigate}
+              onExit={() => {
+                navigate(
+                  `/reader?workspace=${encodeURIComponent(workspaceId)}`,
+                );
+                void loadPage("feed", null);
+              }}
+            />
+          ) : readerPath === "/reading" ? (
             <FocusedReading
               key={`${account.id}/${workspaceId}`}
               client={client}
@@ -486,6 +495,14 @@ export function ReaderApplication({
               navigate={navigate}
               announce={announce}
               onExit={(articleId) => {
+                if (
+                  new URLSearchParams(location.search).get("from") === "digest"
+                ) {
+                  navigate(
+                    `/digest?${new URLSearchParams({ workspace: workspaceId, subscription: new URLSearchParams(location.search).get("digestSubscription") ?? "" })}`,
+                  );
+                  return;
+                }
                 navigate(
                   `/reader?${new URLSearchParams({ workspace: workspaceId, ...(articleId ? { article: articleId } : {}) })}`,
                 );
@@ -589,7 +606,10 @@ export function ReaderApplication({
                   onOpenSubscription={(id) =>
                     navigate(`/subscriptions/${encodeURIComponent(id)}`)
                   }
-                  onUpdate={(patch) => update(selected.id, patch)}
+                  onUpdate={(patch) => {
+                    if (patch.read === true) setRatingTarget(selected.id);
+                    else update(selected.id, patch);
+                  }}
                   onRefresh={() => reader.refreshFullText(selected.id)}
                   onNotice={announce}
                   summaryPending={!!chat.busy}
@@ -611,6 +631,18 @@ export function ReaderApplication({
           )}
         </>
       </main>
+      {ratingTarget && (
+        <MarkReadDialog
+          key={`${account.id}:${workspaceId}:${ratingTarget}`}
+          client={client}
+          owner={account.id}
+          workspace={workspaceId}
+          article={ratingTarget}
+          onClose={() => setRatingTarget(null)}
+          onSave={(command) => reader.completeReading(ratingTarget, command)}
+          onSkip={() => reader.markReadWithoutRating(ratingTarget)}
+        />
+      )}
       {subscriptionRoute && (
         <SubscriptionsPage
           onOpenWiki={navigate}
@@ -772,7 +804,7 @@ export function ReaderApplication({
           }}
         />
       )}
-      {readerPath !== "/reading" && (
+      {!readingLayout && (
         <PanelDock
           active={
             !!glossary.target &&

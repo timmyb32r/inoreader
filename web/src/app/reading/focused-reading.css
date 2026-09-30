@@ -7,7 +7,7 @@
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) 116px;
+  grid-template-rows: 86px minmax(0, 1fr) 116px;
   background: var(--surface);
   color: var(--text);
 }
@@ -149,7 +149,7 @@
   border-radius: 0;
   box-shadow: none;
 }
-.glossary-panel--embedded > header {
+.focused-reading__assistant .glossary-panel--embedded > header {
   display: none;
 }
 .focused-reading__footer {
@@ -274,7 +274,7 @@
 }
 @media (max-width: 760px) {
   .focused-reading {
-    grid-template-rows: 44px minmax(0, 1fr) 172px;
+    grid-template-rows: 86px minmax(0, 1fr) 172px;
   }
   .focused-reading__header {
     padding-inline: 12px;

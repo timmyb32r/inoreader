@@ -850,7 +850,7 @@ fn model_preferences_are_closed_and_default_to_flash() {
         ModelPreferences::default(),
         ModelPreferences {
             summary: DeepSeekModel::Flash,
-            verification: DeepSeekModel::Flash
+            verification: Some(DeepSeekModel::Flash)
         }
     );
     for bad in [
@@ -862,7 +862,7 @@ fn model_preferences_are_closed_and_default_to_flash() {
     }
     let preferences = ModelPreferences {
         summary: DeepSeekModel::Pro,
-        verification: DeepSeekModel::Flash,
+        verification: None,
     };
     assert_eq!(
         serde_json::from_str::<ModelPreferences>(&serde_json::to_string(&preferences).unwrap())

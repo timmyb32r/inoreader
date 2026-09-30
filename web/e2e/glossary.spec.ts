@@ -150,7 +150,6 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
     return route.fulfill({ json: wireFixture([]) });
   });
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Close chat" }).click();
   const trigger = page.getByRole("button", { name: "Terms", exact: true });
   const before = await trigger.boundingBox();
   await trigger.click();

@@ -50,6 +50,12 @@ pub async fn verify(pool: &PgPool) {
         operation_id: Uuid::new_v4(),
         expected_revision: before.revision,
         rating: ArticleRating::try_from(8).unwrap(),
+        reason: Some(
+            reader_application::RatingReason::try_from(
+                "  Полезно: CDC 中文 🦆\r\nНо нет замеров.  ".to_owned(),
+            )
+            .unwrap(),
+        ),
     };
     let (first, repeated) = tokio::join!(
         repository.complete_reading(owner.id, workspace.id(), article.id, command.clone()),
@@ -59,6 +65,23 @@ pub async fn verify(pool: &PgPool) {
     assert_eq!(result, repeated.unwrap());
     assert!(result.state.read);
     assert_eq!(result.state.rating, Some(command.rating));
+    assert_eq!(result.state.reason, command.reason);
+    assert_eq!(
+        repository
+            .reading_state(owner.id, workspace.id(), article.id)
+            .await
+            .unwrap()
+            .reason,
+        command.reason
+    );
+    let mut different_reason = command.clone();
+    different_reason.reason = None;
+    assert!(matches!(
+        repository
+            .complete_reading(owner.id, workspace.id(), article.id, different_reason)
+            .await,
+        Err(RepositoryError::Conflict)
+    ));
     let saved = repository
         .article(workspace.id(), article.id)
         .await
@@ -90,6 +113,7 @@ pub async fn verify(pool: &PgPool) {
     assert!(undone.undone);
     assert!(!undone.state.read);
     assert_eq!(undone.state.rating, None);
+    assert_eq!(undone.state.reason, None);
     assert_eq!(
         undone,
         repository
@@ -113,6 +137,9 @@ pub async fn verify(pool: &PgPool) {
         operation_id: Uuid::new_v4(),
         expected_revision: undone.state.revision,
         rating: ArticleRating::try_from(9).unwrap(),
+        reason: Some(
+            reader_application::RatingReason::try_from("Previous explanation".to_owned()).unwrap(),
+        ),
     };
     repository
         .complete_reading(owner.id, workspace.id(), article.id, second.clone())
@@ -155,6 +182,7 @@ pub async fn verify(pool: &PgPool) {
         operation_id: Uuid::new_v4(),
         expected_revision: ReadingRevision::new(0).unwrap(),
         rating: command.rating,
+        reason: command.reason.clone(),
     };
     assert!(matches!(
         repository
@@ -171,6 +199,7 @@ pub async fn verify(pool: &PgPool) {
         operation_id: Uuid::new_v4(),
         expected_revision: prior.revision,
         rating: ArticleRating::try_from(2).unwrap(),
+        reason: None,
     };
     repository
         .complete_reading(owner.id, workspace.id(), article.id, third.clone())
@@ -181,6 +210,7 @@ pub async fn verify(pool: &PgPool) {
         .await
         .unwrap();
     assert_eq!(undo.state.rating, prior.rating);
+    assert_eq!(undo.state.reason, prior.reason);
     assert_eq!(undo.state.rated_at, prior.rated_at);
     // Foreign owner with an identical public source cannot read/mutate these results.
     let foreign = AccountRecord {
@@ -249,6 +279,7 @@ pub async fn verify(pool: &PgPool) {
         operation_id: Uuid::new_v4(),
         expected_revision: ReadingRevision::new(0).unwrap(),
         rating: command.rating,
+        reason: command.reason.clone(),
     };
     assert!(repository
         .complete_reading(owner.id, workspace.id(), other.id, failing.clone())
@@ -303,4 +334,23 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     assert!(tx.commit().await.is_err());
     assert!(repository.article(workspace.id(), other.id).await.is_ok());
+    assert_eq!(
+        repository
+            .reading_state(owner.id, workspace.id(), other.id)
+            .await
+            .unwrap()
+            .reason,
+        command.reason
+    );
+    let retained: String =
+        sqlx::query_scalar("SELECT document FROM reading_completions WHERE owner=$1 AND id=$2")
+            .bind(owner.id.as_uuid().to_string())
+            .bind(command.operation_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&retained).unwrap()["command"]["reason"],
+        serde_json::to_value(&command.reason).unwrap()
+    );
 }

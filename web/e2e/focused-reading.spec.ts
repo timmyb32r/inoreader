@@ -23,6 +23,7 @@ async function fixture(page: Page) {
     read: false,
     rating: null as number | null,
     ratedAt: null as string | null,
+    reason: null as string | null,
   }));
   const chat = (id: string) => ({
     id: `chat-${id}`,
@@ -139,11 +140,13 @@ async function fixture(page: Page) {
             revision: String(Number(states[i].revision) + 1),
             read: true,
             rating: command.rating,
+            reason: command.reason,
             ratedAt: "2026-09-29T12:00:00Z",
           };
           articles[i].read = true;
           receipts.set(command.operationId, {
             previous,
+            command,
             result: {
               operationId: command.operationId,
               articleId: match[1],
@@ -217,6 +220,13 @@ const heading = (page: Page) =>
   page.locator(".focused-reading .reader-body h1");
 const next = (page: Page) =>
   page.getByRole("button", { name: "Read & next →", exact: true });
+const reasonDialog = (page: Page) =>
+  page.getByRole("dialog", { name: /^Почему \d+ из 10\?$/ });
+const save = (page: Page) =>
+  reasonDialog(page).getByRole("button", {
+    name: "Save & next →",
+    exact: true,
+  });
 const rate = (page: Page, value: number) =>
   page.getByRole("button", { name: `Rate ${value} out of 10`, exact: true });
 
@@ -225,7 +235,7 @@ test("dedicated mode requires rating, keeps geometry, completes once, resets sco
 }) => {
   const f = await fixture(page);
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Reading mode", exact: true }).click();
+  await page.getByRole("button", { name: "One by one", exact: true }).click();
   await expect(heading(page)).toHaveText("Article 1");
   await expect(
     page.getByText("Prepared summary for 1", { exact: true }),
@@ -249,6 +259,7 @@ test("dedicated mode requires rating, keeps geometry, completes once, resets sco
   ).toEqual(composer);
   const release = f.hold();
   await next(page).click();
+  await save(page).click();
   await expect(next(page)).toBeDisabled();
   await expect(next(page)).toHaveAttribute("aria-busy", "true");
   expect(await next(page).boundingBox()).toEqual(before);
@@ -277,19 +288,25 @@ test("lost response survives reload and replays the identical completion instead
   await rate(page, 7).click();
   f.loseNext();
   await next(page).click();
-  await expect(
-    page.getByRole("button", { name: "Retry saving", exact: true }),
-  ).toBeEnabled();
+  const reason = "  Полезные примеры CDC\nНо без замеров.  ";
+  await reasonDialog(page).getByRole("textbox").fill(reason);
+  await save(page).click();
+  await expect(page.locator(".focused-reading__next")).toBeEnabled();
   expect(f.receipts.size).toBe(1);
   await page.reload();
-  await expect(
-    page.getByRole("button", { name: "Retry saving", exact: true }),
-  ).toBeEnabled();
-  await page.getByRole("button", { name: "Retry saving", exact: true }).click();
+  await expect(page.locator(".focused-reading__next")).toBeEnabled();
+  await page.locator(".focused-reading__next").click();
+  await expect(reasonDialog(page).getByRole("textbox")).toHaveValue(reason);
+  await expect(reasonDialog(page).getByRole("textbox")).toBeDisabled();
+  await reasonDialog(page)
+    .getByRole("button", { name: "Retry saving", exact: true })
+    .click();
   await expect(heading(page)).toHaveText("Article 2");
   expect(f.calls.complete).toBe(2);
   expect(f.receipts.size).toBe(1);
   expect(f.states[0].revision).toBe("1");
+  expect(f.states[0].reason).toBe(reason);
+  expect([...f.receipts.values()][0].command.reason).toBe(reason);
 });
 
 test("drafts follow their article, browser history is read-only, and no-fulltext article hides the chat", async ({
@@ -304,6 +321,7 @@ test("drafts follow their article, browser history is read-only, and no-fulltext
     .fill("My unsent question");
   await rate(page, 6).click();
   await next(page).click();
+  await save(page).click();
   await expect(heading(page)).toHaveText("Article 2");
   await expect(
     page.getByRole("textbox", { name: "Message DeepSeek" }),
@@ -337,6 +355,7 @@ test("next-load failure retains committed rating; undo conflicts are explicit; n
   expect(await next(page).boundingBox()).toEqual(before);
   f.failNext(true);
   await next(page).click();
+  await save(page).click();
   await expect(
     page.getByText("Next article unavailable", { exact: true }),
   ).toBeVisible();
@@ -372,9 +391,7 @@ test("keyboard rating does not commit on exit; queue end keeps undo and desktop/
   await page.keyboard.press("Enter");
   await expect(rate(page, 6)).toHaveAttribute("aria-pressed", "true");
   expect(f.calls.complete).toBe(0);
-  await page
-    .getByRole("button", { name: "← Back to Feed", exact: true })
-    .click();
+  await page.getByRole("button", { name: "← Back", exact: true }).click();
   await expect(page).toHaveURL(/\/reader\?/);
   expect(f.articles[2].read).toBe(false);
   expect(f.states[2].rating).toBe(null);
@@ -395,6 +412,7 @@ test("keyboard rating does not commit on exit; queue end keeps undo and desktop/
   expect(await next(page).boundingBox()).toEqual(bounds);
   await rate(page, 4).click();
   await next(page).click();
+  await save(page).click();
   await expect(
     page.getByRole("heading", { name: "All caught up" }),
   ).toBeVisible();
@@ -414,6 +432,7 @@ test("a previous rating is visible but cannot enable a second completion under a
   await page.goto("/reading?workspace=ws&article=1");
   await rate(page, 7).click();
   await next(page).click();
+  await save(page).click();
   await expect(heading(page)).toHaveText("Article 2");
   await expect(
     page.getByText("Previous rating: 8/10 · choose a rating to finish.", {
@@ -592,4 +611,94 @@ test("Summary is the complete chat: sending a question keeps summary, question a
   await expect(
     page.getByRole("tab", { name: "Discussion", exact: true }),
   ).toHaveCount(0);
+});
+
+test("reason confirmation retains exact draft on cancel/reload, saves once with stable controls and clears for next article", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/reading?workspace=ws&article=1");
+  await rate(page, 8).click();
+  const footer = await next(page).boundingBox();
+  await next(page).click();
+  const dialog = reasonDialog(page),
+    field = dialog.getByRole("textbox");
+  await expect(dialog).toBeVisible();
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute("autocomplete", "none");
+  await expect(field).toHaveCSS("resize", "none");
+  await expect(field).toHaveCSS("font-size", "16px");
+  expect(f.calls.complete).toBe(0);
+  const reason = "  Практичный CDC 中文 🦆\nНе хватает сравнения стоимости.  ";
+  const submit = await save(page).boundingBox();
+  await field.fill(reason);
+  expect(await next(page).boundingBox()).toEqual(footer);
+  expect(await save(page).boundingBox()).toEqual(submit);
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(next(page)).toBeFocused();
+  expect(f.articles[0].read).toBe(false);
+  await next(page).click();
+  await expect(field).toHaveValue(reason);
+  await dialog.getByRole("button", { name: "Назад к статье" }).click();
+  await page.reload();
+  await rate(page, 8).click();
+  await next(page).click();
+  await expect(field).toHaveValue(reason);
+  const before = await save(page).boundingBox();
+  const release = f.hold();
+  await save(page).dblclick();
+  await expect(save(page)).toHaveAttribute("aria-busy", "true");
+  await expect(field).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Close dialog" }),
+  ).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeVisible();
+  expect(await save(page).boundingBox()).toEqual(before);
+  expect(await next(page).boundingBox()).toEqual(footer);
+  expect(f.calls.complete).toBe(1);
+  release();
+  await expect(heading(page)).toHaveText("Article 2");
+  await expect(dialog).toHaveCount(0);
+  expect(f.states[0].reason).toBe(reason);
+  await rate(page, 5).click();
+  await next(page).click();
+  await expect(field).toHaveValue("");
+  await save(page).click();
+  await expect(heading(page)).toHaveText("Article 3");
+  expect(f.states[1].reason).toBeNull();
+  await page.getByRole("button", { name: "Undo last read" }).click();
+  await expect(heading(page)).toHaveText("Article 2");
+  expect(f.states[1].reason).toBeNull();
+});
+
+test("narrow reason dialog does not overlap the initiating button; failure keeps draft and fixed targets", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const f = await fixture(page);
+  await page.goto("/reading?workspace=ws&article=1");
+  await rate(page, 3).click();
+  const footer = await next(page).boundingBox();
+  await next(page).click();
+  const dialog = reasonDialog(page),
+    field = dialog.getByRole("textbox");
+  const before = await save(page).boundingBox();
+  expect(before!.y + before!.height).toBeLessThan(footer!.y);
+  expect(await next(page).boundingBox()).toEqual(footer);
+  await field.fill("Не хватает технических деталей.");
+  f.states[0].revision = "9";
+  await save(page).click();
+  await expect(
+    dialog.getByText("Article changed in another tab", { exact: true }),
+  ).toBeVisible();
+  expect(await save(page).boundingBox()).toEqual(before);
+  expect(await next(page).boundingBox()).toEqual(footer);
+  await expect(field).toHaveValue("Не хватает технических деталей.");
+  await expect(field).toBeEnabled();
+  expect(f.articles[0].read).toBe(false);
+  await page.screenshot({ path: "/tmp/rating-reason-mobile.png" });
+  await dialog.getByRole("button", { name: "Назад к статье" }).click();
+  await expect(next(page)).toBeFocused();
 });

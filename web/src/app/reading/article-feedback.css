@@ -1,0 +1,109 @@
+.reading-reason {
+  padding: 20px 24px 24px;
+}
+.reading-reason__label {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.reading-reason__label > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.modal .reading-reason textarea {
+  display: block;
+  width: 100%;
+  height: 128px;
+  resize: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 12px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.reading-reason__status {
+  display: block;
+  height: 44px;
+  overflow: auto;
+  padding-block: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.reading-reason__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.reading-reason__actions button {
+  height: 40px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+.reading-reason__save {
+  position: relative;
+  min-width: 142px;
+}
+.reading-reason__save[aria-busy="true"] > span:first-child {
+  opacity: 0;
+}
+.reading-reason__actions button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+@media (max-width: 420px) {
+  .reading-reason {
+    padding: 16px;
+  }
+  .reading-reason__actions {
+    gap: 8px;
+  }
+  .reading-reason__actions button {
+    padding: 0 10px;
+  }
+  .reading-reason__save {
+    min-width: 128px;
+  }
+}
+
+.mark-read-rating {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.mark-read-rating button {
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+}
+.mark-read-rating button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+.mark-read-rating button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+@media (max-width: 420px) {
+  .mark-read-rating {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.reading-reason__pending {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}

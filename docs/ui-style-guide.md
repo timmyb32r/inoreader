@@ -101,9 +101,10 @@ the title, excerpt and full rendered body once full text is ready. Its pending,
 success and error states preserve toolbar geometry. On narrow screens Summarize
 and Terms retain their accessible names but show icons to keep all actions visible.
 
-Article selection opens its persisted DeepSeek chat automatically. Chat remains a
-fixed overlay and is hidden beneath settings and outside Reader. Every article
-selection reopens its own conversation; no regeneration control is offered.
+The ordinary Reader opens its persisted DeepSeek chat only via Summarize. Article
+selection and returning from focused reading leave the floating widget closed.
+Chat remains a fixed overlay and is hidden beneath settings and outside Reader;
+no regeneration control is offered.
 DeepSeek spending reserves a fixed-height 30-day plot and summary region; mode
 segments use semantic colors, and exact-value hover cards are overlays. Unknown
 billing is a separate reservation, never rendered as known zero spending.
@@ -115,7 +116,9 @@ Once displayed, its 128px region remains reserved when cleared or loading;
 article rows show the matching read time separately from source dates.
 
 DeepSeek settings reserve two native shared model selectors and a fixed-size Save
-models control. Both start at Flash. Saving immediately locks both selectors and
+models control. Both start at Flash; the fact-check selector also offers Off.
+Off publishes the first completed summary with a “not fact-checked” label and
+keeps follow-up chat available. It also applies to queued retained drafts. Saving immediately locks both selectors and
 shows a spinner within the existing button; success/error use the existing fixed
 status area. Refreshing usage must not overwrite unsaved selections.
 
@@ -141,3 +144,44 @@ A fixed footer holds the explicit personal-value rating (1–10), Read & next an
 a permanently reserved status/recovery row. Selecting a score changes only
 color/border inside a stable box. Pending completion disables repeat activation;
 next article starts without a selected score unless it already has a saved rating.
+
+The rating explanation uses a centered shared modal after Read & next. Opening it
+never marks the article read. The optional protected textarea is 128px high, the
+status region 44px and both actions 40px; pending and error states keep those
+footprints. Save & next locks the textarea, dismissal and repeat submission with
+an immediate spinner. Escape/Back/close restore focus to the reading footer and
+retain the account/article-scoped draft. Modal actions stay above the initiating
+footer button on narrow screens so a repeat click cannot confirm unexpectedly.
+
+Explicit Mark read outside focused reading opens an optional rating/explanation
+modal. Skip is available only with empty feedback; selecting a score enables Save.
+Closing does not mark read and retains the article-scoped draft. Pending writes
+lock dismissal, ratings and text; retry reuses the exact receipt. The ten scores
+wrap into two fixed rows on narrow screens. Existing automatic read-on-open and
+bulk mark-read behavior stay unchanged.
+
+Subscription digest (`/digest`) uses a fixed source navigation column and one
+selected subscription's unread articles. On mobile the source selector is a
+fixed-height horizontally scrolling strip. Cards display complete saved summaries
+above inline rating and explanation fields. Saved summaries load before the page
+becomes interactive, preventing late text from moving rating controls. Header,
+status and footer dimensions remain stable. Source changes reset pagination, preserve drafts, and
+write the selection into the URL. Saved cards remain until explicit refresh.
+Sources with zero unread articles are hidden; others sort by descending unread
+count. Loading never generates a paid summary.
+
+Feed reading entry uses the approved first variant: solid teal Reading mode and
+outlined One by one, with source/book icons, matching 40px height and 8px spacing.
+The pair wraps as a stable second header row when the list container is at most
+540px wide. Hover, focus and press never change button geometry.
+
+Digest cards expose Open original as a shared outlined external-link icon in the
+upper-right metadata row. It opens the article URL in a separate tab and does
+not mark the article read or change its feedback. The metadata row reserves its
+height and the action cannot shrink on narrow screens.
+
+Both reading surfaces share ReadingBackButton and the reading-navigation header:
+86px header, 100×40px outlined “← Back” at the left, 24px desktop / 16px narrow
+horizontal inset. Destination remains owned by the caller: digest returns to Feed;
+focused discussion returns to its originating digest, standalone focus to Feed.
+Header geometry and control appearance are identical on both surfaces.

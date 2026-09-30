@@ -29,12 +29,13 @@ impl ReadPeriod {
     }
 }
 
-/// Closed selection: a subscription id is required only for subscription history.
+/// Closed selection: a subscription id is required for subscription history and unread subscription selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArticleScope {
     Feed,
     Later,
     Subscription(SubscriptionId),
+    SubscriptionUnread(SubscriptionId),
 }
 impl ArticleScope {
     pub fn from_wire(
@@ -44,13 +45,14 @@ impl ArticleScope {
         match (view, subscription) {
             ("feed", None) => Ok(Self::Feed),
             ("later", None) => Ok(Self::Later),
+            ("subscription-unread", Some(id)) => Ok(Self::SubscriptionUnread(id)),
             ("subscription", Some(id)) => Ok(Self::Subscription(id)),
             _ => Err("invalid article scope: subscription history requires a subscription; Feed and Read later are workspace views"),
         }
     }
     pub fn subscription(self) -> Option<SubscriptionId> {
         match self {
-            Self::Subscription(id) => Some(id),
+            Self::Subscription(id) | Self::SubscriptionUnread(id) => Some(id),
             _ => None,
         }
     }

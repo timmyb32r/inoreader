@@ -48,3 +48,33 @@ fn completion_requires_rating_and_rejects_extra_fields() {
     raw["read"] = serde_json::json!(true);
     assert!(serde_json::from_value::<CompleteReading>(raw).is_err());
 }
+
+#[test]
+fn rating_reason_preserves_authored_text_and_rejects_unstorable_nul() {
+    for raw in ["", "  ", "  CDC 中文 🦆\r\nбез замеров  "] {
+        let value = RatingReason::try_from(raw.to_owned()).unwrap();
+        assert_eq!(value.as_str(), raw);
+        let roundtrip: RatingReason =
+            serde_json::from_str(&serde_json::to_string(&value).unwrap()).unwrap();
+        assert_eq!(roundtrip, value);
+        assert_eq!(String::from(value), raw);
+    }
+    assert!(RatingReason::try_from("a\0b".to_owned()).is_err());
+    assert!(serde_json::from_str::<RatingReason>(r#""a\u0000b""#).is_err());
+    let mut raw = serde_json::json!({"operationId":Uuid::new_v4(),"expectedRevision":"0","rating":7,"reason":null});
+    assert!(serde_json::from_value::<CompleteReading>(raw.clone())
+        .unwrap()
+        .reason
+        .is_none());
+    raw["reason"] = serde_json::json!("  exactly as typed\n");
+    assert_eq!(
+        serde_json::from_value::<CompleteReading>(raw.clone())
+            .unwrap()
+            .reason
+            .unwrap()
+            .as_str(),
+        "  exactly as typed\n"
+    );
+    raw["reason"] = serde_json::json!("bad\0text");
+    assert!(serde_json::from_value::<CompleteReading>(raw).is_err());
+}

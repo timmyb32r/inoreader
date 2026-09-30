@@ -34,6 +34,41 @@ impl From<ArticleRating> for u8 {
     }
 }
 
+/// User-authored explanation, retained exactly (including whitespace and line
+/// breaks). Absence is represented by Option::None on the command/state; no
+/// explanation is inferred from a score. U+0000 cannot be stored in PostgreSQL
+/// TEXT and is rejected at construction/deserialization, never stripped.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct RatingReason(String);
+impl RatingReason {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+impl TryFrom<String> for RatingReason {
+    type Error = &'static str;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.contains('\0') {
+            return Err("rating explanation cannot contain U+0000");
+        }
+        Ok(Self(value))
+    }
+}
+impl From<RatingReason> for String {
+    fn from(value: RatingReason) -> Self {
+        value.0
+    }
+}
+impl schemars::JsonSchema for RatingReason {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "RatingReason".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({"type":"string"})
+    }
+}
+
 /// Exact decimal wire revision: avoids JavaScript integer precision loss. Fits PG BIGINT.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(try_from = "String", into = "String")]
@@ -76,6 +111,7 @@ pub struct ReadingState {
     pub read: bool,
     pub rating: Option<ArticleRating>,
     pub rated_at: Option<DateTime<Utc>>,
+    pub reason: Option<RatingReason>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -83,6 +119,7 @@ pub struct CompleteReading {
     pub operation_id: Uuid,
     pub expected_revision: ReadingRevision,
     pub rating: ArticleRating,
+    pub reason: Option<RatingReason>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -534,6 +534,10 @@ pub trait AiStore: Send + Sync {
         id: Uuid,
         update: CallUpdate,
     ) -> Result<(), AiError>;
+    /// Atomically publish a retained, validated draft only when fact-check is
+    /// currently disabled. Returns false when enabled, without changing state.
+    /// Requires the active lease and a completed generation; makes no paid call.
+    async fn finish_unchecked(&self, claim: &ClaimedChat) -> Result<bool, AiError>;
     async fn update_claim(
         &self,
         claim: &ClaimedChat,

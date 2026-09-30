@@ -625,7 +625,7 @@ pub async fn verify(pool: &PgPool) {
             owner,
             ModelPreferences {
                 summary: DeepSeekModel::Pro,
-                verification: DeepSeekModel::Flash,
+                verification: Some(DeepSeekModel::Flash),
             },
         )
         .await

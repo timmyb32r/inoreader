@@ -63,7 +63,9 @@ export function ArticleListPanel({
       class={`article-list ${view === "feed" && (readPeriod || showReadFilter) ? "article-list--history" : ""} panel-mobile-${mobilePanel === "list" ? "show" : "hide"}`}
       aria-label="Article list"
     >
-      <header class="list-header">
+      <header
+        class={`list-header ${view === "feed" ? "list-header--reading" : ""}`}
+      >
         <div class="list-header__title">
           {selectedSubscription ? (
             <a
@@ -97,17 +99,32 @@ export function ArticleListPanel({
         </div>
         <div class="list-header__tools">
           {view === "feed" && !readPeriod && (
-            <button
-              class="text-button"
-              disabled={paging || markingAll || unreadTotal === 0}
-              onClick={() =>
-                navigate(
-                  `/reading?${new URLSearchParams({ workspace: reader.workspaceId, ...(selected && !selected.read ? { article: selected.id } : {}) })}`,
-                )
-              }
-            >
-              Reading mode
-            </button>
+            <>
+              <button
+                class="primary-button reading-entry"
+                disabled={paging || markingAll || unreadTotal === 0}
+                onClick={() =>
+                  navigate(
+                    `/digest?workspace=${encodeURIComponent(reader.workspaceId)}`,
+                  )
+                }
+              >
+                <Icon name="feed" size={17} />
+                Reading mode
+              </button>
+              <button
+                class="secondary-button reading-entry"
+                disabled={paging || markingAll || unreadTotal === 0}
+                onClick={() =>
+                  navigate(
+                    `/reading?${new URLSearchParams({ workspace: reader.workspaceId, ...(selected && !selected.read ? { article: selected.id } : {}) })}`,
+                  )
+                }
+              >
+                <Icon name="book" size={17} />
+                One by one
+              </button>
+            </>
           )}
           <button
             class="icon-button"

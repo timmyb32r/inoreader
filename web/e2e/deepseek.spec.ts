@@ -173,6 +173,7 @@ test("chat drag, response, collapse and viewport resize keep reader/composer tar
 }) => {
   const state = await fixture(page);
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const summarize = page.getByRole("button", {
     name: "Summarize",
     exact: true,
@@ -316,12 +317,13 @@ test("profile key saving and balance updates preserve controls and never store t
   expect(storage).not.toContain("test-ui-secret");
 });
 
-test("article switching follows the selected chat; reopening preserves stopped work", async ({
+test("manual chat opening follows article selection and preserves stopped work", async ({
   page,
 }) => {
   const state = await fixture(page);
   state.status = "waiting_content";
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const first = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -333,6 +335,7 @@ test("article switching follows the selected chat; reopening preserves stopped w
   await expect(first.getByRole("status")).toContainText("Stopped");
   await first.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("heading", { name: "Article B", level: 2 }).click();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const second = page.getByRole("dialog", {
     name: "Article chat: Article B",
     exact: true,
@@ -340,11 +343,13 @@ test("article switching follows the selected chat; reopening preserves stopped w
   await expect(second).toBeVisible();
   await second.getByRole("button", { name: "Close chat" }).click();
   await page.getByRole("heading", { name: "Article A", level: 2 }).click();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(first.getByRole("status")).toContainText("Stopped");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
   ).toHaveLength(2);
   await page.reload();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(first.getByRole("status")).toContainText("Stopped");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
@@ -371,6 +376,7 @@ test("lost message acknowledgements retain one operation and stable controls unt
     return route.fulfill({ json: wireFixture(state.versions[0]) });
   });
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -436,6 +442,9 @@ test("closing Profile during key save still enables the account when saving comp
   await profile.getByRole("button", { name: "Done", exact: true }).click();
   state.hold = false;
   await expect(profile).not.toBeVisible();
+  await expect.poll(() => state.profile.enabled).toBe(true);
+  await chat.getByRole("button", { name: "Close chat" }).click();
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await expect(chat.getByRole("status")).toContainText("Writing summary");
   expect(
     state.mutations.filter((call) => call.path.endsWith("/chat")),
@@ -466,6 +475,7 @@ test("early summary is readable while checking; final replacement preserves read
   };
   state.versions.push(current);
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -583,6 +593,7 @@ test("failed verification keeps the preview; retry and stop give immediate feedb
     await route.fulfill({ json: wireFixture(current) });
   });
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -652,6 +663,7 @@ test("verification cannot replace selected text until the reader releases the se
     ],
   });
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", {
     name: "Article chat: Article A",
     exact: true,
@@ -793,6 +805,25 @@ test("independent model choices persist with immediate pending and stable geomet
   await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
   await expect(summary).toHaveValue("deepseek-v4-pro");
   await expect(checker).toHaveValue("deepseek-flash");
+  await checker.selectOption("off");
+  const offBefore = await save.boundingBox();
+  state.hold = true;
+  await save.dblclick();
+  await expect(
+    profile.getByRole("button", { name: "Saving…", exact: true }),
+  ).toHaveAttribute("aria-busy", "true");
+  await expect(checker).toBeDisabled();
+  expect(
+    state.mutations.filter((v) => v.path === "/api/ai/models"),
+  ).toHaveLength(2);
+  state.hold = false;
+  await expect(save).toBeVisible();
+  expect(await save.boundingBox()).toEqual(offBefore);
+  expect(state.profile.models.verification).toBeNull();
+  await page.reload();
+  await page.getByRole("button", { name: "Account menu" }).click();
+  await page.getByRole("menuitem", { name: "Profile", exact: true }).click();
+  await expect(checker).toHaveValue("off");
   await checker.selectOption("deepseek-v4-pro");
   await save.click();
   await expect(save).toBeDisabled();
@@ -835,6 +866,7 @@ test("summary and terms share one draggable frame without losing chat state", as
     }),
   );
   await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
   const chat = page.getByRole("dialog", { name: "Article chat: Article A" });
   await expect(chat).toBeVisible();
   await page.getByRole("button", { name: "Terms", exact: true }).click();
@@ -868,4 +900,24 @@ test("summary and terms share one draggable frame without losing chat state", as
   await terms.getByRole("button", { name: /Закрыть/ }).click();
   await expect(chat).toBeVisible();
   await expect(chat).toContainText("Kafka");
+});
+
+test("unchecked completed summaries stay visibly unchecked and support chat", async ({
+  page,
+}) => {
+  const state = await fixture(page);
+  const chat = exampleChat();
+  chat.messages[0].phase = "generating";
+  state.versions = [chat];
+  state.status = "completed";
+  await page.goto("/reader");
+  await page.getByRole("button", { name: "Summarize", exact: true }).click();
+  await expect(
+    page.getByText("Summary · not fact-checked", { exact: true }),
+  ).toBeVisible();
+  const composer = page.getByLabel("Message DeepSeek");
+  await composer.fill("Explain");
+  await expect(
+    page.getByRole("button", { name: "Send", exact: true }),
+  ).toBeEnabled();
 });

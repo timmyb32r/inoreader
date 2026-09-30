@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 #[path = "support/focused_reading.rs"]
 mod focused_reading;
+#[path = "support/rating_reason_upgrade.rs"]
+mod rating_reason_upgrade;
 
 #[path = "support/search_content.rs"]
 mod search_content;

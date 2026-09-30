@@ -68,7 +68,6 @@ test("translation traverses real HTTP, worker and PostgreSQL, retains failure an
     },
   ]);
   await page.goto("/reader");
-  await page.getByRole("button", { name: "Close chat" }).click();
   const toggle = page.getByRole("button", {
     name: "Translate paragraphs",
     exact: true,
@@ -90,7 +89,6 @@ test("translation traverses real HTTP, worker and PostgreSQL, retains failure an
   await expect(panel).toHaveAttribute("aria-busy", "true");
   await expect(panel).toContainText("Точный исходный текст.");
   await page.reload();
-  await page.getByRole("button", { name: "Close chat" }).click();
   await page
     .getByRole("button", { name: "Translate paragraphs", exact: true })
     .click();

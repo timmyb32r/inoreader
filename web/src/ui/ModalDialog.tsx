@@ -8,16 +8,20 @@ export function ModalDialog({
   children,
   onClose,
   width = "520px",
+  closeDisabled = false,
 }: {
   title: string;
   description?: string;
   children: ComponentChildren;
   onClose: () => void;
   width?: string;
+  closeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
-  closeRef.current = onClose;
+  closeRef.current = () => {
+    if (!closeDisabled) onClose();
+  };
   const titleId = useId();
   const descriptionId = useId();
   useLayoutEffect(() => {
@@ -73,7 +77,9 @@ export function ModalDialog({
     <div
       class="modal-layer"
       role="presentation"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      onMouseDown={(event) =>
+        event.target === event.currentTarget && closeRef.current()
+      }
     >
       <div
         class="modal"
@@ -94,7 +100,8 @@ export function ModalDialog({
           <button
             class="icon-button"
             aria-label="Close dialog"
-            onClick={onClose}
+            disabled={closeDisabled}
+            onClick={() => closeRef.current()}
           >
             <Icon name="close" />
           </button>

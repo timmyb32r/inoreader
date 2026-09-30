@@ -6,7 +6,7 @@ import {
   type ArticleChat,
 } from "../api/ai";
 import { ApiError } from "../api/client";
-import { hasVerifiedSummary, lastAssistant } from "./chatPresentation";
+import { hasCompletedSummary, lastAssistant } from "./chatPresentation";
 
 export type ChatTarget = {
   articleId: string;
@@ -263,7 +263,7 @@ export function useArticleChat(
   const send = () => {
     if (
       !chat ||
-      !hasVerifiedSummary(chat) ||
+      !hasCompletedSummary(chat) ||
       !draft.trim() ||
       !profile?.enabled ||
       isChatActive(chat) ||
@@ -337,6 +337,7 @@ export function useArticleChat(
     completedGeneration,
     open,
     close,
+    hide: () => setVisible(false),
     send,
     retry,
     stop,

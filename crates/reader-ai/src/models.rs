@@ -23,11 +23,27 @@ impl DeepSeekModel {
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelPreferences {
     pub summary: DeepSeekModel,
-    pub verification: DeepSeekModel,
+    /// Explicit null disables the second request. Omission is invalid. Changes
+    /// apply at phase admission; an already admitted checker may finish.
+    #[cfg_attr(
+        feature = "schema",
+        schemars(required, schema_with = "verification_schema")
+    )]
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub verification: Option<DeepSeekModel>,
+}
+
+impl Default for ModelPreferences {
+    fn default() -> Self {
+        Self {
+            summary: DeepSeekModel::Flash,
+            verification: Some(DeepSeekModel::Flash),
+        }
+    }
 }
 
 /// Both tariffs are mandatory, valid-by-construction CostRates. No unknown
@@ -64,4 +80,9 @@ impl CallModel {
     pub fn rates(&self) -> &CostRates {
         &self.rates
     }
+}
+
+#[cfg(feature = "schema")]
+fn verification_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    generator.subschema_for::<Option<DeepSeekModel>>()
 }

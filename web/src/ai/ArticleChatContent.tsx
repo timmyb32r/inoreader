@@ -7,7 +7,7 @@ import { CopyButton } from "../ui/CopyButton";
 import { ChatMarkdown } from "./ChatMarkdown";
 import {
   chatProgress,
-  hasVerifiedSummary,
+  hasCompletedSummary,
   lastAssistant,
   messagePlaceholder,
   visibleMessageContent,
@@ -35,7 +35,7 @@ export function ArticleChatContent({
     !controller.retryable && chat && lastAssistant(chat)?.phase === "verifying"
       ? "Retry verification"
       : "Retry";
-  const summaryReady = hasVerifiedSummary(chat);
+  const summaryReady = hasCompletedSummary(chat);
   const canSend =
     summaryReady &&
     !!profile?.enabled &&
@@ -104,7 +104,9 @@ export function ArticleChatContent({
                       ? "You"
                       : message.purpose === "summary"
                         ? message.status === "complete"
-                          ? "Summary"
+                          ? message.phase === "generating"
+                            ? "Summary · not fact-checked"
+                            : "Summary"
                           : content
                             ? "Summary · not yet checked"
                             : "Summary"

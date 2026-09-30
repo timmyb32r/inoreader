@@ -3481,3 +3481,53 @@ button[aria-busy] {
 .article-list--history .article-scroll {
   flex: 1;
 }
+
+/* Reading entry actions share geometry; narrow list panes use two stable rows. */
+.article-list {
+  container-type: inline-size;
+}
+.list-header--reading {
+  gap: 16px;
+}
+.list-header--reading .list-header__tools {
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.list-header--reading .reading-entry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+.list-header--reading .reading-entry:active:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--accent-deep);
+}
+@container (max-width: 540px) {
+  .list-header--reading {
+    height: 126px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 10px;
+    padding-block: 12px;
+  }
+  .list-header--reading .list-header__title {
+    flex: 0 0 auto;
+    height: auto;
+  }
+  .list-header--reading .list-header__tools {
+    margin-left: 0;
+  }
+  .list-header--reading .list-header__tools > .icon-button {
+    margin-left: auto;
+  }
+}

@@ -334,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 12;
-pub const RELEASE: &str = "focused-reading-2026-09-29";
+pub const VERSION: i64 = 13;
+pub const RELEASE: &str = "rating-reasons-2026-09-30";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -376,7 +376,7 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let models: bool = sqlx::query_scalar("SELECT to_regclass('ai_model_preferences') IS NOT NULL AND to_regclass('ai_call_models') IS NOT NULL AND to_regclass('ai_budget_overrides') IS NOT NULL").fetch_one(pool).await?;
     let organization: bool = sqlx::query_scalar("SELECT to_regclass('wiki_favorites') IS NOT NULL AND to_regclass('wiki_subscription_roots') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='wiki_pages' AND column_name='parent')").fetch_one(pool).await?;
     let reviews: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='ai_call_responses' AND column_name IN ('id','owner','content','system_prompt')").fetch_one(pool).await?;
-    let focused: bool = sqlx::query_scalar("SELECT count(*)=7 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='article_ratings' AND column_name IN ('article_key','rating','rated_at')) OR (table_name='reading_completions' AND column_name IN ('owner','id','article_key','document')))").fetch_one(pool).await?;
+    let focused: bool = sqlx::query_scalar("SELECT count(*)=8 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='article_ratings' AND column_name IN ('article_key','rating','rated_at','reason')) OR (table_name='reading_completions' AND column_name IN ('owner','id','article_key','document')))").fetch_one(pool).await?;
     if !focused
         || !organization
         || !models
@@ -418,6 +418,7 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
             && previous != (9, "ai-model-preferences-2026-09-29".into())
             && previous != (10, "wiki-organization-2026-09-29".into())
             && previous != (11, "targeted-ai-review-2026-09-29".into())
+            && previous != (12, "focused-reading-2026-09-29".into())
         {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
@@ -445,7 +446,15 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         if previous.0 < 11 {
             install_ai_reviews(&mut transaction).await?;
         }
-        install_focused_reading(&mut transaction).await?;
+        if previous.0 < 12 {
+            install_focused_reading(&mut transaction).await?;
+        } else {
+            // Existing ratings/receipts are untouched: no authored explanation
+            // existed before this feature. NULL records that absence explicitly.
+            sqlx::query("ALTER TABLE article_ratings ADD COLUMN reason TEXT")
+                .execute(&mut *transaction)
+                .await?;
+        }
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
