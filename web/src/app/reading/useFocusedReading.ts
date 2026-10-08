@@ -1,3 +1,4 @@
+import { useReadingSession } from "./useReadingSession";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { ApiError, type ApiClient } from "../../api/client";
 import type { Article } from "../../api/viewModels";
@@ -31,13 +32,17 @@ export function useFocusedReading(
   const reasonKey = (id: string) =>
     `reading-reason:${owner}:${workspace}:${id}`;
   const [score, setScore] = useState<number | null>(null);
+  const [abstain, setAbstain] = useState(false);
+  const [departing, setDeparting] = useState(false);
   const [busy, setBusy] = useState("Loading article");
   const [error, setError] = useState("");
+  const [commitFailures, setCommitFailures] = useState<string[]>([]);
   const [done, setDone] = useState(false);
   const [undo, setUndo] = useState<ReadingCompletion | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [url, setUrl] = useState(currentUrl);
   const [reload, setReload] = useState(0);
+  const session = useReadingSession(owner, workspace);
   const epoch = useRef(0),
     lock = useRef(false),
     pending = useRef<Pending>();
@@ -61,7 +66,12 @@ export function useFocusedReading(
       currentUrl(),
     );
   const selectUrl = (id: string | null, replace = false) => {
-    const query = new URLSearchParams({ workspace });
+    const query = new URLSearchParams(location.search);
+    query.set("workspace", workspace);
+    query.delete("article");
+    query.delete("done");
+    if (new URLSearchParams(location.search).get("from") === "smart")
+      query.set("from", "smart");
     if (new URLSearchParams(location.search).get("from") === "digest") {
       query.set("from", "digest");
       const subscription = new URLSearchParams(location.search).get(
@@ -94,9 +104,12 @@ export function useFocusedReading(
     lock.current = false;
     setBusy("Loading article");
     setError("");
+    setCommitFailures([]);
     setArticle(null);
     setState(null);
     setScore(null);
+    setAbstain(false);
+    setDeparting(false);
     setReasonValue("");
     setDraftError("");
     setDone(false);
@@ -104,17 +117,27 @@ export function useFocusedReading(
     let disposed = false;
     void (async () => {
       try {
+        if (session.error) throw Error(session.error);
         const snapshot = saved();
         pending.current = snapshot.pending;
         setUndo(snapshot.undo ?? null);
         const q = new URL(url, location.origin).searchParams;
-        if (q.get("done") === "1") {
+        if (
+          q.get("done") === "1" ||
+          (session.enabled && session.progress.finished)
+        ) {
           setDone(true);
+          setBusy("");
           return;
         }
         let id = q.get("article");
         if (!id) {
-          const page = await client.listArticles(workspace, "feed");
+          const page =
+            session.random || (session.enabled && session.mode === "random")
+              ? await client.interests.random(workspace, session.seed)
+              : q.get("from") === "smart" || session.enabled
+                ? await client.interests.feed(workspace)
+                : await client.listArticles(workspace, "feed");
           if (disposed) return;
           id = page.articles[0]?.id ?? null;
           selectUrl(id, true);
@@ -143,7 +166,8 @@ export function useFocusedReading(
         setScore(null);
         if (pending.current?.article === id) {
           setUncertain(true);
-          setScore(pending.current.command.rating);
+          setScore(pending.current.command.rating ?? null);
+          setAbstain(pending.current.command.rating === null);
           setReasonValue(pending.current.command.reason ?? "");
           setError(
             "The previous save needs confirmation. Retry uses the same operation.",
@@ -181,6 +205,23 @@ export function useFocusedReading(
     }
   };
   const next = async (id: string, token: number) => {
+    if (
+      new URLSearchParams(location.search).get("from") === "smart" ||
+      session.random ||
+      session.enabled
+    ) {
+      const progress = session.enabled ? session.advance() : null;
+      if (progress?.finished) {
+        selectUrl(null);
+        return;
+      }
+      const page =
+        session.random || progress?.mode === "random"
+          ? await client.interests.random(workspace, session.seed)
+          : await client.interests.feed(workspace);
+      if (token === epoch.current) selectUrl(page.articles[0]?.id ?? null);
+      return;
+    }
     if (!remaining.current.length) {
       const page = await client.reading.next(workspace, id);
       if (token !== epoch.current) return;
@@ -205,7 +246,7 @@ export function useFocusedReading(
   };
   const complete = () =>
     run("Saving rating", async (token) => {
-      if (!article || !state || score === null) return;
+      if (!article || !state || (score === null && !abstain)) return;
       if (reason.includes("\0"))
         throw Error("Explanation cannot contain U+0000.");
       const request =
@@ -264,7 +305,52 @@ export function useFocusedReading(
         return;
       }
       setArticle({ ...article, read: true });
-      await next(article.id, token);
+      setDeparting(true);
+      // The original leaves inside a fixed viewport; controls never move. The
+      // read receipt is committed first, so a failed save never animates away.
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+        await new Promise<void>((resolve) => setTimeout(resolve, 240));
+      try {
+        if (token === epoch.current) await next(article.id, token);
+      } finally {
+        if (token === epoch.current) setDeparting(false);
+      }
+    });
+  const completeCommits = (ids: string[]) =>
+    run("Помечаю коммиты прочитанными", async (token) => {
+      if (!article || !ids.length) return;
+      setCommitFailures([]);
+      const failures: string[] = [];
+      let index = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(4, ids.length) }, async () => {
+          while (token === epoch.current && index < ids.length) {
+            const id = ids[index++];
+            try {
+              await client.updateArticle(workspace, id, { read: true });
+            } catch {
+              failures.push(id);
+            }
+          }
+        }),
+      );
+      if (token !== epoch.current) return;
+      if (failures.length) {
+        setCommitFailures(failures);
+        throw Error(
+          `Не удалось отметить ${failures.length} коммитов. Сохранённые отметки не потеряны; повторите действие.`,
+        );
+      }
+      remaining.current = [];
+      setState(await client.reading.state(workspace, article.id));
+      setDeparting(true);
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches)
+        await new Promise<void>((resolve) => setTimeout(resolve, 240));
+      try {
+        if (token === epoch.current) await next(article.id, token);
+      } finally {
+        if (token === epoch.current) setDeparting(false);
+      }
     });
   const undoLast = () =>
     run("Undoing completion", async (token) => {
@@ -303,10 +389,20 @@ export function useFocusedReading(
     });
   };
   return {
+    session,
     article,
     state,
     score,
-    setScore,
+    setScore: (value: number) => {
+      setAbstain(false);
+      setScore(value);
+    },
+    abstain,
+    setAbstain: () => {
+      setScore(null);
+      setAbstain(true);
+    },
+    departing,
     reason,
     setReason,
     draftError,
@@ -316,6 +412,8 @@ export function useFocusedReading(
     undo,
     uncertain,
     complete,
+    completeCommits,
+    commitFailures,
     undoLast,
     updateLater,
     refresh,

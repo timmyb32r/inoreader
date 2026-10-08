@@ -26,6 +26,7 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+reader-collectors = { path = "../reader-collectors" }
 testcontainers = "0.25"
 testcontainers-modules = { version = "0.13", features = ["postgres"] }
 reader-server = { path = "../reader-server" }

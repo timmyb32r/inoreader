@@ -509,6 +509,8 @@ where
             let source = crate::web_feed::decode_html(&page.body, page.content_type.as_deref())
                 .map_err(|error| IngestError::Parse(error.to_string()))?;
             let publication = crate::extract_publication(&source, &page.final_url);
+            let reddit_flair = crate::video::extract_reddit_flair(&source, &page.final_url);
+            let video = crate::extract_video(&source, &page.final_url)?;
             let readable = if embedded {
                 source
             } else {
@@ -525,6 +527,13 @@ where
                 .publish_content(
                     lease,
                     ContentRevision {
+                        reddit_flair: reddit_flair.or_else(|| {
+                            record
+                                .categories()
+                                .and_then(|v| v.iter().find(|c| c.as_str() == "Career"))
+                                .cloned()
+                        }),
+                        video,
                         publication,
                         record_id,
                         source_revision,

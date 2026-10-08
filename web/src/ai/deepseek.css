@@ -434,6 +434,9 @@
 .ai-spending__mode-4 {
   background: var(--line-strong);
 }
+.ai-spending__mode-5 {
+  background: var(--accent-deep);
+}
 .ai-spending__tooltip {
   display: none;
   position: absolute;

@@ -1,0 +1,79 @@
+.commit-group {
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: 24px;
+}
+.commit-group > header h1 {
+  font-size: 24px;
+  margin: 0 0 12px;
+}
+.commit-group__status {
+  height: 32px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.commit-group__item {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+}
+.commit-group__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  height: 68px;
+}
+.commit-group__heading h2 {
+  margin: 0;
+  min-width: 0;
+  max-height: 68px;
+  overflow: auto;
+  font-size: 16px;
+}
+.commit-group__heading a {
+  flex-shrink: 0;
+  color: var(--accent-deep);
+  font-size: 12px;
+}
+.commit-group__paragraph {
+  height: 140px;
+  overflow: auto;
+  line-height: 1.6;
+}
+.commit-group__actions {
+  height: 80px;
+  display: grid;
+  grid-template-columns: 128px 128px;
+  grid-template-rows: 36px 32px;
+  align-items: center;
+  justify-content: start;
+  gap: 8px 12px;
+}
+.commit-group__actions button {
+  width: 128px;
+  min-width: 128px;
+  padding-inline: 8px;
+  height: 36px;
+  flex-shrink: 0;
+}
+.commit-group__actions > span {
+  grid-column: 1 / -1;
+  height: 32px;
+  min-width: 0;
+  overflow: auto;
+  max-height: 32px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+@media (max-width: 760px) {
+  .commit-group {
+    padding: 16px;
+  }
+  .commit-group__heading h2 {
+    font-size: 14px;
+  }
+}

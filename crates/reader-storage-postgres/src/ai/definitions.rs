@@ -21,7 +21,7 @@ impl PostgresAiStore {
         article: Uuid,
     ) -> Result<Option<DefinitionsJob>, AiError> {
         owned_workspace(&self.pool, owner, workspace).await?;
-        let row:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC LIMIT 1")
+        let row:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND status<>'cancelled' AND (article=$3 OR article::text IN (SELECT history_article_id FROM article_history_links WHERE workspace_id=$2::text AND article_id=$3::text)) ORDER BY created_at DESC,id DESC LIMIT 1")
             .bind(owner).bind(workspace).bind(article).fetch_optional(&self.pool).await.map_err(storage)?;
         row.map(|r| Ok(checked(r)?.job().clone())).transpose()
     }
@@ -30,7 +30,11 @@ impl PostgresAiStore {
         record: DefinitionsRecord,
         operation: Uuid,
         regenerate: bool,
+        automatic: bool,
     ) -> Result<DefinitionsJob, AiError> {
+        if automatic && regenerate {
+            return Err(AiError::Conflict);
+        }
         if operation.is_nil() {
             return Err(AiError::Message);
         }
@@ -61,22 +65,43 @@ impl PostgresAiStore {
             let old = checked(row)?;
             if old.job().workspace_id != j.workspace_id
                 || old.job().article_id != j.article_id
-                || old.input().identity()? != record.input().identity()?
+                || if automatic {
+                    old.job().prompt_version != j.prompt_version
+                } else {
+                    !old.input().same_request(record.input())?
+                }
             {
                 return Err(AiError::Conflict);
             }
             return Ok(old.job().clone());
         }
-        let input = record.input().identity()?;
-        let cached:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND article=$3 AND input=$4 AND (status IN ('queued','generating') OR (status='completed' AND NOT $5)) ORDER BY created_at DESC LIMIT 1")
-            .bind(owner).bind(j.workspace_id).bind(j.article_id).bind(&input).bind(regenerate).fetch_optional(&mut *tx).await.map_err(storage)?;
+        if automatic {
+            let corrupt: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND article=$3 AND status='quarantined')")
+                .bind(owner).bind(j.workspace_id).bind(j.article_id).fetch_one(&mut *tx).await.map_err(storage)?;
+            if corrupt {
+                return Err(AiError::AutomaticExcluded);
+            }
+        }
+        let input = encode(record.input())?;
+        // Retain exact inputs for provenance. Manual cache equality excludes only
+        // fields absent from the paid request; automatic admission is article/prompt scoped.
+        let cached:Option<Row>=sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE owner=$1 AND workspace=$2 AND article=$3 AND status NOT IN ('cancelled','quarantined') AND (($6 AND document::jsonb#>>'{job,promptVersion}'=$7) OR (NOT $6 AND (input::jsonb - 'limits' #- '{snapshot,source_revision}' #- '{snapshot,safe_html}' #- '{snapshot,source_url}')=($4::jsonb - 'limits' #- '{snapshot,source_revision}' #- '{snapshot,safe_html}' #- '{snapshot,source_url}') AND (status IN ('queued','generating') OR (status='completed' AND NOT $5)))) ORDER BY created_at DESC LIMIT 1")
+            .bind(owner).bind(j.workspace_id).bind(j.article_id).bind(&input).bind(regenerate).bind(automatic).bind(&j.prompt_version).fetch_optional(&mut *tx).await.map_err(storage)?;
         let job = if let Some(row) = cached {
             checked(row)?.job().clone()
         } else {
-            sqlx::query("INSERT INTO ai_definitions(id,owner,workspace,article,status,document,input) VALUES($1,$2,$3,$4,'queued',$5,$6)")
-                .bind(j.id).bind(owner).bind(j.workspace_id).bind(j.article_id).bind(encode(&record)?).bind(input).execute(&mut *tx).await.map_err(storage)?;
+            sqlx::query("INSERT INTO ai_definitions(id,owner,workspace,article,status,document,input,automatic) VALUES($1,$2,$3,$4,'queued',$5,$6,$7)")
+                .bind(j.id).bind(owner).bind(j.workspace_id).bind(j.article_id).bind(encode(&record)?).bind(input).bind(automatic).execute(&mut *tx).await.map_err(storage)?;
             j.clone()
         };
+        if !automatic {
+            sqlx::query("UPDATE ai_definitions SET automatic=false,scheduled_at=now() WHERE owner=$1 AND id=$2")
+                .bind(owner)
+                .bind(job.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(storage)?;
+        }
         sqlx::query("INSERT INTO ai_definition_operations(owner,operation,job,workspace,article,regenerate) VALUES($1,$2,$3,$4,$5,$6)").bind(owner).bind(operation).bind(job.id).bind(j.workspace_id).bind(j.article_id).bind(regenerate).execute(&mut *tx).await.map_err(storage)?;
         tx.commit().await.map_err(storage)?;
         Ok(job)
@@ -90,6 +115,21 @@ impl PostgresAiStore {
             return Err(AiError::Configuration);
         }
         let mut tx = self.pool.begin().await.map_err(storage)?;
+        let duplicates: Vec<Row> = sqlx::query_as("SELECT d.id,d.owner,d.workspace,d.article,d.document FROM ai_definitions d JOIN workspaces w ON w.id=d.workspace::text WHERE d.status='queued' AND d.automatic AND w.document::jsonb->>'owner'=d.owner::text AND reader_ai_terms_superseded(d.id) ORDER BY d.created_at,d.id LIMIT $1 FOR UPDATE OF d SKIP LOCKED")
+            .bind(i64::from(self.recovery_batch.get())).fetch_all(&mut *tx).await.map_err(storage)?;
+        for row in duplicates {
+            let id = row.0;
+            match checked(row).and_then(|mut record| {
+                record.cancel_duplicate()?;
+                Ok(record)
+            }) {
+                Ok(record) => {
+                    sqlx::query("UPDATE ai_definitions SET status='cancelled',document=$2,lease=NULL,lease_until=NULL WHERE id=$1")
+                        .bind(id).bind(encode(&record)?).execute(&mut *tx).await.map_err(storage)?;
+                }
+                Err(_) => quarantine::definitions(&mut tx, id).await?,
+            }
+        }
         let expired: Vec<Row> = sqlx::query_as("SELECT id,owner,workspace,article,document FROM ai_definitions WHERE status='generating' AND lease_until<now() ORDER BY lease_until,id LIMIT $1 FOR UPDATE SKIP LOCKED").bind(i64::from(self.recovery_batch.get()))
             .fetch_all(&mut *tx).await.map_err(storage)?;
         for row in expired {
@@ -111,7 +151,7 @@ impl PostgresAiStore {
                 Err(_) => quarantine::definitions(&mut tx, id).await?,
             }
         }
-        let row:Option<Row>=sqlx::query_as("SELECT d.id,d.owner,d.workspace,d.article,d.document FROM ai_definitions d JOIN workspaces w ON w.id=d.workspace::text WHERE d.status='queued' AND w.document::jsonb->>'owner'=d.owner::text ORDER BY d.created_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED")
+        let row:Option<Row>=sqlx::query_as("SELECT d.id,d.owner,d.workspace,d.article,d.document FROM ai_definitions d JOIN workspaces w ON w.id=d.workspace::text WHERE d.status='queued' AND NOT reader_ai_terms_superseded(d.id) AND d.scheduled_at<=now() AND (NOT d.automatic OR (SELECT reader_ai_automatic_resume_at(statement_timestamp())) IS NULL) AND w.document::jsonb->>'owner'=d.owner::text ORDER BY d.created_at,d.id LIMIT 1 FOR UPDATE OF d SKIP LOCKED")
             .fetch_optional(&mut *tx).await.map_err(storage)?;
         let Some(row) = row else {
             tx.commit().await.map_err(storage)?;
@@ -149,6 +189,7 @@ impl PostgresAiStore {
         let status = match &state {
             DefinitionState::Completed { .. } => "completed",
             DefinitionState::Failed { .. } => "failed",
+            DefinitionState::Cancelled { .. } => "cancelled",
             _ => return Err(AiError::Protocol),
         };
         let mut record = claim.record.clone();

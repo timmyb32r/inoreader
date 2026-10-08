@@ -295,3 +295,24 @@ it("restores article URLs in another owned workspace without mixing subscription
   expect(result.current.selected?.title).toBe("Other workspace");
   expect(changed).toHaveBeenCalledWith(restored);
 });
+
+it("bulk failure restores both read state and provenance without submitting provenance as authored state", async () => {
+  const client = mockClient();
+  const bootstrap = await client.bootstrap();
+  const request = deferred<void>();
+  vi.spyOn(client, "markAllRead").mockImplementation(() => request.promise);
+  const { result } = renderHook(() =>
+    useReaderController(client, bootstrap, [], vi.fn(), vi.fn()),
+  );
+  const before = result.current.selected;
+  act(() => {
+    result.current.markAllRead();
+  });
+  expect(result.current.selected?.readMethod).toBe("bulk");
+  await act(async () => {
+    request.reject(new Error("fixture failure"));
+    await request.promise.catch(() => {});
+  });
+  expect(result.current.selected?.read).toBe(before?.read);
+  expect(result.current.selected?.readMethod).toBe(before?.readMethod);
+});

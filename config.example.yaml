@@ -84,7 +84,14 @@ observability:
   archive_budget_bytes: 107374182400
 ai:
   daily_limit_usd: "3"
+  automatic_schedule:
+    pause_peak_hours: true
+    holiday_calendar_valid_through: "2026-12-31"
+    public_holidays: ["2026-01-01", "2026-01-02", "2026-01-03", "2026-02-15", "2026-02-16", "2026-02-17", "2026-02-18", "2026-02-19", "2026-02-20", "2026-02-21", "2026-02-22", "2026-02-23", "2026-04-04", "2026-04-05", "2026-04-06", "2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04", "2026-05-05", "2026-06-19", "2026-06-20", "2026-06-21", "2026-09-25", "2026-09-26", "2026-09-27", "2026-10-01", "2026-10-02", "2026-10-03", "2026-10-04", "2026-10-05", "2026-10-06", "2026-10-07"]
+  automatic_terms: false
   automatic_summaries: true
+  # Applies to summary, terms and interest ranking; archive storage is unchanged.
+  initial_articles: 10
   automatic_attempts: 3
   automatic_retry_seconds: 60
   # Set true only after documented operator acceptance (passed evaluation or explicit owner waiver).

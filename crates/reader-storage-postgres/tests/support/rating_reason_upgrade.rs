@@ -40,7 +40,7 @@ pub async fn verify(pool: &PgPool) {
     let command = CompleteReading {
         operation_id: Uuid::new_v4(),
         expected_revision: ReadingRevision::new(0).unwrap(),
-        rating: ArticleRating::try_from(8).unwrap(),
+        rating: Some(ArticleRating::try_from(8).unwrap()),
         reason: None,
     };
     let before = repository
@@ -57,6 +57,7 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     // Build the old three-column layout, rather than DROP COLUMN + ADD: the
     // latter leaves an artificial attnum hole unlike any production v12 table.
+    super::schema_contracts::remove_interests(pool).await;
     sqlx::raw_sql("CREATE TEMP TABLE rating_upgrade_values AS SELECT article_key,rating,rated_at FROM article_ratings; DROP TABLE article_ratings; CREATE TABLE article_ratings(article_key TEXT PRIMARY KEY REFERENCES articles(id) DEFERRABLE INITIALLY DEFERRED,rating SMALLINT NOT NULL CHECK(rating BETWEEN 1 AND 10),rated_at TIMESTAMPTZ NOT NULL); INSERT INTO article_ratings SELECT * FROM rating_upgrade_values; DROP TABLE rating_upgrade_values; DELETE FROM schema_releases; INSERT INTO schema_releases(version,release) VALUES(12,'focused-reading-2026-09-29')").execute(pool).await.unwrap();
     reader_storage_postgres::upgrade_schema(pool, std::num::NonZeroU32::new(50).unwrap())
         .await

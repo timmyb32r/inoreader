@@ -9,15 +9,17 @@ export function RatingReasonDialog({
   score,
   reason,
   onReason,
+  onScore,
   busy,
   uncertain,
   error,
   onClose,
   onSave,
 }: {
-  score: number;
+  score: number | null;
   reason: string;
   onReason: (value: string) => void;
+  onScore: (value: number | null) => void;
   busy: boolean;
   uncertain: boolean;
   error: string;
@@ -27,7 +29,7 @@ export function RatingReasonDialog({
   const invalid = reason.includes("\0");
   return (
     <ModalDialog
-      title={`Почему ${score} из 10?`}
+      title={score === null ? "Без числовой оценки" : `Почему ${score} из 10?`}
       onClose={onClose}
       closeDisabled={busy}
       width="520px"
@@ -40,6 +42,28 @@ export function RatingReasonDialog({
           if (!busy && !invalid) onSave();
         }}
       >
+        <div class="mark-read-rating" role="group" aria-label="Оценка статьи">
+          {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
+            <button
+              type="button"
+              aria-label={`Rate ${value} out of 10`}
+              aria-pressed={score === value}
+              disabled={busy || uncertain}
+              onClick={() => onScore(value)}
+            >
+              {value}
+            </button>
+          ))}
+          <button
+            type="button"
+            class="mark-read-rating__unknown"
+            aria-pressed={score === null}
+            disabled={busy || uncertain}
+            onClick={() => onScore(null)}
+          >
+            Не знаю
+          </button>
+        </div>
         <label>
           <span class="reading-reason__label">
             Что повлияло на оценку? <span>Необязательно</span>

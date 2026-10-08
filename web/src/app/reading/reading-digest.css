@@ -127,7 +127,7 @@
   margin-left: auto;
 }
 .digest-article__feedback {
-  min-height: 300px;
+  min-height: 380px;
   border-top: 1px solid var(--line);
   padding-top: 20px;
 }
@@ -294,4 +294,38 @@
 }
 .digest-article__topline > a {
   flex-shrink: 0;
+}
+
+/* Leave a stable slot until explicit refresh: adjacent rating targets never move
+   underneath a repeated click while the completed card leaves the viewport. */
+.digest-article[data-read="true"] {
+  animation: digest-depart 240ms ease-in forwards;
+  pointer-events: none;
+}
+@keyframes digest-depart {
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .digest-article[data-read="true"] {
+    animation: none;
+    visibility: hidden;
+  }
+}
+
+/* Async definitions occupy a reserved slot, keeping all rating targets fixed. */
+.digest-article__terms {
+  height: 220px;
+  margin-top: 16px;
+  display: grid;
+  grid-template-rows: 24px minmax(0, 1fr);
+}
+.digest-article__terms > div {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  font-size: 13px;
+  color: var(--text-muted);
 }

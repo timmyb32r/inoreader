@@ -1,3 +1,6 @@
+import { useReturnToNews } from "./useReturnToNews";
+import { ReadingClock } from "./ReadingClock";
+import type { SessionClock } from "../reading/useSessionClock";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../ui/Icon";
 import { ModalDialog } from "../../ui/ModalDialog";
@@ -12,7 +15,18 @@ import {
 } from "./state";
 import "./timer.css";
 
-export function CountdownTimer({ accountId }: { accountId: string }) {
+export function CountdownTimer({
+  accountId,
+  reading,
+  onReturn,
+  hasArticle = false,
+}: {
+  accountId: string;
+  reading?: SessionClock;
+  onReturn?: () => string | null;
+  hasArticle?: boolean;
+}) {
+  const returning = useReturnToNews(onReturn);
   const key = `reader:countdown:${accountId}`;
   const [error, setError] = useState("");
   const [draftError, setDraftError] = useState("");
@@ -130,6 +144,12 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
       void audio.current?.close();
     };
   }, [key]);
+  useEffect(() => {
+    if (reading?.active && current.current.mode !== "idle") {
+      save({ mode: "idle", duration: current.current.duration });
+      setFlash(false);
+    }
+  }, [reading?.active?.session]);
   const toggle = () => {
     if (error) return;
     unlockAudio();
@@ -149,6 +169,8 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
         deadline: time + (v.mode === "paused" ? v.remaining : v.duration),
       });
   };
+  if (reading?.active && onReturn)
+    return <ReadingClock clock={reading} onReturn={onReturn} />;
   return (
     <>
       <div
@@ -159,7 +181,7 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
         <button
           class="countdown__digits"
           disabled={state.mode === "running" || state.mode === "paused"}
-          title={error || "Set timer duration"}
+          title={error || reading?.error || "Set timer duration"}
           aria-label={`Timer ${formatDuration(remaining(state, now))}. ${state.mode}. Set duration`}
           onClick={() => {
             setDraft(formatDuration(state.duration));
@@ -167,11 +189,13 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
             setEditing(true);
           }}
         >
-          {error ? "Storage error" : formatDuration(remaining(state, now))}
+          {error || reading?.error
+            ? "Storage error"
+            : formatDuration(remaining(state, now))}
         </button>
         <button
           class="countdown__control"
-          disabled={!!error}
+          disabled={!!error || !!reading?.error}
           title={
             state.mode === "running"
               ? "Pause timer"
@@ -198,7 +222,7 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
           class="countdown__control"
           title="Stop timer"
           aria-label="Stop timer"
-          disabled={state.mode === "idle" || !!error}
+          disabled={state.mode === "idle" || !!error || !!reading?.error}
           onClick={() => {
             if (save({ mode: "idle", duration: state.duration }))
               setFlash(false);
@@ -206,8 +230,26 @@ export function CountdownTimer({ accountId }: { accountId: string }) {
         >
           <Icon name="stop" />
         </button>
+        {onReturn && (
+          <button
+            class="countdown__return"
+            disabled={
+              returning.pending || state.mode !== "running" || !hasArticle
+            }
+            aria-busy={returning.pending}
+            onClick={returning.open}
+          >
+            {returning.pending ? (
+              <span class="spinner" />
+            ) : (
+              <Icon name="external" />
+            )}
+            <span>К текущей новости</span>
+          </button>
+        )}
         <span class="sr-only" role="status">
           {error ||
+            reading?.error ||
             (state.mode === "finished"
               ? "Timer finished"
               : state.mode === "paused"

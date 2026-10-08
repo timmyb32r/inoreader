@@ -8,6 +8,7 @@ import "./article-feedback.css";
 
 type Draft = {
   score: number | null;
+  abstain?: boolean;
   reason: string;
   pending?: CompleteReading;
 };
@@ -23,6 +24,7 @@ export function ArticleFeedback({
   inline = false,
   onSave,
   onSkip,
+  ratingOptional = false,
 }: {
   client: ApiClient;
   owner: string;
@@ -31,6 +33,7 @@ export function ArticleFeedback({
   onSaved: () => void;
   onBusy?: (busy: boolean) => void;
   inline?: boolean;
+  ratingOptional?: boolean;
   onSave: (command: CompleteReading) => Promise<void>;
   onSkip?: () => Promise<void>;
 }) {
@@ -51,6 +54,8 @@ export function ArticleFeedback({
           const value = JSON.parse(stored) as Draft;
           if (
             typeof value.reason !== "string" ||
+            (value.abstain !== undefined &&
+              typeof value.abstain !== "boolean") ||
             !(
               value.score === null ||
               (Number.isInteger(value.score) &&
@@ -94,7 +99,8 @@ export function ArticleFeedback({
   const save = async (skip: boolean) => {
     if (lock.current || loading || !state || draft.reason.includes("\0"))
       return;
-    if (!skip && draft.score === null) return;
+    if (!skip && draft.score === null && !draft.abstain && !ratingOptional)
+      return;
     lock.current = true;
     setBusy(true);
     onBusy?.(true);
@@ -105,7 +111,7 @@ export function ArticleFeedback({
         const command = draft.pending ?? {
           operationId: crypto.randomUUID(),
           expectedRevision: state.revision,
-          rating: draft.score!,
+          rating: draft.score,
           reason: draft.reason === "" ? null : draft.reason,
         };
         remember({ ...draft, pending: command });
@@ -118,7 +124,11 @@ export function ArticleFeedback({
       setError((cause as Error).message);
       if (cause instanceof ApiError && cause.status < 500) {
         try {
-          remember({ score: draft.score, reason: draft.reason });
+          remember({
+            score: draft.score,
+            reason: draft.reason,
+            abstain: draft.abstain,
+          });
         } catch {
           /* Keep the pending receipt in memory/storage for explicit recovery. */
         }
@@ -145,14 +155,36 @@ export function ArticleFeedback({
               busy || !!draft.pending || completed || (inline && !!state?.read)
             }
             onClick={() =>
-              edit({ ...draft, score: draft.score === value ? null : value })
+              edit({
+                ...draft,
+                abstain: false,
+                score: draft.score === value ? null : value,
+              })
             }
           >
             {value}
           </button>
         ))}
+        <button
+          type="button"
+          class="mark-read-rating__unknown"
+          aria-pressed={!!draft.abstain}
+          disabled={
+            busy || !!draft.pending || completed || (inline && !!state?.read)
+          }
+          onClick={() =>
+            edit({ ...draft, score: null, abstain: !draft.abstain })
+          }
+        >
+          Не знаю
+        </button>
       </div>
-      <label>
+      <label
+        style={{
+          visibility:
+            draft.score === null && !draft.abstain ? "hidden" : "visible",
+        }}
+      >
         <span class="reading-reason__label">
           Почему такая оценка? <span>Необязательно</span>
         </span>
@@ -197,6 +229,7 @@ export function ArticleFeedback({
               busy ||
               !!draft.pending ||
               draft.score !== null ||
+              !!draft.abstain ||
               draft.reason !== "" ||
               !state
             }
@@ -214,7 +247,7 @@ export function ArticleFeedback({
             busy ||
             !state ||
             (state.read && !draft.pending) ||
-            draft.score === null ||
+            (draft.score === null && !draft.abstain && !ratingOptional) ||
             invalid
           }
           onClick={() => void save(false)}

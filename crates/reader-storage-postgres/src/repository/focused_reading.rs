@@ -58,7 +58,7 @@ impl FocusedReadingRepository for PostgresRepository {
         let state = ReadingState {
             revision: ReadingRevision::new(current.revision).map_err(storage)?,
             read: true,
-            rating: Some(command.rating),
+            rating: command.rating,
             rated_at: Some(now),
             reason: command.reason.clone(),
         };
@@ -84,7 +84,13 @@ impl FocusedReadingRepository for PostgresRepository {
         }
         write_article(&mut tx, &key, &current).await?;
         write_rating(&mut tx, &key, &completed.state).await?;
-        super::article::record_read(&mut tx, workspace, &current).await?;
+        super::article::record_read(
+            &mut tx,
+            workspace,
+            &current,
+            reader_application::ReadMethod::Reader,
+        )
+        .await?;
         tx.commit().await.map_err(storage)?;
         Ok(completed)
     }
@@ -159,7 +165,7 @@ async fn snapshot(
     key: &str,
     article: &Article,
 ) -> Result<ReadingState, RepositoryError> {
-    let value: Option<(i16, DateTime<Utc>, Option<String>)> =
+    let value: Option<(Option<i16>, DateTime<Utc>, Option<String>)> =
         sqlx::query_as("SELECT rating,rated_at,reason FROM article_ratings WHERE article_key=$1")
             .bind(key)
             .fetch_optional(&mut **tx)
@@ -167,7 +173,11 @@ async fn snapshot(
             .map_err(storage)?;
     let (rating, rated_at, reason) = match value {
         Some((value, at, reason)) => (
-            Some(ArticleRating::try_from(u8::try_from(value).map_err(storage)?).map_err(storage)?),
+            value
+                .map(|v| {
+                    ArticleRating::try_from(u8::try_from(v).map_err(storage)?).map_err(storage)
+                })
+                .transpose()?,
             Some(at),
             reason
                 .map(RatingReason::try_from)
@@ -227,9 +237,9 @@ async fn write_rating(
     state: &ReadingState,
 ) -> Result<(), RepositoryError> {
     match (state.rating, state.rated_at) {
-        (Some(rating), Some(at)) => {
+        (rating, Some(at)) => {
             sqlx::query("INSERT INTO article_ratings(article_key,rating,rated_at,reason) VALUES($1,$2,$3,$4) ON CONFLICT(article_key) DO UPDATE SET rating=EXCLUDED.rating,rated_at=EXCLUDED.rated_at,reason=EXCLUDED.reason")
-                .bind(key).bind(i16::from(u8::from(rating))).bind(at).bind(state.reason.as_ref().map(RatingReason::as_str)).execute(&mut **tx).await.map_err(storage)?;
+                .bind(key).bind(rating.map(|v| i16::from(u8::from(v)))).bind(at).bind(state.reason.as_ref().map(RatingReason::as_str)).execute(&mut **tx).await.map_err(storage)?;
         }
         (None, None) if state.reason.is_none() => {
             sqlx::query("DELETE FROM article_ratings WHERE article_key=$1")

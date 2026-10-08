@@ -110,18 +110,11 @@ impl crate::ArticleRepository for Repository {
     ) -> Result<(), RepositoryError> {
         unused()
     }
-    async fn unread_selection(
+    async fn mark_scope_read_atomic(
         &self,
         _: WorkspaceId,
         _: crate::ArticleScope,
         _: crate::SelectionLimit,
-    ) -> Result<Vec<Article>, RepositoryError> {
-        unused()
-    }
-    async fn mark_articles_read_atomic(
-        &self,
-        _: WorkspaceId,
-        _: Vec<Article>,
     ) -> Result<(), RepositoryError> {
         unused()
     }

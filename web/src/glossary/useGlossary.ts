@@ -35,8 +35,17 @@ export function useGlossary(
   useLayoutEffect(() => {
     close();
   }, [scope, workspace]);
-  const load = async (id: string, title: string, retry = false) => {
+  const load = async (
+    id: string,
+    title: string,
+    retry = false,
+    requestGeneration = true,
+  ) => {
     if (locked.current) return;
+    if (!retry && target?.id === id && view?.job?.status === "completed") {
+      setTarget({ id, title });
+      return;
+    }
     const intentKey = JSON.stringify([scope, workspace, id]);
     const token = ++revision.current;
     locked.current = true;
@@ -50,7 +59,11 @@ export function useGlossary(
       if (token !== revision.current) return;
       setView(value);
       if (
-        (!value.job || retry || intents.current.has(intentKey)) &&
+        requestGeneration &&
+        (!value.job ||
+          value.job.status === "queued" ||
+          retry ||
+          intents.current.has(intentKey)) &&
         value.channel.indexReady &&
         value.channel.generationAllowed
       ) {
@@ -107,9 +120,11 @@ export function useGlossary(
     target,
     view,
     busy: !!pending,
+    actionBusy: busy || view?.job?.status === "generating",
     error,
     close,
-    open: load,
+    open: (id: string, title: string, requestGeneration = true) =>
+      load(id, title, false, requestGeneration),
     retry: () => target && load(target.id, target.title, true),
   };
 }

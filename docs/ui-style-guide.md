@@ -3,6 +3,12 @@
 The product uses a cool-slate neutral palette with teal actions. Components use
 semantic tokens only; light and dark themes expose the same meanings.
 
+Smart feed reserves its header, status row and footer during loading, profile
+editing and errors. Background classification never inserts or reorders visible
+cards; only explicit refresh/navigation changes a page. Predicted ratings and
+their reasons remain separate from the user's authored ratings. Its profile
+editor uses the shared autofill-resistant textarea.
+
 Tokens are owned by `web/src/styles.css` (`:root` and `.theme-dark`).
 Components must not define competing neutral palettes. The architecture test
 rejects references to undefined tokens.
@@ -38,6 +44,10 @@ translation character is an icon, not a separate label style. Only enabled
 toggle states use the selected teal surface; Summarize and Terms are ordinary
 actions. Hover and press feedback changes color without scaling the control.
 Loading spinners occupy the same space as the icons they replace.
+Queued automatic summaries and terms keep these explicit actions available.
+A button press promotes the same queued job to on-demand work; passive opening
+never promotes it. Disable the initiating action immediately during its HTTP
+request, retain its dimensions, and reject duplicate activation while pending.
 
 The article chat reserves its header, 36px status row and 80px composer. Copy and
 send use icon buttons; request accounting and version selection are not part of
@@ -185,3 +195,77 @@ Both reading surfaces share ReadingBackButton and the reading-navigation header:
 horizontal inset. Destination remains owned by the caller: digest returns to Feed;
 focused discussion returns to its originating digest, standalone focus to Feed.
 Header geometry and control appearance are identical on both surfaces.
+
+Focused reading can show Summary/Chat and Terms together in reserved assistant
+rows. The article body exits with a 240ms horizontal animation only after the read
+receipt commits; reduced motion skips the animation. Header/footer hit targets
+remain fixed. Unknown ratings are explicit abstentions and never numeric training
+examples. Commits may be completed without a numeric rating. Digest explanation
+fields retain their footprint but stay visually hidden until a score is selected.
+
+Smart reading starts directly in `/reading?from=smart`: the first and each subsequent article use the personal-interest ranking, with original, conversation, terms and explicit rating in the same fixed workspace. Profile management remains accessible through a header link. Background ranking never replaces the currently open article.
+
+When focused reading selects a GitHub commit, its original pane displays a project
+snapshot of all unread commits, across subscriptions in the owned workspace.
+Pagination is exhausted explicitly; it never stops at the first 50 items.
+Each card reserves its heading, TL;DR paragraph and action footprints. Text updates
+scroll inside the paragraph slot and cannot move Discuss or the fixed footer.
+Discuss selects that commit's conversation; numeric rating controls keep their
+space but are hidden. The fixed “Все прочитаны” action marks only the displayed
+snapshot, locks immediately, and advances after successful writes. Partial failure
+is explicit and preserves successful writes and the visible snapshot for retry.
+
+## Reader AI actions
+
+Opening focused reading loads saved summaries and terms without starting missing
+paid work. Missing terms have an explicit extraction action. Commit rows reserve
+an 80px action grid with fixed 128px buttons for manual TL;DR and read state.
+Pending and result updates preserve these targets; duplicate activation is blocked
+synchronously. Mobile and desktop browser regressions cover the same contract.
+
+## Timed reading sessions
+
+Home opens a shared modal wizard with45 smart minutes and15 random minutes. The
+fields,44px validation region and actions keep fixed geometry. Both zero phases
+are rejected before starting; a zero individual phase is deliberately skipped.
+Focused reading reserves a mode label and countdown/control slot. Expiry never
+replaces the active article: explicit completion/next selects the next phase.
+Only explicit pause stops time. The account-owned global clock persists an absolute
+deadline and continues in hidden tabs, other app pages and across reloads. Progress
+is scoped by account, workspace and session. Phase expiry keeps the current article
+until explicit completion/next.
+The rating explanation dialog includes its own stable rating picker; uncertain
+saves lock both score and explanation. Enter submits chat, Shift+Enter adds a
+line, IME composition never sends. Mark all read opens a confirmation modal with
+reserved status/actions; cancel does not write, pending locks dismissal and
+activation, errors retain the dialog. Mobile and desktop regressions prove these
+targets remain stationary.
+
+The article source metadata reserves a 20px read-method row even for unread
+articles. Labels distinguish reader completion, individual marking, bulk marking
+and unknown historical provenance. Undo shows unread without removing the row.
+
+The source metadata takes the remaining row width and the wiki slot stays fixed
+when provenance labels change. Narrow labels ellipsize with an exact full tooltip.
+
+## Private DeepSeek statistics
+
+`/ai-statistics` is a full-page admin surface with slate/teal semantic tokens,
+fixed KPI card heights, a 260px stacked request plot, a fixed 340px table viewport
+and a 40px feedback row. Day/month/year grouping and arbitrary inclusive Moscow
+dates use shared protected fields. Selecting a period drills down without moving
+controls; pending state locks immediately and rejects duplicate requests. Tooltips
+overlay the chart. Small screens stack reserved cards and scroll the plot/table
+inside their containers. Access and navigation are exclusive to timmyb32r; the API
+checks the authenticated account independently. Unknown billing is distinct from
+settled expenditure, and decimal dollar values are retained exactly.
+
+The approved unified reading timer is variant 1: a compact slate/teal panel in the
+upper-right global bar. It shows the active mode and its remainder, the other
+phase's remainder, fixed pause/stop controls and a reserved Return to current news
+button. It replaces the general countdown during a reading session, stopping the
+previous general countdown rather than running a second hidden timer. Return loads
+the saved article and scroll position without marking it read or generating AI work.
+A single `--topbar-height` owns the fixed 76px desktop / 124px narrow header footprint,
+including when paused or expired. Narrow screens reserve a second timer row, with
+an accessible icon-only return action; no timer state inserts or removes controls.

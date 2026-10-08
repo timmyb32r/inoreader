@@ -156,7 +156,8 @@ test("terms show immediate feedback, deduplicate, preserve targets and split ori
   const dialog = page.getByRole("dialog", { name: "Термины статьи" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("status")).toHaveAttribute("aria-busy", "true");
-  await expect(trigger).toBeDisabled();
+  // A queued job remains available for an explicit manual promotion.
+  await expect(trigger).toBeEnabled();
   expect(mutations).toBe(1);
   const close = dialog.getByRole("button", { name: "Закрыть термины" }),
     closeBefore = await close.boundingBox();

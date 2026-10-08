@@ -226,11 +226,7 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
             SourceDefinition::new(SourceId::new(), v.source_url().clone(), SourceKind::Auto)
                 .map_err(storage)?;
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        let old_key = format!(
-            "{}\0{}",
-            v.workspace_id().as_uuid(),
-            current.source_url_exact()
-        );
+        let old_key = workspace_feed_url_key(v.workspace_id(), current.source_url_exact());
         let new_key = workspace_feed_url_key(v.workspace_id(), v.source_url_exact());
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT subscription_id FROM workspace_feed_urls WHERE id = $1 FOR UPDATE",
@@ -299,6 +295,14 @@ impl reader_application::SubscriptionRepository for PostgresRepository {
             .execute(&mut *tx)
             .await
             .map_err(storage)?;
+        crate::ai_bootstrap::create_subscription(
+            &mut tx,
+            &v.id().as_uuid().to_string(),
+            &source.as_uuid().to_string(),
+        )
+        .await
+        .map_err(storage)?;
+        enqueue_backfill_tx(&mut tx, source, v.id(), self.initial_scope).await?;
         enqueue_work_tx(
             &mut tx,
             JobId::new().as_uuid(),

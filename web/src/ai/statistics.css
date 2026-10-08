@@ -1,0 +1,346 @@
+.deepseek-statistics {
+  overflow: auto;
+  min-width: 0;
+  padding: 28px;
+  background: var(--bg);
+}
+.ds-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.ds-heading h1 {
+  font-size: clamp(26px, 3vw, 38px);
+  margin: 8px 0;
+  letter-spacing: -1px;
+}
+.ds-heading h1 span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.ds-heading p {
+  color: var(--text-muted);
+  margin: 0;
+}
+.ds-timezone {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 24px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ds-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.ds-segments {
+  display: flex;
+  padding: 4px;
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.ds-segments button {
+  border: 0;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  background: transparent;
+}
+.ds-segments button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+.ds-controls form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+.ds-controls label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ds-controls input {
+  height: 40px;
+  width: 148px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px;
+}
+.ds-controls .primary-button,
+.ds-controls .secondary-button {
+  width: 110px;
+  height: 40px;
+}
+.ds-controls button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.ds-status {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+}
+.ds-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 20px;
+}
+.ds-kpis article,
+.ds-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  min-width: 0;
+}
+.ds-kpis article {
+  height: 138px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+}
+.ds-kpis span,
+.ds-kpis small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.ds-kpis strong {
+  font-size: clamp(20px, 2.5vw, 30px);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.ds-card h2 {
+  font-size: 16px;
+  margin: 0 0 18px;
+}
+.ds-card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  height: 48px;
+}
+.ds-card-heading span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ds-chart-scroll {
+  height: 280px;
+  overflow: auto;
+}
+.ds-chart {
+  height: 260px;
+  display: flex;
+  align-items: stretch;
+  padding: 8px 8px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.ds-column {
+  border: 0;
+  flex: 1;
+  min-width: 26px;
+  background: transparent;
+  color: var(--text-muted);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: end;
+  align-items: center;
+  padding: 0 3px;
+}
+.ds-column:hover,
+.ds-column:focus-visible {
+  background: var(--accent-soft);
+}
+.ds-stack {
+  width: 100%;
+  max-width: 42px;
+  display: flex;
+  flex-direction: column-reverse;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+.ds-stack > div {
+  flex-shrink: 0;
+}
+.ds-period {
+  font-size: 10px;
+  height: 24px;
+  padding-top: 8px;
+  white-space: nowrap;
+}
+.ds-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  bottom: 28px;
+  width: 250px;
+  text-align: left;
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.ds-column:nth-last-child(-n + 8) .ds-tooltip {
+  left: auto;
+  right: 0;
+}
+.ds-column:hover .ds-tooltip,
+.ds-column:focus-visible .ds-tooltip {
+  display: grid;
+  gap: 5px;
+}
+.ds-mode-0 {
+  background: var(--accent);
+}
+.ds-mode-1 {
+  background: var(--accent-deep);
+}
+.ds-mode-2 {
+  background: var(--text-muted);
+}
+.ds-mode-3 {
+  background: var(--warning);
+}
+.ds-mode-4 {
+  background: var(--focus);
+}
+.ds-mode-5 {
+  background: var(--line-strong);
+}
+.ds-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding-top: 18px;
+  min-height: 40px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.ds-legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ds-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+.ds-bottom {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr);
+  gap: 20px;
+  margin-top: 20px;
+}
+.ds-breakdown {
+  display: grid;
+  gap: 16px;
+}
+.ds-breakdown > div {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  font-size: 12px;
+}
+.ds-breakdown b {
+  font-variant-numeric: tabular-nums;
+}
+.ds-track {
+  grid-column: 1/-1;
+  height: 6px;
+  background: var(--surface-muted);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ds-track i {
+  height: 100%;
+  display: block;
+}
+.ds-table-scroll {
+  height: 340px;
+  overflow: auto;
+}
+.ds-detail table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ds-detail th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.ds-detail td,
+.ds-detail th {
+  text-align: right;
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ds-detail td:first-child,
+.ds-detail th:first-child {
+  text-align: left;
+}
+.ds-detail small {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-muted);
+}
+.ds-empty,
+.ds-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ds-note {
+  margin-top: 20px;
+}
+@media (max-width: 700px) {
+  .deepseek-statistics {
+    position: absolute;
+    inset: 0;
+    padding: 16px;
+  }
+  .ds-heading {
+    flex-direction: column;
+  }
+  .ds-kpis {
+    grid-template-columns: 1fr;
+  }
+  .ds-kpis article {
+    height: 128px;
+  }
+  .ds-bottom {
+    grid-template-columns: 1fr;
+  }
+  .ds-card-heading {
+    height: 64px;
+  }
+  .ds-card {
+    padding: 16px;
+  }
+}

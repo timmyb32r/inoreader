@@ -12,6 +12,7 @@ const views: { id: View | "wiki"; label: string; icon: IconName }[] = [
   { id: "later", label: "Read later", icon: "later" },
 ];
 interface Props {
+  deepseekStatisticsAllowed: boolean;
   sidebarCollapsed: boolean;
   mobilePanel: "nav" | "list" | "article";
   toggleSidebar: () => void;
@@ -39,6 +40,7 @@ interface Props {
 }
 /** Navigation owns its local menus; application commands and routes are explicit inputs. */
 export function ReaderSidebar({
+  deepseekStatisticsAllowed,
   sidebarCollapsed,
   mobilePanel,
   toggleSidebar,
@@ -92,6 +94,16 @@ export function ReaderSidebar({
         onArchive={() => onArchive()}
       />
       <nav class="nav-block" aria-label="Library">
+        {deepseekStatisticsAllowed && (
+          <button
+            class={`nav-item${readerPath === "/ai-statistics" ? " active" : ""}`}
+            onClick={() => navigate("/ai-statistics")}
+            title="DeepSeek statistics"
+          >
+            <Icon name="settings" />
+            <span>DeepSeek stats</span>
+          </button>
+        )}
         <button
           class={readerPath === "/" ? "nav-item active" : "nav-item"}
           onClick={goHome}

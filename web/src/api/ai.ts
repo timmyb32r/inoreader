@@ -45,6 +45,16 @@ export class AiClient {
       "ParagraphJob",
     );
   profile = () => this.transport("/api/ai/profile", undefined, "AiProfile");
+  statistics = (range: {
+    from: string;
+    until: string;
+    bucket: "day" | "month" | "year";
+  }) =>
+    this.transport(
+      `/api/ai/statistics?${new URLSearchParams(range)}`,
+      undefined,
+      "AiRequestStatistics",
+    );
   saveKey = (apiKey: string) =>
     this.transport("/api/ai/profile", json("PUT", { apiKey }), "AiProfile");
   saveModels = (models: AiProfile["models"]) =>

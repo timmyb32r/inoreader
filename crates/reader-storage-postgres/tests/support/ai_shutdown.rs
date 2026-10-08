@@ -93,7 +93,7 @@ pub async fn child(connection: &str, marker: PathBuf) {
         op,
     );
     let id = initial.view.id;
-    store.create_chat(initial, op, false).await.unwrap();
+    store.create_chat(initial, op, false, false).await.unwrap();
     let provider = Arc::new(SlowProvider {
         marker,
         calls: AtomicUsize::new(0),

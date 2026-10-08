@@ -2,7 +2,7 @@ WITH counts AS (
                    SELECT origin.subscription_id,
                           COUNT(DISTINCT origin.article_id)::bigint AS article_count,
                           COUNT(DISTINCT origin.article_id) FILTER (
-                              WHERE NOT COALESCE(article.is_read, false)
+                              WHERE NOT COALESCE(article.is_read, false) AND reader_article_visible(article)
                           )::bigint AS unread_count
                    FROM library_origins origin
                    LEFT JOIN articles article ON article.id=$2 || '/' || origin.article_id

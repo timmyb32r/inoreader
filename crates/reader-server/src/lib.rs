@@ -90,7 +90,7 @@ pub struct AppState<R> {
     auth_policy: AuthPolicy,
     external_origin: String,
     login_attempts_per_minute: u32,
-    bulk_mutation_limit: reader_application::SelectionLimit,
+    bulk_mutation_batch: reader_application::SelectionLimit,
 }
 impl<R> Clone for AppState<R> {
     fn clone(&self) -> Self {
@@ -106,7 +106,7 @@ impl<R> Clone for AppState<R> {
             auth_policy: self.auth_policy,
             external_origin: self.external_origin.clone(),
             login_attempts_per_minute: self.login_attempts_per_minute,
-            bulk_mutation_limit: self.bulk_mutation_limit,
+            bulk_mutation_batch: self.bulk_mutation_batch,
         }
     }
 }
@@ -118,7 +118,7 @@ impl<R> AppState<R> {
         auth_policy: AuthPolicy,
         external_origin: String,
         login_attempts_per_minute: u32,
-        bulk_mutation_limit: reader_application::SelectionLimit,
+        bulk_mutation_batch: reader_application::SelectionLimit,
     ) -> Self {
         Self {
             ai: None,
@@ -132,7 +132,7 @@ impl<R> AppState<R> {
             auth_policy,
             external_origin,
             login_attempts_per_minute,
-            bulk_mutation_limit,
+            bulk_mutation_batch,
         }
     }
 
@@ -255,6 +255,10 @@ pub fn router<R: ReaderRepository + 'static>(state: AppState<R>) -> Router {
             get(source_activity::<R>),
         )
         .route("/api/articles", get(list_articles::<R>))
+        .route(
+            "/api/articles/{id}/reading/commits",
+            get(focused_reading::commits::<R>),
+        )
         .route("/api/articles/{id}", get(get_article::<R>))
         .route("/api/articles/{id}/state", post(update_article::<R>))
         .route(

@@ -10,10 +10,11 @@ mod translation;
 mod worker;
 
 pub struct AiService {
-    store: Arc<dyn AiStore>,
-    provider: Arc<dyn AiProvider>,
+    pub(crate) store: Arc<dyn AiStore>,
+    pub(crate) provider: Arc<dyn AiProvider>,
     cipher: CredentialCipher,
-    policy: AiPolicy,
+    pub(crate) policy: AiPolicy,
+    pub(crate) interests: Option<Arc<dyn crate::InterestStore>>,
 }
 
 impl AiService {
@@ -28,6 +29,7 @@ impl AiService {
             provider,
             cipher,
             policy,
+            interests: None,
         }
     }
     pub async fn profile(&self, owner: Uuid) -> Result<AiProfile, AiError> {
@@ -50,6 +52,13 @@ impl AiService {
             error,
             availability_reason: availability.map(|v| v.to_string()),
         })
+    }
+    pub async fn request_statistics(
+        &self,
+        owner: Uuid,
+        range: &crate::StatisticsRange,
+    ) -> Result<crate::AiRequestStatistics, AiError> {
+        self.store.request_statistics(owner, range).await
     }
     pub async fn save_models(
         &self,
@@ -105,7 +114,7 @@ impl AiService {
         }
         self.profile(owner).await
     }
-    async fn key(&self, owner: Uuid) -> Result<String, AiError> {
+    pub(crate) async fn key(&self, owner: Uuid) -> Result<String, AiError> {
         if !self.policy.allowed(owner) {
             return Err(AiError::Unavailable);
         }
@@ -247,7 +256,7 @@ impl AiService {
         };
         let record = self
             .store
-            .create_chat(record, operation, regenerate)
+            .create_chat(record, operation, regenerate, !interactive)
             .await?;
         if interactive {
             self.store.prioritize(owner, record.view.id).await?;

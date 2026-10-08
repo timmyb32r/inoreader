@@ -210,7 +210,7 @@ fn unknown_fields_fail() {
 }
 
 #[test]
-fn bulk_selection_limit_rejects_invalid_configuration_before_connecting() {
+fn bulk_batch_capacity_rejects_invalid_configuration_before_connecting() {
     for size in [0, usize::MAX] {
         let mut config = example();
         config.ingest.batch_items = size;

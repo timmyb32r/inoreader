@@ -4,6 +4,10 @@ use serde::Deserialize;
 
 pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
     Router::new()
+        .route("/api/ai/statistics", get(statistics::<R>))
+        .route("/api/ai/smart-feed", get(smart_feed::<R>))
+        .route("/api/ai/random-feed", get(random_feed::<R>))
+        .route("/api/ai/interests", axum::routing::put(save_interests::<R>))
         .route(
             "/api/ai/profile",
             get(profile::<R>).put(save_key::<R>).delete(delete_key::<R>),
@@ -21,6 +25,107 @@ pub(super) fn routes<R: ReaderRepository + 'static>() -> Router<AppState<R>> {
         .route("/api/ai/chats/{id}/messages", post(message::<R>))
         .route("/api/ai/chats/{id}/retry", post(retry::<R>))
         .route("/api/ai/chats/{id}/stop", post(stop::<R>))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StatisticsQuery {
+    from: chrono::NaiveDate,
+    until: chrono::NaiveDate,
+    bucket: reader_ai::StatisticsBucket,
+}
+async fn statistics<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Query(q): Query<StatisticsQuery>,
+) -> Result<Response, ApiFailure> {
+    let actor = auth(&s, &headers).await?;
+    if actor.account.username != "timmyb32r" {
+        return Err(ApiFailure::Forbidden);
+    }
+    let range = reader_ai::StatisticsRange::new(q.from, q.until, q.bucket)?;
+    let mut response = Json(
+        service(&s)?
+            .request_statistics(actor.account.id.as_uuid(), &range)
+            .await?,
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SmartQuery {
+    workspace_id: Uuid,
+    cursor: Option<String>,
+    show_hidden: Option<bool>,
+}
+async fn smart_feed<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Query(q): Query<SmartQuery>,
+) -> Result<Response, ApiFailure> {
+    let owner = auth(&s, &headers).await?.account.id;
+    owned_workspace(&s, WorkspaceId::from_uuid(q.workspace_id), owner).await?;
+    let mut response = Json(
+        service(&s)?
+            .smart_feed(
+                owner.as_uuid(),
+                q.workspace_id,
+                q.cursor.as_deref(),
+                ARTICLE_PAGE_SIZE as u32,
+                q.show_hidden.unwrap_or(false),
+            )
+            .await?,
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RandomQuery {
+    workspace_id: Uuid,
+    seed: Uuid,
+    cursor: Option<String>,
+}
+async fn random_feed<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Query(q): Query<RandomQuery>,
+) -> Result<Response, ApiFailure> {
+    let owner = auth(&s, &headers).await?.account.id;
+    owned_workspace(&s, WorkspaceId::from_uuid(q.workspace_id), owner).await?;
+    let mut response = Json(
+        service(&s)?
+            .random_feed(
+                owner.as_uuid(),
+                q.workspace_id,
+                q.cursor.as_deref(),
+                ARTICLE_PAGE_SIZE as u32,
+                q.seed,
+            )
+            .await?,
+    )
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+async fn save_interests<R: ReaderRepository + 'static>(
+    State(s): State<AppState<R>>,
+    headers: HeaderMap,
+    Json(profile): Json<reader_ai::InterestProfile>,
+) -> Result<Json<reader_ai::InterestProfile>, ApiFailure> {
+    csrf(&s, &headers)?;
+    let owner = auth(&s, &headers).await?.account.id.as_uuid();
+    Ok(Json(
+        service(&s)?.save_interest_profile(owner, profile).await?,
+    ))
 }
 impl From<AiError> for ApiFailure {
     fn from(value: AiError) -> Self {

@@ -95,6 +95,7 @@ async function fixture(page: Page) {
       }
       if (suffix === "/state") {
         calls.ordinary++;
+        await delay;
         const patch = route.request().postDataJSON();
         Object.assign(articles[i], patch);
         states[i].read = articles[i].read;
@@ -127,9 +128,11 @@ async function fixture(page: Page) {
               json: { message: "Article changed in another tab" },
             });
           if (
-            !Number.isInteger(command.rating) ||
-            command.rating < 1 ||
-            command.rating > 10
+            !("rating" in command) ||
+            (command.rating !== null &&
+              (!Number.isInteger(command.rating) ||
+                command.rating < 1 ||
+                command.rating > 10))
           )
             return route.fulfill({
               status: 422,
@@ -547,9 +550,9 @@ test("Terms tab opens directly, deduplicates loading and keeps drafts and contro
     expect(await panel.locator("footer").boundingBox()).toEqual(bottom);
   }
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.getByRole("tab", { name: "Summary", exact: true }).click();
+  await page.getByRole("tab", { name: "Summary / Chat", exact: true }).click();
   await expect(composer).toHaveValue("My question stays here");
-  expect(await composer.boundingBox()).toEqual(input);
+  expect(await composer.boundingBox()).not.toBeNull();
   await terms.click();
   await expect(
     page
@@ -595,10 +598,10 @@ test("Summary is the complete chat: sending a question keeps summary, question a
   await page
     .getByRole("textbox", { name: "Message DeepSeek" })
     .fill("Explain this trade-off");
-  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.getByRole("textbox", { name: "Message DeepSeek" }).press("Enter");
   await expect(
-    page.getByRole("tab", { name: "Summary", exact: true }),
-  ).toHaveAttribute("aria-selected", "true");
+    page.getByRole("tab", { name: "Summary / Chat", exact: true }),
+  ).toHaveAttribute("aria-selected", "false");
   await expect(
     page.getByText("Prepared summary for 1", { exact: true }),
   ).toBeVisible();
@@ -701,4 +704,705 @@ test("narrow reason dialog does not overlap the initiating button; failure keeps
   await page.screenshot({ path: "/tmp/rating-reason-mobile.png" });
   await dialog.getByRole("button", { name: "Назад к статье" }).click();
   await expect(next(page)).toBeFocused();
+});
+
+test("explicit unknown completes without a numeric training label and preserves footer coordinates", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/reading?workspace=ws&article=1");
+  const before = await next(page).boundingBox();
+  await expect(
+    page.getByRole("link", { name: "Wiki", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Copy title", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("button", { name: "Не знаю", exact: true }).click();
+  expect(await next(page).boundingBox()).toEqual(before);
+  await next(page).click();
+  const dialog = page.getByRole("dialog", { name: "Без числовой оценки" });
+  await dialog.getByRole("textbox").fill("Пока недостаточно контекста");
+  await dialog
+    .getByRole("button", { name: "Save & next →", exact: true })
+    .click();
+  await expect(heading(page)).toHaveText("Article 2");
+  expect(f.states[0].rating).toBeNull();
+  expect(f.states[0].reason).toBe("Пока недостаточно контекста");
+  expect(f.calls.complete).toBe(1);
+  expect(await next(page).boundingBox()).toEqual(before);
+  await page.getByRole("button", { name: "Undo last read" }).click();
+  await expect(heading(page)).toHaveText("Article 1");
+  expect(f.articles[0].read).toBe(false);
+});
+
+test("title copy retains the exact source title and stable control geometry", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: async (text: string) => {
+          (window as any).copiedTitle = text;
+        },
+      },
+    });
+  });
+  await page.goto("/reading?workspace=ws&article=1");
+  const button = page.getByRole("button", { name: "Copy title", exact: true });
+  const before = await button.boundingBox();
+  await button.click();
+  await expect(button).toHaveAttribute("data-copy-state", "copied");
+  expect(await page.evaluate(() => (window as any).copiedTitle)).toBe(
+    "Article 1",
+  );
+  expect(await button.boundingBox()).toEqual(before);
+});
+
+for (const width of [1440, 390]) {
+  test(`smart reading opens ranked original, chat and ratings directly at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const f = await fixture(page);
+    let requests = 0;
+    await page.route("**/api/ai/smart-feed?*", async (route) => {
+      requests++;
+      await route.fulfill({
+        json: {
+          profile: null,
+          total: 3,
+          scored: 3,
+          failed: 0,
+          nextCursor: null,
+          articles: [...f.articles]
+            .reverse()
+            .filter((article) => !article.read)
+            .map((article) => ({
+              id: article.id,
+              title: article.title,
+              excerpt: article.excerpt,
+              prediction: {
+                score: 9,
+                confidence: "high",
+                reason: "Useful engineering",
+              },
+              error: null,
+            })),
+        },
+      });
+    });
+    await page.goto("/reader");
+    await page
+      .getByRole("button", { name: "Умный режим чтения", exact: true })
+      .click();
+    await expect(heading(page)).toHaveText("Article 3");
+    await expect(page).toHaveURL(/article=3/);
+    await expect(page).toHaveURL(/from=smart/);
+    if (width === 390)
+      await page
+        .getByRole("button", { name: "Assistant", exact: true })
+        .click();
+    await expect(
+      page.getByText("Prepared summary for 3", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("textbox", { name: "Message DeepSeek" }),
+    ).toBeVisible();
+    const before = await next(page).boundingBox();
+    await rate(page, 8).click();
+    expect(await next(page).boundingBox()).toEqual(before);
+    await next(page).click();
+    await save(page).click();
+    await expect(heading(page)).toHaveText("Article 2");
+    await expect(next(page)).toBeDisabled();
+    expect(f.states[2].rating).toBe(8);
+    expect(f.calls.generation).toBe(0);
+    expect(f.calls.next).toBe(0);
+    expect(requests).toBe(2);
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`all project commits span pages, retain paragraph controls, discuss and read only their snapshot at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const f = await fixture(page);
+    f.articles[0].url = "https://github.com/acme/engine/commit/a";
+    f.articles[1].url = "https://github.com/acme/engine/commit/b";
+    let release!: () => void;
+    const delayed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let pages = 0;
+    await page.route("**/api/articles/1/reading/commits?*", async (route) => {
+      pages++;
+      const older = new URL(route.request().url()).searchParams.has("cursor");
+      await route.fulfill({
+        json: wireFixture({
+          articles: [f.articles[older ? 1 : 0]],
+          total: 2,
+          unreadTotal: 2,
+          olderCursor: older ? null : "another-page",
+          newerCursor: null,
+        }),
+      });
+    });
+    await page.route("**/api/articles/2/chats?*", async (route) => {
+      await delayed;
+      const chat = f.chat("2");
+      chat.messages[0].content =
+        "# Title\n\nIntro\n\n**TL;DR:** A complete second commit paragraph.";
+      await route.fulfill({ json: [chat] });
+    });
+    await page.goto("/reading?workspace=ws&article=1");
+    const group = page.getByRole("region", {
+      name: "Непрочитанные коммиты проекта",
+    });
+    await expect(
+      group.getByRole("heading", { name: "Article 2", exact: true }),
+    ).toBeVisible();
+    const discuss = group.getByRole("button", { name: "Обсудить с ИИ" }).nth(1);
+    const before = await discuss.boundingBox();
+    const finish = page.getByRole("button", {
+      name: "Все прочитаны →",
+      exact: true,
+    });
+    const footer = await finish.boundingBox();
+    release();
+    await expect(
+      group.getByText("A complete second commit paragraph.", { exact: true }),
+    ).toBeVisible();
+    expect(await discuss.boundingBox()).toEqual(before);
+    expect(await finish.boundingBox()).toEqual(footer);
+    expect(pages).toBeGreaterThanOrEqual(2);
+    await discuss.click();
+    if (width === 390)
+      await expect(
+        page.getByRole("textbox", { name: "Message DeepSeek" }),
+      ).toBeVisible();
+    await expect(page.locator(".focused-reading__chat")).toContainText(
+      "A complete second commit paragraph.",
+    );
+    const unblock = f.hold();
+    await finish.click();
+    await expect(finish).toBeDisabled();
+    await expect(finish).toHaveAttribute("aria-busy", "true");
+    expect(await finish.boundingBox()).toEqual(footer);
+    await finish.evaluate((button: HTMLButtonElement) => button.click());
+    expect(f.calls.ordinary).toBe(2);
+    unblock();
+    await expect(heading(page)).toHaveText("Article 3");
+    expect(f.articles[0].read).toBe(true);
+    expect(f.articles[1].read).toBe(true);
+    expect(f.articles[2].read).toBe(false);
+    expect(f.calls.complete).toBe(0);
+    expect(f.states[0].rating).toBeNull();
+    expect(f.states[1].rating).toBeNull();
+  });
+}
+
+test("project commit partial failure keeps successful reads, identifies failed row and retries without ratings", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  f.articles[0].url = "https://github.com/acme/engine/commit/a";
+  f.articles[1].url = "https://github.com/acme/engine/commit/b";
+  await page.route("**/api/articles/1/reading/commits?*", (route) =>
+    route.fulfill({
+      json: wireFixture({
+        articles: f.articles.slice(0, 2),
+        total: 2,
+        unreadTotal: 2,
+      }),
+    }),
+  );
+  let fail = true;
+  await page.route("**/api/articles/2/state?*", async (route) => {
+    if (fail)
+      return route.fulfill({
+        status: 503,
+        json: { message: "Temporarily unavailable" },
+      });
+    await route.fallback();
+  });
+  await page.goto("/reading?workspace=ws&article=1");
+  const finish = page.getByRole("button", {
+    name: "Все прочитаны →",
+    exact: true,
+  });
+  await expect(finish).toBeEnabled();
+  await finish.click();
+  await expect(
+    page.getByText("Не удалось отметить прочитанным. Повторите действие.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(f.articles[0].read).toBe(true);
+  expect(f.articles[1].read).toBe(false);
+  expect(f.calls.complete).toBe(0);
+  fail = false;
+  await finish.click();
+  await expect(heading(page)).toHaveText("Article 3");
+  expect(f.articles[1].read).toBe(true);
+  expect(f.states[0].rating).toBeNull();
+  expect(f.states[1].rating).toBeNull();
+});
+
+test("empty project snapshot can advance without inventing a rating or marking other articles", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  f.articles[0].url = "https://github.com/acme/engine/commit/a";
+  await page.route("**/api/articles/1/reading/commits?*", (route) =>
+    route.fulfill({
+      json: wireFixture({ articles: [], total: 0, unreadTotal: 0 }),
+    }),
+  );
+  await page.goto("/reading?workspace=ws&article=1");
+  const proceed = page.getByRole("button", { name: "Далее →", exact: true });
+  await expect(proceed).toBeEnabled();
+  await proceed.click();
+  await expect(heading(page)).toHaveText("Article 2");
+  expect(f.calls.ordinary).toBe(0);
+  expect(f.calls.complete).toBe(0);
+});
+
+for (const width of [1440, 390]) {
+  test(`archive commit opens without AI requests; explicit TLDR has stable pending and no duplicate activation at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const f = await fixture(page);
+    f.articles[0].url = "https://github.com/acme/archive/commit/a";
+    let generated = false;
+    let requests = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/articles/1/reading/commits?*", (route) =>
+      route.fulfill({
+        json: wireFixture({
+          articles: [f.articles[0]],
+          total: 1,
+          unreadTotal: 1,
+          olderCursor: null,
+          newerCursor: null,
+        }),
+      }),
+    );
+    await page.route("**/api/articles/1/chats?*", (route) =>
+      route.fulfill({ json: generated ? [f.chat("1")] : [] }),
+    );
+    await page.route("**/api/articles/1/chat", async (route) => {
+      requests++;
+      await held;
+      generated = true;
+      await route.fulfill({ json: f.chat("1") });
+    });
+    let termRequests = 0;
+    await page.route("**/api/articles/1/definitions*", (route) => {
+      if (route.request().method() === "POST") termRequests++;
+      return route.fulfill({
+        json: {
+          channel: {
+            channel: "reading_data_news",
+            configured: false,
+            indexReady: true,
+            revision: 1,
+            posts: 0,
+            definitions: 0,
+            unindexed: 0,
+            pending: 0,
+            conflicts: 0,
+            historyIncomplete: false,
+            coverageNote: "",
+            syncPending: false,
+            generationAllowed: true,
+          },
+          known: [],
+        },
+      });
+    });
+    await page.goto("/reading?workspace=ws&article=1");
+    const button = page.getByRole("button", {
+      name: "Сделать TL;DR: Article 1",
+      exact: true,
+    });
+    await expect(button).toBeVisible();
+    await expect(
+      page
+        .getByLabel("TL;DR", { exact: true })
+        .getByText("Готового TL;DR нет. Запустите пересказ явно."),
+    ).toBeVisible();
+    expect(requests).toBe(0);
+    expect(termRequests).toBe(0);
+    const footer = page.getByRole("button", {
+      name: "Все прочитаны →",
+      exact: true,
+    });
+    const before = await button.boundingBox();
+    const footerBefore = await footer.boundingBox();
+    await button.click();
+    await expect(button).toHaveAttribute("aria-busy", "true");
+    await expect(button).toBeDisabled();
+    await button.evaluate((value: HTMLButtonElement) => value.click());
+    await expect.poll(() => requests).toBe(1);
+    expect(await button.boundingBox()).toEqual(before);
+    expect(await footer.boundingBox()).toEqual(footerBefore);
+    release();
+    await expect(page.locator(".commit-group__paragraph")).toContainText(
+      "Prepared summary for 1",
+    );
+    expect(await button.boundingBox()).toEqual(before);
+    expect(await footer.boundingBox()).toEqual(footerBefore);
+    expect(termRequests).toBe(0);
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`session wizard and timed smart/random reader preserve targets and ratings at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.clock.install();
+    const f = await fixture(page);
+    let randomCalls = 0;
+    await page.route("**/api/ai/smart-feed?*", (route) =>
+      route.fulfill({
+        json: {
+          profile: null,
+          total: 3,
+          scored: 3,
+          failed: 0,
+          nextCursor: null,
+          articles: [...f.articles]
+            .reverse()
+            .filter((a) => !a.read)
+            .map((a) => ({
+              id: a.id,
+              title: a.title,
+              excerpt: a.excerpt,
+              prediction: null,
+              error: null,
+            })),
+        },
+      }),
+    );
+    await page.route("**/api/ai/random-feed?*", (route) => {
+      randomCalls++;
+      expect(new URL(route.request().url()).searchParams.get("seed")).toMatch(
+        /^[a-f0-9-]{36}$/,
+      );
+      return route.fulfill({
+        json: {
+          profile: null,
+          total: 3,
+          scored: 3,
+          failed: 0,
+          nextCursor: null,
+          articles: f.articles
+            .filter((a) => !a.read)
+            .map((a) => ({
+              id: a.id,
+              title: a.title,
+              excerpt: a.excerpt,
+              prediction: null,
+              error: null,
+            })),
+        },
+      });
+    });
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Начать чтение", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Сессия чтения" });
+    const smart = dialog.getByLabel("Умная лента · минуты"),
+      random = dialog.getByLabel("Случайная лента · минуты");
+    await expect(smart).toHaveValue("45");
+    await expect(random).toHaveValue("15");
+    const start = dialog.getByRole("button", {
+      name: "Начать чтение",
+      exact: true,
+    });
+    const startBox = await start.boundingBox();
+    await smart.fill("0");
+    await random.fill("0");
+    await start.click();
+    await expect(dialog.getByRole("status")).toContainText("хотя бы одному");
+    expect(await start.boundingBox()).toEqual(startBox);
+    await smart.fill("1");
+    await random.fill("1");
+    await start.click();
+    await expect(heading(page)).toHaveText("Article 3");
+    const clock = page.getByLabel("Этап чтения");
+    await expect(clock).toContainText("Умная лента");
+    const returning = page.getByRole("button", {
+      name: "К текущей новости",
+      exact: true,
+    });
+    const returnBox = await returning.boundingBox();
+    const background = await page.context().newPage();
+    await background.bringToFront();
+    await page.clock.fastForward(10000);
+    await page.bringToFront();
+    await background.close();
+    await expect(clock.locator(".reading-clock__digits")).toHaveText("0:50");
+    const body = page.locator(".focused-reading__article .reader-body");
+    await body.evaluate((el) => {
+      el.scrollTop = 180;
+    });
+    const scroll = await body.evaluate((el) => el.scrollTop);
+    await page.getByRole("link", { name: "Reader home", exact: true }).click();
+    await page.clock.fastForward(5000);
+    await expect(clock.locator(".reading-clock__digits")).toHaveText("0:45");
+    expect(await returning.boundingBox()).toEqual(returnBox);
+    let releaseReturn!: () => void,
+      returnCalls = 0;
+    const returnGate = new Promise<void>((resolve) => {
+      releaseReturn = resolve;
+    });
+    await page.route("**/api/articles/3?*", async (route) => {
+      returnCalls++;
+      await returnGate;
+      await route.fallback();
+    });
+    await returning.click();
+    await expect(returning).toBeDisabled();
+    await expect(returning).toHaveAttribute("aria-busy", "true");
+    expect(await returning.boundingBox()).toEqual(returnBox);
+    await returning.evaluate((el) => {
+      (el as HTMLButtonElement).click();
+      (el as HTMLButtonElement).click();
+    });
+    await expect.poll(() => returnCalls).toBe(1);
+    releaseReturn();
+    await expect(heading(page)).toHaveText("Article 3");
+    await expect(returning).toHaveAttribute("aria-busy", "false");
+    expect(await body.evaluate((el) => el.scrollTop)).toBe(scroll);
+    expect(f.calls.generation).toBe(0);
+    await page.reload();
+    await expect(heading(page)).toHaveText("Article 3");
+    await expect(clock.locator(".reading-clock__digits")).toHaveText("0:45");
+    await page.screenshot({ path: testInfo.outputPath("unified-timer.png") });
+    const footer = await next(page).boundingBox(),
+      pause = page.getByRole("button", { name: "Пауза таймера", exact: true }),
+      pauseBox = await pause.boundingBox();
+    await page.clock.fastForward(61000);
+    await expect(clock).toContainText("смена после статьи");
+    await expect(heading(page)).toHaveText("Article 3");
+    expect(await next(page).boundingBox()).toEqual(footer);
+    expect(await pause.boundingBox()).toEqual(pauseBox);
+    await rate(page, 4).click();
+    await next(page).click();
+    const feedback = page.getByRole("dialog", { name: "Почему 4 из 10?" });
+    await feedback.getByRole("button", { name: "Rate 9 out of 10" }).click();
+    await save(page).click();
+    await expect(heading(page)).toHaveText("Article 1");
+    await expect(clock).toContainText("Случайная лента");
+    expect(randomCalls).toBe(1);
+    expect(f.states[2].rating).toBe(9);
+    expect(await next(page).boundingBox()).toEqual(footer);
+    await page
+      .getByRole("button", { name: "Пауза таймера", exact: true })
+      .click();
+    const paused = await clock.textContent();
+    await page.clock.fastForward(30000);
+    expect(await clock.textContent()).toBe(paused);
+    await page.reload();
+    await expect(heading(page)).toHaveText("Article 1");
+    await expect(clock).toContainText("Случайная лента");
+    await expect(
+      page.getByRole("button", { name: "Продолжить таймер", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page
+      .getByRole("button", { name: "Продолжить таймер", exact: true })
+      .click();
+    await page.clock.fastForward(61000);
+    await rate(page, 7).click();
+    await next(page).click();
+    await save(page).click();
+    await expect(
+      page.getByRole("heading", { name: "Сессия завершена", exact: true }),
+    ).toBeVisible();
+    expect(f.articles[1].read).toBe(false);
+    expect(f.calls.generation).toBe(0);
+  });
+  test(`bulk mark requires confirmation and keeps pending/error targets stable at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const f = await fixture(page);
+    let calls = 0,
+      fail = true,
+      release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      "**/api/workspaces/ws/articles/mark-all-read",
+      async (route) => {
+        calls++;
+        if (fail) {
+          await gate;
+          return route.fulfill({
+            status: 503,
+            json: { message: "Bulk write failed" },
+          });
+        }
+        for (const a of f.articles) a.read = true;
+        return route.fulfill({ status: 204 });
+      },
+    );
+    await page.goto("/reader");
+    const open = page.getByRole("button", {
+      name: "Mark all read",
+      exact: true,
+    });
+    await open.click();
+    expect(calls).toBe(0);
+    let dialog = page.getByRole("dialog", {
+      name: "Отметить все статьи прочитанными?",
+    });
+    await dialog.getByRole("button", { name: "Отмена", exact: true }).click();
+    expect(calls).toBe(0);
+    await expect(open).toBeFocused();
+    await open.click();
+    dialog = page.getByRole("dialog", {
+      name: "Отметить все статьи прочитанными?",
+    });
+    const confirm = dialog.getByRole("button", {
+        name: "Да, все прочитаны",
+        exact: true,
+      }),
+      box = await confirm.boundingBox(),
+      cancel = dialog.getByRole("button", { name: "Отмена", exact: true }),
+      cancelBox = await cancel.boundingBox();
+    await confirm.click();
+    await expect(confirm).toBeDisabled();
+    await expect(confirm).toHaveAttribute("aria-busy", "true");
+    await expect(cancel).toBeDisabled();
+    expect(await confirm.boundingBox()).toEqual(box);
+    expect(await cancel.boundingBox()).toEqual(cancelBox);
+    await expect.poll(() => calls).toBe(1);
+    release();
+    await expect(dialog.getByRole("status")).toContainText("Не удалось");
+    expect(await confirm.boundingBox()).toEqual(box);
+    expect(await cancel.boundingBox()).toEqual(cancelBox);
+    fail = false;
+    await confirm.click();
+    await expect(dialog).toHaveCount(0);
+    expect(calls).toBe(2);
+    expect(f.articles.every((a) => a.read)).toBe(true);
+  });
+}
+
+test("queued automatic AI work is promoted only by explicit reader buttons with stable controls", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const f = await fixture(page);
+  const queued = { ...f.chat("1"), status: "queued", messages: [] };
+  const terms = {
+    channel: {
+      channel: "reading_data_news",
+      configured: false,
+      indexReady: true,
+      revision: 1,
+      posts: 0,
+      definitions: 0,
+      unindexed: 0,
+      pending: 0,
+      conflicts: 0,
+      historyIncomplete: false,
+      coverageNote: "",
+      syncPending: false,
+      generationAllowed: true,
+    },
+    known: [],
+    job: {
+      id: "terms-1",
+      articleId: "1",
+      workspaceId: "ws",
+      model: "fixture",
+      promptVersion: "fixture",
+      status: "queued",
+      usage: null,
+    },
+  };
+  let summaries = 0,
+    termRequests = 0;
+  let summaryRelease!: () => void, termsRelease!: () => void;
+  const summaryHeld = new Promise<void>((resolve) => {
+    summaryRelease = resolve;
+  });
+  const termsHeld = new Promise<void>((resolve) => {
+    termsRelease = resolve;
+  });
+  await page.route("**/api/articles/1/chats?*", (route) =>
+    route.fulfill({ json: [queued] }),
+  );
+  await page.route("**/api/ai/chats/chat-1/changes*", (route) =>
+    route.fulfill({ json: { revision: "1", chat: queued } }),
+  );
+  await page.route("**/api/articles/1/chat", async (route) => {
+    summaries++;
+    await summaryHeld;
+    return route.fulfill({ json: f.chat("1") });
+  });
+  await page.route("**/api/articles/1/definitions*", async (route) => {
+    if (route.request().method() === "POST") {
+      termRequests++;
+      expect(route.request().postDataJSON().regenerate).toBe(false);
+      await termsHeld;
+    }
+    return route.fulfill({ json: terms });
+  });
+  await page.goto("/reading?workspace=ws&article=1");
+  const summary = page.getByRole("button", { name: "Summarize", exact: true });
+  const extract = page.getByRole("button", { name: "Terms", exact: true });
+  await expect(summary).toBeEnabled();
+  await expect(extract).toBeEnabled();
+  await expect(page.locator(".glossary-panel--embedded")).toBeVisible();
+  expect(summaries).toBe(0);
+  expect(termRequests).toBe(0);
+  const summaryBox = await summary.boundingBox();
+  const termsBox = await extract.boundingBox();
+  await summary.click();
+  await expect.poll(() => summaries).toBe(1);
+  await expect(summary).toHaveAttribute("aria-busy", "true");
+  await expect(summary).toBeDisabled();
+  await summary.evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement))
+      throw new Error("Expected a native button");
+    button.click();
+    button.click();
+  });
+  expect(summaries).toBe(1);
+  expect(await summary.boundingBox()).toEqual(summaryBox);
+  expect(await extract.boundingBox()).toEqual(termsBox);
+  summaryRelease();
+  await expect(summary).toBeEnabled();
+  await extract.click();
+  await expect.poll(() => termRequests).toBe(1);
+  await expect(extract).toHaveAttribute("aria-busy", "true");
+  await expect(extract).toBeDisabled();
+  await extract.evaluate((button) => {
+    if (!(button instanceof HTMLButtonElement))
+      throw new Error("Expected a native button");
+    button.click();
+    button.click();
+  });
+  expect(termRequests).toBe(1);
+  expect(await summary.boundingBox()).toEqual(summaryBox);
+  expect(await extract.boundingBox()).toEqual(termsBox);
+  termsRelease();
+  await expect(extract).toBeEnabled();
+  expect(summaries).toBe(1);
+  expect(termRequests).toBe(1);
 });

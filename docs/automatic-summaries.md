@@ -1,17 +1,24 @@
 # Automatic article summaries and daily budget
 
-Approved by the owner on 2026-09-29; schema release 8. Applies to the account's
-workspaces using its encrypted DeepSeek key. Read archive is not backfilled.
+Initial activation approved on 2026-09-29; current admission is schema release 16.
+Applies to the account's workspaces using its encrypted DeepSeek key. Automatic
+archive admission is restricted to each subscription's frozen initial selection.
 
 ## Delivery and conversations
 
-Startup enrolls configured, approved accounts before ingest workers start. An
-atomic account enrollment snapshots unread articles exactly once. PostgreSQL
-triggers add future articles and first full-text publications to a durable
-`ai_summary_queue`; candidates wait for the full manifest before snapshotting.
-All workers use the existing article-owned chat creation lock, so opening a post,
-background discovery, multiple tabs and restarts reuse one conversation. Existing
-historical conversations are retained; the latest is reopened, never regenerated.
+Startup enrolls configured accounts before ingest workers start. Enrollment and
+new-origin delivery use the shared subscription admission policy: the latest
+`ai.initial_articles` unique visible initial articles (deployment: 10), then new
+source records. The entire archive remains stored. Immutable first discovery
+includes initial poll continuations; selection freezes after successful collection
+and delivery. Shared-source subscriptions retain independent owned selections.
+See [the bootstrap contract](designs/subscription-ai-bootstrap.md).
+
+Summary, terms and interest workers share admission and recheck it before budget
+reservation. Late full text and restart cannot admit excluded history. Explicit
+manual generation remains available within the budget. Reader and commit groups
+load saved results without creating missing paid jobs on opening. Conversations,
+results, read state, ratings and spending history are retained.
 
 The selected summary model produces a complete preview; the independently selected
 fact-check model checks it. Both default to Flash.
@@ -67,8 +74,8 @@ additive schema objects. Upgrade requires a verified PostgreSQL backup and a
 restored-copy rehearsal. Queue and ledger are included in backup/restore tests.
 
 Tests cover concurrent admission, account isolation, idempotent settlement,
-unknown reservations, Moscow rollover, no calls while deferred, single unread
-backfill, new arrivals, complete automatic two-stage execution and reuse. Browser
+unknown reservations, Moscow rollover, no calls while deferred, frozen initial
+selection, new arrivals, complete automatic two-stage execution and reuse. Browser
 coverage checks explicit opening and article switching, closing/reopening, stable targets, existing
 translation/wiki flows, preview replacement and per-mode graph data.
 
@@ -81,3 +88,24 @@ On 2026-09-29 the owner requested 5 USD for that date only. No timer or cleanup
 is required to return to 3 at midnight. Historical spend/reserves are preserved.
 When raising a limit, wake only that owner's queued budget-deferred jobs; they
 must still reserve again before calling DeepSeek. Never refund unknown charges.
+
+## Automatic work during DeepSeek peak hours
+
+`ai.automatic_schedule` controls automatic summaries, glossary extraction and
+interest scoring. With `pause_peak_hours: true`, queued jobs stay pending during
+Monday–Friday Beijing 09:00–12:00 and 14:00–18:00 (Moscow 04:00–07:00 and
+09:00–13:00). Ends are exclusive; lunch, nights, weekends and configured Chinese
+public holidays remain available. Manual Summarize/Extract terms, retries and
+discussion requests run under the existing daily budget at any hour. A manual
+request promotes an already queued automatic job rather than creating a duplicate.
+
+The worker checks the policy both before claiming and before reserving a paid
+request. Jobs crossing a window boundary release their lease and resume at its
+end, including a saved summary draft awaiting its next paid stage. Already admitted
+requests may finish. Collection and full-text fetching continue during the pause.
+
+Configure `holiday_calendar_valid_through` and `public_holidays` from the official
+Chinese holiday calendar. Duplicate/out-of-range dates fail configuration validation.
+After calendar expiry automatic AI pauses until the calendar is updated; manual
+requests stay available. The example supplies the official 2026 calendar. This
+policy changes scheduling, not the configured model tariffs or spending history.

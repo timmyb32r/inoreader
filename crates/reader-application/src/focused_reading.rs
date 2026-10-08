@@ -118,7 +118,10 @@ pub struct ReadingState {
 pub struct CompleteReading {
     pub operation_id: Uuid,
     pub expected_revision: ReadingRevision,
-    pub rating: ArticleRating,
+    /// Null is an explicit abstention. An absent field is rejected.
+    #[serde(deserialize_with = "explicit_rating")]
+    #[schemars(required, schema_with = "nullable_rating_schema")]
+    pub rating: Option<ArticleRating>,
     pub reason: Option<RatingReason>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -159,3 +162,13 @@ pub trait FocusedReadingRepository: Send + Sync {
 #[cfg(test)]
 #[path = "tests/focused_reading.rs"]
 mod tests;
+
+fn explicit_rating<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ArticleRating>, D::Error> {
+    Option::<ArticleRating>::deserialize(deserializer)
+}
+
+fn nullable_rating_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    <Option<ArticleRating> as schemars::JsonSchema>::json_schema(generator)
+}

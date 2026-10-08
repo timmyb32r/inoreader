@@ -1,5 +1,8 @@
+import { SessionClockContext } from "./useSessionClock";
+import { CommitGroup } from "./CommitGroup";
+import { isCommitArticle } from "./commitArticle";
 import { ReadingBackButton } from "./ReadingBackButton";
-import { useEffect, useState } from "preact/hooks";
+import { useContext, useEffect, useState } from "preact/hooks";
 import type { ApiClient } from "../../api/client";
 import type { AiProfile } from "../../api/ai";
 import type { ArticleChatController } from "../../ai/useArticleChat";
@@ -35,19 +38,50 @@ export function FocusedReading({
   onExit,
   announce,
 }: Props) {
+  const from = new URLSearchParams(location.search).get("from");
+  const smart = from === "smart" || from === "session" || from === "random";
   const reading = useFocusedReading(client, owner, workspace);
   const { article, state, busy, score } = reading;
+  const sessionClock = useContext(SessionClockContext);
+  useEffect(() => {
+    if (busy) return;
+    window.dispatchEvent(
+      new CustomEvent("reader-reading-ready", {
+        detail: location.pathname + location.search,
+      }),
+    );
+    if (!article) return;
+    const saved = sessionClock?.active;
+    if (
+      saved?.url === location.pathname + location.search &&
+      saved.workspace === workspace
+    ) {
+      const pane = document.querySelector<HTMLElement>(
+        ".focused-reading__article .reader-body",
+      );
+      if (pane) pane.scrollTop = saved.scroll;
+    }
+  }, [busy, article?.id, owner, workspace]);
+  const [commitIds, setCommitIds] = useState<string[] | null>(null);
+  const [discussion, setDiscussion] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   useEffect(() => {
     if (!article || (state?.read && !reading.uncertain && !busy))
       setConfirming(null);
   }, [article?.id, state?.read, reading.uncertain, busy]);
-  const [tab, setTab] = useState<"summary" | "terms">("summary");
+  const [tab, setTab] = useState<"summary" | "terms" | "both">("summary");
   const [mobile, setMobile] = useState<"article" | "assistant">("article");
   useEffect(() => {
-    setTab("summary");
+    setDiscussion(null);
+    setCommitIds(null);
+    setTab("both");
     setMobile("article");
     glossary.close();
+    if (article?.fullText === "ready")
+      void glossary.open(article.id, article.title, false);
     if (article?.fullText === "ready")
       void chat.open(
         { workspaceId: workspace, articleId: article.id, title: article.title },
@@ -57,9 +91,12 @@ export function FocusedReading({
   }, [article?.id, article?.fullText]);
   const sameChat =
     article?.fullText === "ready" &&
-    chat.target?.articleId === article.id &&
+    chat.target?.articleId === (discussion?.id ?? article.id) &&
     chat.target.workspaceId === workspace;
-  const showTerms = tab === "terms" && glossary.target?.id === article?.id;
+  const showTerms =
+    (tab === "terms" || tab === "both") &&
+    glossary.target?.id === (discussion?.id ?? article?.id);
+  const commit = !!article && isCommitArticle(article.url);
   const pending = new Set<string>(
     article && busy ? [`${article.id}:later`] : [],
   );
@@ -67,8 +104,8 @@ export function FocusedReading({
     if (!article) return;
     setTab("terms");
     setMobile("assistant");
-    if (glossary.target?.id !== article.id)
-      void glossary.open(article.id, article.title);
+    const target = discussion ?? article;
+    void glossary.open(target.id, target.title);
   };
   const summarize = () => {
     if (!article || article.fullText !== "ready") return;
@@ -76,8 +113,8 @@ export function FocusedReading({
     setMobile("assistant");
     void chat.open({
       workspaceId: workspace,
-      articleId: article.id,
-      title: article.title,
+      articleId: discussion?.id ?? article.id,
+      title: discussion?.title ?? article.title,
     });
   };
   return (
@@ -88,7 +125,45 @@ export function FocusedReading({
     >
       <header class="focused-reading__header reading-navigation">
         <ReadingBackButton onClick={() => onExit(article?.id)} />
-        <span>Reading mode</span>
+        {reading.session.error ? (
+          <div class="focused-reading__mode">Сессия недоступна</div>
+        ) : reading.session.enabled ? (
+          <div class="focused-reading__mode">
+            {reading.session.mode === "smart"
+              ? "Умная лента"
+              : "Случайная лента"}
+          </div>
+        ) : (
+          <div class="focused-reading__mode">
+            {from === "random"
+              ? "Случайная лента"
+              : smart
+                ? "Умная лента"
+                : "Reading mode"}
+          </div>
+        )}
+        {smart && (
+          <a
+            class="text-button"
+            href={`/smart?workspace=${encodeURIComponent(workspace)}`}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate(`/smart?workspace=${encodeURIComponent(workspace)}`);
+            }}
+          >
+            Профиль интересов
+          </a>
+        )}
+        <a
+          class="text-button"
+          href="/wiki"
+          onClick={(e) => {
+            e.preventDefault();
+            navigate("/wiki");
+          }}
+        >
+          Wiki
+        </a>
         <div class="focused-reading__mobile-tabs" aria-label="Reading pane">
           <button
             class="text-button"
@@ -107,8 +182,32 @@ export function FocusedReading({
         </div>
       </header>
       <div class="focused-reading__panes" data-mobile={mobile}>
-        <div class="focused-reading__article">
-          {article ? (
+        <div
+          class="focused-reading__article"
+          data-departing={reading.departing}
+        >
+          {article && commit ? (
+            <CommitGroup
+              key={article.id}
+              client={client}
+              workspace={workspace}
+              article={article}
+              enabled={!!profile?.enabled}
+              busy={!!busy}
+              failures={reading.commitFailures}
+              onSnapshot={setCommitIds}
+              onDiscuss={(item) => {
+                setDiscussion({ id: item.id, title: item.title });
+                setTab("summary");
+                setMobile("assistant");
+                void chat.open({
+                  workspaceId: workspace,
+                  articleId: item.id,
+                  title: item.title,
+                });
+              }}
+            />
+          ) : article ? (
             <ArticleReader
               key={article.id}
               focused
@@ -128,7 +227,7 @@ export function FocusedReading({
               onSummarize={summarize}
               summaryPending={!!chat.busy}
               onDefinitions={openTerms}
-              definitionsPending={glossary.busy}
+              definitionsPending={glossary.actionBusy}
               aiClient={client.ai}
               wikiClient={client.wiki}
               onNavigate={navigate}
@@ -138,10 +237,18 @@ export function FocusedReading({
           ) : (
             <div class="focused-reading__empty">
               <Icon name={reading.done ? "unread" : "book"} size={30} />
-              <h1>{reading.done ? "All caught up" : "Reading mode"}</h1>
+              <h1>
+                {reading.done
+                  ? reading.session.progress.finished && reading.session.enabled
+                    ? "Сессия завершена"
+                    : "All caught up"
+                  : "Reading mode"}
+              </h1>
               <p>
                 {reading.done
-                  ? "No more unread articles in this queue."
+                  ? reading.session.progress.finished && reading.session.enabled
+                    ? "Запланированное время чтения закончилось."
+                    : "No more unread articles in this queue."
                   : busy
                     ? "Loading your article…"
                     : "The article could not be loaded."}
@@ -163,7 +270,7 @@ export function FocusedReading({
           )}
         </div>
         <aside
-          class="focused-reading__assistant"
+          class={`focused-reading__assistant ${tab === "both" ? "focused-reading__assistant--both" : ""}`}
           aria-label="Article assistant"
         >
           <header>
@@ -176,7 +283,7 @@ export function FocusedReading({
             role="tablist"
             aria-label="Assistant tabs"
           >
-            {(["summary", "terms"] as const).map((value) => (
+            {(["both", "summary", "terms"] as const).map((value) => (
               <button
                 key={value}
                 role="tab"
@@ -187,14 +294,21 @@ export function FocusedReading({
                   value === "terms" ? openTerms() : setTab(value)
                 }
               >
-                {value === "summary" ? "Summary" : "Terms"}
+                {value === "both"
+                  ? "Summary + Terms"
+                  : value === "summary"
+                    ? "Summary / Chat"
+                    : "Terms"}
               </button>
             ))}
           </div>
-          <div class="ai-chat focused-reading__chat" hidden={showTerms}>
+          <div
+            class="ai-chat focused-reading__chat"
+            hidden={tab === "terms" && showTerms}
+          >
             {sameChat ? (
               <ArticleChatContent
-                key={article?.id}
+                key={discussion?.id ?? article?.id}
                 controller={chat}
                 profile={profile}
               />
@@ -228,9 +342,14 @@ export function FocusedReading({
       <footer class="focused-reading__footer">
         <div class="focused-reading__rating-label">
           <strong>Useful to you?</strong>
-          <span>Required · 1–10</span>
+          <span>
+            {commit ? "Коммиты проекта · без оценки" : "1–10 / Не знаю"}
+          </span>
         </div>
-        <div class="focused-reading__rating">
+        <div
+          class="focused-reading__rating"
+          style={{ visibility: commit ? "hidden" : "visible" }}
+        >
           <div role="group" aria-label="Personal value from 1 to 10">
             {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
               <button
@@ -245,6 +364,14 @@ export function FocusedReading({
             ))}
           </div>
           <div class="focused-reading__rating-ends">
+            <button
+              class="text-button"
+              disabled={!!busy || !state || state.read || reading.uncertain}
+              aria-pressed={reading.abstain}
+              onClick={reading.setAbstain}
+            >
+              Не знаю
+            </button>
             <span>Not useful</span>
             <span>Very useful</span>
           </div>
@@ -252,18 +379,35 @@ export function FocusedReading({
         <button
           class="primary-button focused-reading__next"
           aria-busy={!!busy}
-          disabled={!!busy || !state || (!state.read && score === null)}
+          disabled={
+            !!busy ||
+            !state ||
+            (commit && commitIds === null) ||
+            (!state.read && score === null && !reading.abstain && !commit)
+          }
           onClick={() => {
+            if (commit && commitIds) {
+              if (commitIds.length) void reading.completeCommits(commitIds);
+              else void reading.continue();
+              return;
+            }
             if (state?.read && !reading.uncertain) void reading.continue();
-            else if (article) setConfirming(article.id);
+            else if (article) {
+              if (commit && score === null) reading.setAbstain();
+              setConfirming(article.id);
+            }
           }}
         >
           <span>
-            {reading.uncertain
-              ? "Retry saving"
-              : state?.read
-                ? "Continue →"
-                : "Read & next →"}
+            {commit
+              ? commitIds?.length
+                ? "Все прочитаны →"
+                : "Далее →"
+              : reading.uncertain
+                ? "Retry saving"
+                : state?.read
+                  ? "Continue →"
+                  : "Read & next →"}
           </span>
           {!!busy && (
             <span class="focused-reading__pending">
@@ -274,7 +418,13 @@ export function FocusedReading({
         <StatusRegion class="focused-reading__status" busy={!!busy}>
           <span class={reading.error ? "ai-error" : ""}>
             {reading.error ||
+              reading.session.storageError ||
               busy ||
+              (commit
+                ? commitIds
+                  ? `${commitIds.length} коммитов · отметка по кнопке`
+                  : "Загружаю подборку коммитов…"
+                : "") ||
               (reading.done
                 ? "Queue complete"
                 : state?.read
@@ -310,12 +460,15 @@ export function FocusedReading({
       </footer>
       {article &&
         confirming === article.id &&
-        score !== null &&
+        (score !== null || reading.abstain) &&
         (!state?.read || !!busy || reading.uncertain) && (
           <RatingReasonDialog
             score={score}
             reason={reading.reason}
             onReason={reading.setReason}
+            onScore={(value) =>
+              value === null ? reading.setAbstain() : reading.setScore(value)
+            }
             busy={!!busy}
             uncertain={reading.uncertain}
             error={reading.error || reading.draftError}

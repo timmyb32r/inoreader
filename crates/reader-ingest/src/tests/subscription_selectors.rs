@@ -133,3 +133,68 @@ fn telegram_text_precedes_media_warning_and_unavailable_posts_are_retained() {
             .contains("tgme_widget_message_bubble"));
     }
 }
+
+#[test]
+fn main_navigation_and_author_biography_do_not_replace_article_body() {
+    let ali = r#"<main class="blog-nav-center">Blog Events Webinars</main><div class="wrap-main-left-article markdown-body"><h2>Architecture</h2><p>Actual database engine internals.</p></div><main>Comments</main>"#;
+    let actual = crate::web_feed::readable_fragment(ali);
+    assert!(actual.contains("Actual database engine internals"));
+    assert!(!actual.contains("Webinars"));
+    let git = r#"<main><article class="author-bio">Author name</article><div class="post__content"><h2>New Git features</h2><p>Correct article.</p></div></main>"#;
+    assert!(crate::web_feed::readable_fragment(git).contains("Correct article"));
+    let cloud = r#"<article>Header navigation<div class="post-content"><header><nav>Blog Post Tags All tags Matching tags Cryptography DNS DNSSEC</nav></header><div class="article-content"><p>The engineering article.</p></div><button>Back to top</button></div>Recommended posts</article>"#;
+    let actual = crate::web_feed::readable_fragment(cloud);
+    assert!(actual.contains("engineering article"));
+    assert!(!actual.contains("Header navigation"));
+    assert!(!actual.contains("Recommended posts"));
+    assert!(!actual.contains("All tags"));
+    assert!(!actual.contains("Back to top"));
+    let simple = r#"<div class="post-content"><p>Older authored post body.</p></div>"#;
+    assert!(crate::web_feed::readable_fragment(simple).contains("Older authored post body"));
+}
+
+#[test]
+fn video_duration_is_declared_and_does_not_guess_shorts() {
+    let html = r#"<script>var ytInitialPlayerResponse={"videoDetails":{"lengthSeconds":"90"},"other":true};</script>"#;
+    let url = url::Url::parse("https://www.youtube.com/watch?v=id").unwrap();
+    let v = crate::extract_video(html, &url).unwrap().unwrap();
+    assert_eq!(v.duration_seconds, Some(90));
+    assert_eq!(v.shorts, None);
+    let url = url::Url::parse("https://www.youtube.com/shorts/id").unwrap();
+    assert_eq!(
+        crate::extract_video(html, &url).unwrap().unwrap().shorts,
+        Some(true)
+    );
+}
+
+#[test]
+fn invalid_declared_video_duration_fails_without_substitution() {
+    let url = url::Url::parse("https://www.youtube.com/watch?v=id").unwrap();
+    for duration in ["-1", "0.5", "18446744073709551616", "unknown"] {
+        let html = format!(r#"{{"videoDetails":{{"lengthSeconds":"{duration}"}}}}"#);
+        assert!(crate::extract_video(&html, &url).is_err());
+    }
+}
+
+#[test]
+fn reddit_flair_uses_authored_metadata_and_does_not_guess_title() {
+    let url =
+        url::Url::parse("https://www.reddit.com/r/dataengineering/comments/id/title/").unwrap();
+    assert_eq!(
+        crate::video::extract_reddit_flair(
+            "<shreddit-post-flair><span>Career</span></shreddit-post-flair>",
+            &url
+        )
+        .as_deref(),
+        Some("Career")
+    );
+    assert_eq!(
+        crate::video::extract_reddit_flair("<h1>A career in databases</h1>", &url),
+        None
+    );
+    let other = url::Url::parse("https://example.com/article").unwrap();
+    assert_eq!(
+        crate::video::extract_reddit_flair("<span class='linkflairlabel'>Career</span>", &other),
+        None
+    );
+}

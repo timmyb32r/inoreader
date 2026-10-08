@@ -59,42 +59,21 @@ pub async fn update_article<R: ArticleRepository>(
         .await
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum MarkReadError {
-    #[error(transparent)]
-    Repository(#[from] RepositoryError),
-    #[error("selection exceeds configured bulk mutation limit")]
-    Limit,
-}
-
-/// One atomic operation over a bounded snapshot. Concurrent revisions abort the
-/// whole write. New arrivals after selection belong to the next operation.
+/// One atomic owned snapshot, streamed in configured batches. New arrivals after
+/// the transaction snapshot belong to the next operation. Any failed batch rolls
+/// back every write and read event; the batch size never caps the total selection.
 pub async fn mark_articles_read<R: ArticleRepository + crate::SubscriptionRepository>(
     repository: &R,
     workspace: &OwnedWorkspace,
     scope: crate::ArticleScope,
-    limit: crate::SelectionLimit,
-) -> Result<(), MarkReadError> {
+    batch: crate::SelectionLimit,
+) -> Result<(), RepositoryError> {
     if let Some(id) = scope.subscription() {
         if repository.subscription(id).await?.workspace_id() != workspace.id {
-            return Err(RepositoryError::NotFound.into());
+            return Err(RepositoryError::NotFound);
         }
     }
-    let mut selected = repository
-        .unread_selection(workspace.id, scope, limit)
-        .await?;
-    if selected.len() > limit.get() {
-        return Err(MarkReadError::Limit);
-    }
-    for article in &mut selected {
-        article.revision = article
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| RepositoryError::Storage("article revision exhausted".into()))?;
-        article.state.read = true;
-    }
     repository
-        .mark_articles_read_atomic(workspace.id, selected)
-        .await?;
-    Ok(())
+        .mark_scope_read_atomic(workspace.id, scope, batch)
+        .await
 }

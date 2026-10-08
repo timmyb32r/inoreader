@@ -92,10 +92,13 @@ test("translation traverses real HTTP, worker and PostgreSQL, retains failure an
   await page
     .getByRole("button", { name: "Translate paragraphs", exact: true })
     .click();
-  await page
+  const restoredParagraph = page
     .locator(".article-content p")
-    .filter({ hasText: "Exact source text" })
-    .click();
+    .filter({ hasText: "Exact source text" });
+  // Cached annotation waits for scrolling/presses to finish; click only once the
+  // paragraph is actually interactive, not merely present after reload.
+  await expect(restoredParagraph).toHaveAttribute("data-translatable", "true");
+  await restoredParagraph.click();
   await expect(
     page.getByRole("region", { name: "Paragraph translation" }),
   ).toContainText("Точный исходный текст.");

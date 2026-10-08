@@ -389,6 +389,7 @@ async fn fanout_preserves_the_exact_url_title_description_key() {
     let source = source();
     let source_id = source.id();
     let parsed = reader_collectors::ParsedRecord {
+        categories: None,
         description_media_type: Some("text/plain".into()),
         upstream_id: "one".into(),
         original_url: "/same".into(),
@@ -545,6 +546,7 @@ async fn web_feed_initial_depth_is_marked_incomplete_and_refresh_uses_browser_pa
                 SourceRecordId::new(),
                 source_id,
                 reader_collectors::ParsedRecord {
+                    categories: None,
                     description_media_type: Some("text/plain".into()),
                     upstream_id: format!("item-{index}"),
                     original_url: format!("/item-{index}"),
@@ -718,6 +720,7 @@ fn fulltext_store(source: SourceDefinition, id: SourceRecordId) -> StoreStub {
         id,
         source.id(),
         reader_collectors::ParsedRecord {
+            categories: None,
             upstream_id: "fixture".into(),
             original_url: "https://example.test/a".into(),
             absolute_url: Some(Url::parse("https://example.test/a").unwrap()),
@@ -902,6 +905,7 @@ async fn dropbox_collection_preserves_rss_metadata_before_commit() {
             SourceRecordId::new(),
             source_id,
             reader_collectors::ParsedRecord {
+                categories: None,
                 upstream_id: "https://dropbox.tech/article".into(),
                 original_url: "https://dropbox.tech/article".into(),
                 absolute_url: Some(Url::parse("https://dropbox.tech/article").unwrap()),

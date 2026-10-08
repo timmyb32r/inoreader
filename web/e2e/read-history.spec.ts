@@ -63,7 +63,10 @@ for (const trigger of ["card", "bar", "calendar"] as const) {
     await expect(target).toBeEnabled();
     await target.scrollIntoViewIfNeeded();
     const before = await target.boundingBox();
-    const feed = page.getByRole("button", { name: "Open feed", exact: true });
+    const feed = page.getByRole("button", {
+      name: "Начать чтение",
+      exact: true,
+    });
     const feedBefore = await feed.boundingBox();
     await target.click();
     await expect(target).toBeDisabled();

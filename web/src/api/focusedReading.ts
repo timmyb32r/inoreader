@@ -13,6 +13,15 @@ export class FocusedReadingClient {
   constructor(private readonly transport: Transport) {}
   state = (workspace: string, article: string) =>
     this.transport(path(article) + query(workspace), undefined, "ReadingState");
+  commits = (workspace: string, article: string, cursor?: string) =>
+    this.transport(
+      path(article) +
+        "/commits" +
+        query(workspace) +
+        (cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""),
+      undefined,
+      "ArticlePageView",
+    );
   next = (workspace: string, article: string) =>
     this.transport(
       path(article) + "/next" + query(workspace),

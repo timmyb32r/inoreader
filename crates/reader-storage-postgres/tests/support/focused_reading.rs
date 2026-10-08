@@ -49,7 +49,7 @@ pub async fn verify(pool: &PgPool) {
     let command = CompleteReading {
         operation_id: Uuid::new_v4(),
         expected_revision: before.revision,
-        rating: ArticleRating::try_from(8).unwrap(),
+        rating: Some(ArticleRating::try_from(8).unwrap()),
         reason: Some(
             reader_application::RatingReason::try_from(
                 "  Полезно: CDC 中文 🦆\r\nНо нет замеров.  ".to_owned(),
@@ -62,9 +62,19 @@ pub async fn verify(pool: &PgPool) {
         repository.complete_reading(owner.id, workspace.id(), article.id, command.clone())
     );
     let result = first.unwrap();
+    let method: String = sqlx::query_scalar("SELECT method FROM article_read_events WHERE workspace_id=$1 AND article_id=$2 ORDER BY revision DESC LIMIT 1").bind(workspace.id().as_uuid().to_string()).bind(article.id.as_uuid().to_string()).fetch_one(pool).await.unwrap();
+    assert_eq!(method, "reader");
+    assert_eq!(
+        repository
+            .article_presentation(workspace.id(), article.id)
+            .await
+            .unwrap()
+            .read_method,
+        Some(reader_application::ReadMethod::Reader)
+    );
     assert_eq!(result, repeated.unwrap());
     assert!(result.state.read);
-    assert_eq!(result.state.rating, Some(command.rating));
+    assert_eq!(result.state.rating, command.rating);
     assert_eq!(result.state.reason, command.reason);
     assert_eq!(
         repository
@@ -99,7 +109,7 @@ pub async fn verify(pool: &PgPool) {
     .unwrap();
     assert_eq!(events, 1);
     let mut different = command.clone();
-    different.rating = ArticleRating::try_from(1).unwrap();
+    different.rating = Some(ArticleRating::try_from(1).unwrap());
     assert!(matches!(
         repository
             .complete_reading(owner.id, workspace.id(), article.id, different)
@@ -136,7 +146,7 @@ pub async fn verify(pool: &PgPool) {
     let second = CompleteReading {
         operation_id: Uuid::new_v4(),
         expected_revision: undone.state.revision,
-        rating: ArticleRating::try_from(9).unwrap(),
+        rating: Some(ArticleRating::try_from(9).unwrap()),
         reason: Some(
             reader_application::RatingReason::try_from("Previous explanation".to_owned()).unwrap(),
         ),
@@ -169,7 +179,7 @@ pub async fn verify(pool: &PgPool) {
             .await
             .unwrap()
             .rating,
-        Some(second.rating)
+        second.rating
     );
     assert!(matches!(
         repository
@@ -198,7 +208,7 @@ pub async fn verify(pool: &PgPool) {
     let third = CompleteReading {
         operation_id: Uuid::new_v4(),
         expected_revision: prior.revision,
-        rating: ArticleRating::try_from(2).unwrap(),
+        rating: Some(ArticleRating::try_from(2).unwrap()),
         reason: None,
     };
     repository
@@ -324,7 +334,7 @@ pub async fn verify(pool: &PgPool) {
             .await
             .unwrap()
             .rating,
-        Some(command.rating)
+        command.rating
     );
     let mut tx = pool.begin().await.unwrap();
     sqlx::query("DELETE FROM articles WHERE id=$1")
@@ -352,5 +362,210 @@ pub async fn verify(pool: &PgPool) {
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&retained).unwrap()["command"]["reason"],
         serde_json::to_value(&command.reason).unwrap()
+    );
+    // An explicit abstention has a receipt/date, but no numeric training label.
+    let unknown_article = Article {
+        id: ArticleId::new(),
+        key: other.key.clone(),
+        state: ArticleState::default(),
+        first_arrived_at: chrono::Utc::now(),
+        origins: vec![],
+        revision: 0,
+    };
+    repository
+        .save_article(workspace.id(), None, unknown_article.clone())
+        .await
+        .unwrap();
+    let receipt = repository
+        .complete_reading(
+            owner.id,
+            workspace.id(),
+            unknown_article.id,
+            CompleteReading {
+                operation_id: Uuid::new_v4(),
+                expected_revision: ReadingRevision::new(0).unwrap(),
+                rating: None,
+                reason: Some("Не знаю".to_string().try_into().unwrap()),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        receipt.state.read && receipt.state.rating.is_none() && receipt.state.rated_at.is_some()
+    );
+    assert_eq!(
+        repository
+            .reading_state(owner.id, workspace.id(), unknown_article.id)
+            .await
+            .unwrap(),
+        receipt.state
+    );
+    assert!(repository
+        .reading_state(foreign.id, workspace.id(), unknown_article.id)
+        .await
+        .is_err());
+    let undone = repository
+        .undo_reading(
+            owner.id,
+            workspace.id(),
+            unknown_article.id,
+            receipt.operation_id,
+        )
+        .await
+        .unwrap();
+    assert!(!undone.state.read && undone.state.rated_at.is_none());
+}
+
+pub async fn verify_commit_projects(pool: &PgPool) {
+    use reader_application::{
+        ArticlePageCursor, ArticlePageDirection, ArticlePageRequest, ArticleScope, CommitProject,
+        SelectionLimit,
+    };
+    let repository =
+        PostgresRepository::new(pool.clone(), ReasonPolicy::new(256).unwrap(), 20, 86400).unwrap();
+    let owner = AccountRecord {
+        id: AccountId::new(),
+        username: Uuid::new_v4().to_string(),
+        password_hash: "fixture".into(),
+        admin: false,
+        auth_revision: 0,
+        revision: 0,
+    };
+    let workspace = Workspace::new(WorkspaceId::new(), owner.id, "Project commits".into());
+    repository
+        .create_account_and_workspace(owner.clone(), workspace.clone())
+        .await
+        .unwrap();
+    let foreign = AccountRecord {
+        id: AccountId::new(),
+        username: Uuid::new_v4().to_string(),
+        password_hash: "fixture".into(),
+        admin: false,
+        auth_revision: 0,
+        revision: 0,
+    };
+    let foreign_workspace = Workspace::new(
+        WorkspaceId::new(),
+        foreign.id,
+        "Other project commits".into(),
+    );
+    repository
+        .create_account_and_workspace(foreign, foreign_workspace.clone())
+        .await
+        .unwrap();
+    let mut expected = Vec::new();
+    for (index, path, read) in [
+        (0, "engine/commit/a", false),
+        (1, "engine/commits/b", false),
+        (2, "engine/commit/c", false),
+        (3, "engine/commit/read", true),
+        (4, "engine-extra/commit/d", false),
+        (5, "engine/issues/1", false),
+    ] {
+        let article = Article {
+            id: ArticleId::new(),
+            key: DedupKey {
+                location: url::Url::parse(&format!("https://github.com/acme/{path}"))
+                    .unwrap()
+                    .into(),
+                title: path.into(),
+                description: None,
+            },
+            state: ArticleState {
+                read,
+                ..Default::default()
+            },
+            first_arrived_at: Utc::now() + chrono::Duration::seconds(index),
+            origins: vec![],
+            revision: 0,
+        };
+        repository
+            .save_article(workspace.id(), None, article.clone())
+            .await
+            .unwrap();
+        repository
+            .save_article(foreign_workspace.id(), None, article.clone())
+            .await
+            .unwrap();
+        if index < 3 {
+            expected.push(article.id);
+        }
+    }
+    let project = CommitProject::from_url("https://github.com/acme/engine/commit/a").unwrap();
+    let request = |cursor| {
+        ArticlePageRequest::new(
+            ArticleScope::Feed,
+            cursor,
+            ArticlePageDirection::Older,
+            SelectionLimit::new(2).unwrap(),
+        )
+        .unwrap()
+        .with_commit_project(project.clone())
+        .unwrap()
+    };
+    let first = repository
+        .article_summary_page(workspace.id(), request(None))
+        .await
+        .unwrap();
+    assert_eq!(first.total, 3);
+    assert_eq!(first.articles.len(), 2);
+    assert!(first.has_older);
+    let last = &first.articles.last().unwrap().article;
+    let second = repository
+        .article_summary_page(
+            workspace.id(),
+            request(Some(ArticlePageCursor {
+                article_id: last.id,
+                arrived_at: last.first_arrived_at,
+            })),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second.articles.len(), 1);
+    assert!(!second.has_older);
+    let mut actual: Vec<_> = first
+        .articles
+        .iter()
+        .chain(second.articles.iter())
+        .map(|a| a.article.id)
+        .collect();
+    actual.sort_by_key(|id| id.as_uuid());
+    expected.sort_by_key(|id| id.as_uuid());
+    assert_eq!(actual, expected);
+    let owned = reader_application::article_commands::OwnedWorkspace::resolve(
+        &repository,
+        owner.id,
+        workspace.id(),
+    )
+    .await
+    .unwrap();
+    reader_application::article_commands::update_article(
+        &repository,
+        &owned,
+        actual[0],
+        reader_application::article_commands::ArticlePatch {
+            read: Some(true),
+            later: None,
+        },
+    )
+    .await
+    .unwrap();
+    let updated = repository
+        .article_summary_page(workspace.id(), request(None))
+        .await
+        .unwrap();
+    assert_eq!(updated.total, 2);
+    let foreign_page = repository
+        .article_summary_page(foreign_workspace.id(), request(None))
+        .await
+        .unwrap();
+    assert_eq!(foreign_page.total, 3);
+    assert!(
+        !repository
+            .article(foreign_workspace.id(), actual[0])
+            .await
+            .unwrap()
+            .state
+            .read
     );
 }

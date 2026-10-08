@@ -111,22 +111,15 @@ pub(super) async fn mark_all_read<R: ReaderRepository + 'static>(
         body.subscription_id.map(SubscriptionId::from_uuid),
     )
     .map_err(ApiFailure::Validation)?;
-    let limit = s.bulk_mutation_limit;
+    let batch = s.bulk_mutation_batch;
     reader_application::article_commands::mark_articles_read(
         s.repository.as_ref(),
         &owned,
         scope,
-        limit,
+        batch,
     )
     .await
-    .map_err(|error| match error {
-        reader_application::article_commands::MarkReadError::Repository(error) => {
-            ApiFailure::Repository(error)
-        }
-        reader_application::article_commands::MarkReadError::Limit => {
-            ApiFailure::Validation("selection exceeds configured bulk mutation limit")
-        }
-    })?;
+    .map_err(ApiFailure::Repository)?;
     Ok(StatusCode::NO_CONTENT)
 }
 

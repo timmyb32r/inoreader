@@ -62,7 +62,7 @@ describe("activity dashboard", () => {
       />,
     );
     const grid = screen.getByRole("grid");
-    const button = screen.getByRole("button", { name: "Open feed" });
+    const button = screen.getByRole("button", { name: "Начать чтение" });
     expect(grid).toHaveAttribute("aria-busy", "true");
     act(() => {
       window.dispatchEvent(new Event("focus"));
@@ -76,7 +76,7 @@ describe("activity dashboard", () => {
     ).toBe(true);
     expect(screen.getByRole("grid")).toBe(grid);
     expect(grid.querySelectorAll('[role="gridcell"]')).toHaveLength(364);
-    expect(screen.getByRole("button", { name: "Open feed" })).toBe(button);
+    expect(screen.getByRole("button", { name: "Начать чтение" })).toBe(button);
     expect(
       screen.getByText("articles marked read today").previousElementSibling,
     ).toHaveTextContent("—");

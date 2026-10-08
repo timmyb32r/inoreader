@@ -136,7 +136,10 @@ async fn fixture_title(
     initial.snapshot.as_mut().unwrap().title = title.into();
     initial.operations[0].kind = OperationKind::Start { regenerate: true };
     let id = initial.view.id;
-    store.create_chat(initial, operation, true).await.unwrap();
+    store
+        .create_chat(initial, operation, true, false)
+        .await
+        .unwrap();
     let provider = Arc::new(Scripted {
         store: store.clone(),
         owner,

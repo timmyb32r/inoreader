@@ -195,7 +195,10 @@ pub async fn verify(pool: &PgPool) {
         .fetch_one(pool)
         .await
         .unwrap();
-    assert_eq!(count, 1, "one-time backfill excludes read archive");
+    assert_eq!(
+        count, 0,
+        "unprovenanced archive is never enrolled automatically"
+    );
     let mut later = old_read.clone();
     later.id = ArticleId::new();
     reader
@@ -207,10 +210,13 @@ pub async fn verify(pool: &PgPool) {
         .fetch_one(pool)
         .await
         .unwrap();
-    assert_eq!(count, 2, "new articles enroll even if already marked read");
+    assert_eq!(
+        count, 0,
+        "article insert cannot bypass owned source admission"
+    );
     let record = ai_tests::record(account, ws, article.id.as_uuid(), Uuid::new_v4());
     let op = record.operations[0].id;
-    let chat = store.create_chat(record, op, false).await.unwrap();
+    let chat = store.create_chat(record, op, false, false).await.unwrap();
     store
         .reserve(
             account,
@@ -235,7 +241,10 @@ pub async fn verify(pool: &PgPool) {
             .await,
         Err(AiError::Budget)
     ));
-    store.defer_budget(&claim).await.unwrap();
+    store
+        .defer_work(&claim, reader_ai::AiDeferral::DailyBudget)
+        .await
+        .unwrap();
     assert!(
         store.claim(60).await.unwrap().is_none(),
         "no busy loop before Moscow midnight"
@@ -302,10 +311,29 @@ pub async fn verify(pool: &PgPool) {
         .save_subscription(None, subscription.clone())
         .await
         .unwrap();
+    let public_source: String =
+        sqlx::query_scalar("SELECT source_id FROM subscription_sources WHERE subscription_id=$1")
+            .bind(subscription.id().as_uuid().to_string())
+            .fetch_one(pool)
+            .await
+            .unwrap();
     let source = reader_core::SourceRecordId::new();
+    sqlx::query("INSERT INTO ai_record_discovery(record,source,source_order) VALUES($1,$2,0)")
+        .bind(source.as_uuid().to_string())
+        .bind(public_source)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE subscription_ai_bootstrap SET cutoff=0,ready=true WHERE subscription=$1")
+        .bind(subscription.id().as_uuid().to_string())
+        .execute(pool)
+        .await
+        .unwrap();
     let refresh = Uuid::new_v4();
     sqlx::query("INSERT INTO library_origins(workspace_id,article_id,subscription_id,source_record_id) VALUES($1,$2,$3,$4)").bind(ws.to_string()).bind(incoming.id.as_uuid().to_string()).bind(subscription.id().as_uuid().to_string()).bind(source.as_uuid().to_string()).execute(pool).await.unwrap();
     let pointer = reader_ingest::ContentManifestPointer {
+        reddit_flair: None,
+        video: None,
         publication: None,
         record_id: source,
         source_revision: 0,

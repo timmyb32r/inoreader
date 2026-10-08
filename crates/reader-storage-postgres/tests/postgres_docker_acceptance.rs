@@ -21,6 +21,8 @@ use uuid::Uuid;
 
 #[path = "support/focused_reading.rs"]
 mod focused_reading;
+#[path = "support/interests.rs"]
+mod interests;
 #[path = "support/rating_reason_upgrade.rs"]
 mod rating_reason_upgrade;
 
@@ -53,8 +55,15 @@ mod schema_contracts;
 #[path = "support/schema_upgrade.rs"]
 mod schema_upgrade;
 
+#[path = "support/ai_bootstrap.rs"]
+mod ai_bootstrap;
+#[path = "support/automatic_schedule.rs"]
+mod automatic_schedule;
+
 #[path = "support/ai_budget.rs"]
 mod ai_budget;
+#[path = "support/ai_statistics.rs"]
+mod ai_statistics;
 
 #[path = "support/ai.rs"]
 mod ai_tests;
@@ -244,7 +253,7 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     .fetch_one(&pool)
     .await
     .expect("count schema tables");
-    assert_eq!(table_count, 72); // Includes ratings and idempotent completion receipts.
+    assert_eq!(table_count, 84); // Includes immutable source discovery and owned initial AI selection.
 
     let index_names: Vec<String> = sqlx::query_scalar(
         "SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND indexname = ANY($1)",
@@ -309,12 +318,17 @@ async fn real_postgres_creates_the_complete_idempotent_schema() {
     verify_lease_fencing(&pool).await;
     verify_repository_isolation(&pool).await;
     verify_article_state_conversion(&pool).await;
+    automatic_schedule::verify(&pool).await;
+    ai_bootstrap::verify(&pool).await;
     ai_budget::verify(&pool).await;
+    ai_statistics::verify(&pool).await;
     ai_tests::verify(&pool).await;
     ai_tests::shutdown::parent(&connection);
     glossary_tests::verify(&pool).await;
     bulk_read::verify(&pool).await;
     focused_reading::verify(&pool).await;
+    focused_reading::verify_commit_projects(&pool).await;
+    interests::verify(&pool).await;
     article_delivery::verify(&pool).await;
     subscription_deletion::verify(&pool).await;
     attention::verify(&pool).await;
@@ -999,9 +1013,11 @@ async fn verify_database_backup_restore(container: &PostgresContainer, pool: &Pg
         assert_eq!(original, copy, "backup retains every field in {table}");
     }
     // Catalog identity changes when restoring into the separate test database;
-    // column types, collation names, defaults, constraints and ordering do not.
+    // column types, collation names, defaults, constraints and relative ordering do not.
+    // pg_restore compacts physical numbers after dropped-column gaps; aggregate
+    // ordering still verifies the relative order without comparing those numbers.
     for sql in [
-        "SELECT jsonb_agg((to_jsonb(c) - 'table_catalog' - 'udt_catalog' - 'domain_catalog' - 'collation_catalog') ORDER BY table_name,ordinal_position)::text FROM information_schema.columns c WHERE table_schema='public'",
+        "SELECT jsonb_agg((to_jsonb(c) - 'table_catalog' - 'udt_catalog' - 'domain_catalog' - 'collation_catalog' - 'ordinal_position' - 'dtd_identifier') ORDER BY table_name,ordinal_position)::text FROM information_schema.columns c WHERE table_schema='public'",
         "SELECT jsonb_agg(to_jsonb(i) ORDER BY indexname)::text FROM pg_indexes i WHERE schemaname='public'",
     ] {
         let original: String = sqlx::query_scalar(sql).fetch_one(pool).await.unwrap();

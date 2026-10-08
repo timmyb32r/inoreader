@@ -5,6 +5,7 @@ use url::Url;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedRecord {
+    pub categories: Option<Vec<String>>,
     pub upstream_id: String,
     pub original_url: String,
     pub absolute_url: Option<Url>,
@@ -33,7 +34,14 @@ pub fn parse_xml(bytes: &[u8], feed_url: &Url) -> Result<Vec<ParsedRecord>, Feed
         .map(|entry| {
             let link = entry
                 .links
-                .first()
+                .iter()
+                .find(|v| {
+                    v.rel.as_deref() == Some("alternate")
+                        && v.media_type
+                            .as_deref()
+                            .is_none_or(|t| t == "text/html" || t == "application/xhtml+xml")
+                })
+                .or_else(|| entry.links.iter().find(|v| v.rel.is_none()))
                 .map(|v| v.href.clone())
                 .unwrap_or_default();
             let upstream_id = if entry.id.is_empty() {
@@ -54,6 +62,7 @@ pub fn parse_xml(bytes: &[u8], feed_url: &Url) -> Result<Vec<ParsedRecord>, Feed
                 )
             };
             Ok(ParsedRecord {
+                categories: Some(entry.categories.into_iter().map(|v| v.term).collect()),
                 upstream_id,
                 original_url: link,
                 absolute_url,
@@ -105,6 +114,7 @@ pub fn parse_json(bytes: &[u8], feed_url: &Url) -> Result<Vec<ParsedRecord>, Fee
                 )
             };
             Ok(ParsedRecord {
+                categories: None,
                 upstream_id,
                 original_url: link,
                 absolute_url,

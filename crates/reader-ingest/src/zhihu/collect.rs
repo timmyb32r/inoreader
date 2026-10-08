@@ -91,6 +91,7 @@ impl Service {
                         SourceRecordId::new(),
                         source.id(),
                         ParsedRecord {
+                            categories: None,
                             upstream_id: id.clone(),
                             original_url: format!("https://zhuanlan.zhihu.com/p/{id}"),
                             absolute_url: Some(

@@ -17,6 +17,7 @@ mod calls;
 mod chat_document;
 pub(crate) use chat_document::backfill_public_views;
 mod definitions;
+mod interests;
 mod quarantine;
 mod translations;
 mod unchecked;
@@ -233,6 +234,36 @@ fn set_attempt(
 
 #[async_trait]
 impl AiStore for PostgresAiStore {
+    async fn request_statistics(
+        &self,
+        owner: Uuid,
+        range: &StatisticsRange,
+    ) -> Result<AiRequestStatistics, AiError> {
+        let rows: Vec<(String, String, i64, i64, String, String)> = sqlx::query_as("SELECT date_trunc($4,day::timestamp)::date::text,mode,count(*),count(*) FILTER(WHERE actual IS NULL),COALESCE(sum(actual),0)::text,COALESCE(sum(reserved) FILTER(WHERE actual IS NULL),0)::text FROM ai_spending WHERE owner=$1 AND day >= $2 AND day <= $3 GROUP BY 1,mode ORDER BY 1,mode")
+            .bind(owner).bind(range.from()).bind(range.until()).bind(range.bucket().name()).fetch_all(&self.pool).await.map_err(storage)?;
+        Ok(AiRequestStatistics {
+            from: range.from().to_string(),
+            until: range.until().to_string(),
+            bucket: range.bucket(),
+            timezone: "Europe/Moscow".into(),
+            rows: rows
+                .into_iter()
+                .map(
+                    |(period, mode, requests, unconfirmed, spent_usd, reserved_usd)| {
+                        Ok(AiRequestStatisticsRow {
+                            period,
+                            mode: serde_json::from_value(serde_json::Value::String(mode))
+                                .map_err(storage)?,
+                            requests,
+                            unconfirmed,
+                            spent_usd,
+                            reserved_usd,
+                        })
+                    },
+                )
+                .collect::<Result<_, AiError>>()?,
+        })
+    }
     async fn spending(&self, owner: Uuid, limit: &str) -> Result<AiSpending, AiError> {
         self.spending_view(owner, limit).await
     }
@@ -243,7 +274,7 @@ impl AiStore for PostgresAiStore {
         reservation: &SpendReservation,
     ) -> Result<(), AiError> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        budget::reserve(&mut tx, owner, id, reservation).await?;
+        budget::reserve(&mut tx, owner, id, reservation, false).await?;
         tx.commit().await.map_err(storage)
     }
     async fn settle(&self, owner: Uuid, id: Uuid, amount: &str) -> Result<(), AiError> {
@@ -252,6 +283,30 @@ impl AiStore for PostgresAiStore {
         if count != 1 {
             return Err(AiError::Conflict);
         }
+        Ok(())
+    }
+    async fn configure_automatic_schedule(
+        &self,
+        policy: &reader_ai::AutomaticScheduleConfig,
+    ) -> Result<(), AiError> {
+        policy.validate()?;
+        let changed = sqlx::query("UPDATE ai_automatic_schedule SET pause_peak_hours=$1,calendar_valid_through=$2,holidays=$3 WHERE singleton")
+            .bind(policy.pause_peak_hours).bind(policy.holiday_calendar_valid_through).bind(&policy.public_holidays).execute(&self.pool).await.map_err(storage)?.rows_affected();
+        if changed != 1 {
+            return Err(AiError::Storage);
+        }
+        Ok(())
+    }
+    async fn configure_initial_articles(&self, limit: u32) -> Result<(), AiError> {
+        let limit = i32::try_from(limit).map_err(|_| AiError::Configuration)?;
+        if limit <= 0 {
+            return Err(AiError::Configuration);
+        }
+        sqlx::query("UPDATE ai_bootstrap_policy SET initial_articles=$1 WHERE singleton")
+            .bind(limit)
+            .execute(&self.pool)
+            .await
+            .map_err(storage)?;
         Ok(())
     }
     async fn enroll_summaries(&self, owners: &[Uuid]) -> Result<(), AiError> {
@@ -274,16 +329,22 @@ impl AiStore for PostgresAiStore {
         Ok(())
     }
     async fn prioritize(&self, owner: Uuid, chat: Uuid) -> Result<(), AiError> {
-        sqlx::query("UPDATE ai_chats SET priority_at=now() WHERE owner=$1 AND id=$2")
-            .bind(owner)
-            .bind(chat)
-            .execute(&self.pool)
-            .await
-            .map_err(storage)?;
+        sqlx::query(
+            "UPDATE ai_chats SET priority_at=now(),automatic=false,scheduled_at=now() WHERE owner=$1 AND id=$2",
+        )
+        .bind(owner)
+        .bind(chat)
+        .execute(&self.pool)
+        .await
+        .map_err(storage)?;
         Ok(())
     }
-    async fn defer_budget(&self, claim: &ClaimedChat) -> Result<(), AiError> {
-        self.budget_wait(claim).await
+    async fn defer_work(
+        &self,
+        claim: &ClaimedChat,
+        reason: reader_ai::AiDeferral,
+    ) -> Result<(), AiError> {
+        self.defer_chat(claim, reason).await
     }
 
     async fn retain_reply(
@@ -329,8 +390,10 @@ impl AiStore for PostgresAiStore {
         record: DefinitionsRecord,
         operation: Uuid,
         regenerate: bool,
+        automatic: bool,
     ) -> Result<DefinitionsJob, AiError> {
-        self.insert_definitions(record, operation, regenerate).await
+        self.insert_definitions(record, operation, regenerate, automatic)
+            .await
     }
     async fn claim_definitions(
         &self,
@@ -532,7 +595,11 @@ impl AiStore for PostgresAiStore {
         // Text-node boundaries are explicit newline separators in the AI input.
         // Preserve the original safe HTML separately; citations target this exact
         // documented text snapshot, not whitespace guessed by the browser.
-        let text = reader_ai::article_plain_text(&html);
+        let mut text = reader_ai::article_plain_text(&html);
+        if let Some(video) = &content.pointer.video {
+            text.push_str("\n\nSource-declared video metadata: ");
+            text.push_str(&serde_json::to_string(video).map_err(storage)?);
+        }
         if text.trim().is_empty() {
             return Ok(ArticleInput::Failed);
         }
@@ -549,6 +616,7 @@ impl AiStore for PostgresAiStore {
         record: ChatRecord,
         operation: Uuid,
         regenerate: bool,
+        automatic: bool,
     ) -> Result<ChatRecord, AiError> {
         let owner = record.owner;
         let mut tx = self.pool.begin().await.map_err(storage)?;
@@ -588,8 +656,8 @@ impl AiStore for PostgresAiStore {
             }
         }
         let (document, inputs) = chat_document::encode(&record)?;
-        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document,inputs,public_view) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)")
-            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(document).bind(inputs).bind(encode(&record.clone().into_public_view()?)?).execute(&mut *tx).await.map_err(storage)?;
+        sqlx::query("INSERT INTO ai_chats(id,owner,workspace,article,created_at,status,document,inputs,public_view,automatic) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+            .bind(record.view.id).bind(owner).bind(record.view.workspace_id).bind(record.view.article_id).bind(record.view.created_at).bind(status(record.view.status)).bind(document).bind(inputs).bind(encode(&record.clone().into_public_view()?)?).bind(automatic).execute(&mut *tx).await.map_err(storage)?;
         save_operation(&mut tx, owner, record.view.id, operation, &kind).await?;
         tx.commit().await.map_err(storage)?;
         Ok(record)
@@ -743,7 +811,7 @@ impl AiStore for PostgresAiStore {
         };
         record.view.error = None;
         write_record(&mut tx, &record).await?;
-        sqlx::query("UPDATE ai_chats SET lease=NULL,lease_until=NULL WHERE id=$1 AND owner=$2")
+        sqlx::query("UPDATE ai_chats SET lease=NULL,lease_until=NULL,automatic=false WHERE id=$1 AND owner=$2")
             .bind(id)
             .bind(owner)
             .execute(&mut *tx)
@@ -791,7 +859,7 @@ impl AiStore for PostgresAiStore {
                 Err(_) => quarantine::chat(&mut tx, id).await?,
             }
         }
-        let row: Option<quarantine::ChatRow> = sqlx::query_as("SELECT c.id,c.owner,c.workspace,c.article,json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND c.scheduled_at<=now() AND w.document::jsonb->>'owner'=c.owner::text ORDER BY c.priority_at DESC NULLS LAST,CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
+        let row: Option<quarantine::ChatRow> = sqlx::query_as("SELECT c.id,c.owner,c.workspace,c.article,json_build_array(c.document,c.inputs)::text FROM ai_chats c JOIN workspaces w ON w.id=c.workspace::text WHERE c.status IN ('queued','waiting_content') AND c.lease IS NULL AND c.scheduled_at<=now() AND (NOT c.automatic OR (SELECT reader_ai_automatic_resume_at(statement_timestamp())) IS NULL) AND w.document::jsonb->>'owner'=c.owner::text ORDER BY c.priority_at DESC NULLS LAST,CASE c.status WHEN 'queued' THEN 0 ELSE 1 END,c.scheduled_at,c.id LIMIT 1 FOR UPDATE OF c SKIP LOCKED").fetch_optional(&mut *tx).await.map_err(storage)?;
         let Some(row) = row else {
             tx.commit().await.map_err(storage)?;
             return Ok(None);

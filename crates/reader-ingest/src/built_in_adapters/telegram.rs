@@ -160,6 +160,7 @@ fn parse_page(
             reader_core::SourceRecordId::new(),
             source.id(),
             ParsedRecord {
+                categories: None,
                 upstream_id: permalink.clone(),
                 original_url: permalink.clone(),
                 absolute_url: Some(

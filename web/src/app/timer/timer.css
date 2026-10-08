@@ -95,3 +95,209 @@
     display: none;
   }
 }
+
+.reading-clock {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 60px;
+  width: 480px;
+  flex: 0 0 auto;
+  padding: 7px 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-muted);
+}
+.reading-clock__phase {
+  width: 118px;
+  flex-shrink: 0;
+}
+.reading-clock__phase > strong {
+  display: block;
+  height: 15px;
+  font-size: 11px;
+  color: var(--accent-deep);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.reading-clock__digits {
+  font:
+    600 19px ui-monospace,
+    monospace;
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  min-width: 61px;
+}
+.reading-clock__status {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: inline-block;
+  vertical-align: middle;
+  width: 55px;
+  line-height: 11px;
+}
+.reading-clock__other {
+  width: 105px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+}
+.reading-clock__other span {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: block;
+  white-space: nowrap;
+}
+.reading-clock__other strong {
+  font:
+    500 15px ui-monospace,
+    monospace;
+}
+.reading-clock__control {
+  width: 28px;
+  height: 32px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.reading-clock__control svg {
+  width: 15px;
+  height: 15px;
+}
+.reading-clock__return,
+.countdown button.countdown__return {
+  height: 32px;
+  width: 145px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  border-radius: 6px;
+  border: 0;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 600;
+}
+.reading-clock__return svg,
+.countdown__return svg {
+  width: 14px;
+  height: 14px;
+}
+.reading-clock__return:hover,
+.countdown button.countdown__return:not(:disabled):hover {
+  background: var(--accent-deep);
+}
+.reading-clock button:active {
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+.reading-clock button:disabled,
+.countdown button.countdown__return:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.reading-clock__track {
+  position: absolute;
+  bottom: 5px;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  background: var(--line);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.reading-clock__track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.app {
+  --topbar-height: 76px;
+}
+.app > .topbar {
+  height: var(--topbar-height);
+}
+.app > .reader-grid {
+  height: calc(100% - var(--topbar-height));
+}
+@media (max-width: 760px) {
+  .app {
+    --topbar-height: 124px;
+  }
+  .app > .topbar {
+    height: var(--topbar-height);
+    position: relative;
+    padding-bottom: 70px;
+  }
+  .app > .reader-grid {
+    height: calc(100% - var(--topbar-height));
+  }
+  .topbar > .reading-clock,
+  .topbar > .countdown {
+    position: absolute;
+    right: 10px;
+    bottom: 8px;
+  }
+  .reading-clock {
+    width: calc(100% - 20px);
+    gap: 5px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .reading-clock__phase {
+    width: 102px;
+  }
+  .reading-clock__other {
+    width: 90px;
+    padding-left: 7px;
+  }
+  .reading-clock__digits {
+    font-size: 17px;
+    min-width: 55px;
+  }
+  .reading-clock__status {
+    width: 45px;
+    font-size: 9px;
+  }
+  .reading-clock__control {
+    width: 26px;
+  }
+  .reading-clock__return {
+    width: 32px;
+  }
+  .reading-clock__return span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@media (max-width: 1000px) {
+  .topbar .brand {
+    min-width: 0;
+  }
+}
+@media (max-width: 360px) {
+  .reading-clock__phase {
+    width: 95px;
+  }
+  .reading-clock__other {
+    width: 80px;
+  }
+  .reading-clock__status {
+    width: 36px;
+  }
+}
+.reading-clock__other span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

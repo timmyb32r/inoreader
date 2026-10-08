@@ -481,7 +481,9 @@ fn article_dto_keeps_url_sources_failure_reason_and_safe_markup() {
         revision: 0,
     };
     let mut presentation = reader_application::ArticlePresentation {
+        video: None,
         marked_read_at: None,
+        read_method: None,
         publication: Vec::new(),
         description_media_type: None,
         article,
@@ -812,18 +814,11 @@ impl reader_application::ArticleRepository for RouteRepository {
     ) -> Result<(), RepositoryError> {
         route_unused()
     }
-    async fn unread_selection(
+    async fn mark_scope_read_atomic(
         &self,
         _: WorkspaceId,
         _: reader_application::ArticleScope,
         _: reader_application::SelectionLimit,
-    ) -> Result<Vec<Article>, RepositoryError> {
-        route_unused()
-    }
-    async fn mark_articles_read_atomic(
-        &self,
-        _: WorkspaceId,
-        _: Vec<Article>,
     ) -> Result<(), RepositoryError> {
         route_unused()
     }
@@ -1122,7 +1117,9 @@ async fn article_command_resolves_ownership_before_any_article_access() {
 fn description_rendering_uses_declared_format_without_changing_source() {
     let source = "<p>Rust &amp; <strong>SQL</strong></p><p>Next</p><script>bad()</script>";
     let mut value = reader_application::ArticlePresentation {
+        video: None,
         marked_read_at: None,
+        read_method: None,
         publication: Vec::new(),
         article: reader_core::Article {
             id: ArticleId::new(),
@@ -1201,5 +1198,84 @@ impl reader_application::FocusedReadingRepository for RouteRepository {
         _: uuid::Uuid,
     ) -> Result<reader_application::ReadingCompletion, reader_application::RepositoryError> {
         Err(reader_application::RepositoryError::NotFound)
+    }
+}
+
+#[tokio::test]
+async fn commit_group_rejects_guessed_articles_and_foreign_workspaces_before_listing() {
+    let (state, _, subscription) = route_fixture(AccountId::new(), None);
+    let app = router(state);
+    let workspace = subscription.workspace_id().as_uuid();
+    for workspace in [workspace, Uuid::new_v4()] {
+        let request = axum::http::Request::builder()
+            .uri(format!(
+                "/api/articles/{}/reading/commits?workspace_id={workspace}",
+                Uuid::new_v4()
+            ))
+            .header(header::COOKIE, "reader_session=route-token")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+}
+
+#[tokio::test]
+async fn deepseek_statistics_is_exclusive_to_the_authenticated_named_account() {
+    let query = "/api/ai/statistics?from=2026-01-01&until=2026-10-08&bucket=month";
+    for (username, admin, expected) in [
+        ("reader", false, StatusCode::FORBIDDEN),
+        ("other-admin", true, StatusCode::FORBIDDEN),
+        ("timmyb32r", false, StatusCode::CONFLICT),
+    ] {
+        let (mut state, _, _) = route_fixture(AccountId::new(), None);
+        let account = &mut Arc::get_mut(&mut state.repository).unwrap().account;
+        account.username = username.into();
+        account.admin = admin;
+        let app = router(state);
+        let request = axum::http::Request::builder()
+            .uri(query)
+            .header(header::COOKIE, "reader_session=route-token")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            expected
+        );
+        let unauthenticated = axum::http::Request::builder()
+            .uri(query)
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.oneshot(unauthenticated).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let (mut state, _, _) = route_fixture(AccountId::new(), None);
+    Arc::get_mut(&mut state.repository)
+        .unwrap()
+        .account
+        .username = "timmyb32r".into();
+    let app = router(state);
+    for query in [
+        "from=2026-01-02&until=2026-01-01&bucket=day",
+        "from=invalid&until=2026-01-01&bucket=day",
+        "from=2026-01-01&until=2026-01-01&bucket=hour",
+        "from=2026-01-01&until=2026-01-01&bucket=day&owner=foreign",
+    ] {
+        let request = axum::http::Request::builder()
+            .uri(format!("/api/ai/statistics?{query}"))
+            .header(header::COOKIE, "reader_session=route-token")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        assert!(app
+            .clone()
+            .oneshot(request)
+            .await
+            .unwrap()
+            .status()
+            .is_client_error());
     }
 }

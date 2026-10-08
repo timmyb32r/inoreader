@@ -18,6 +18,8 @@ pub async fn verify(pool: &PgPool) {
         .await
         .unwrap();
     let pointer = ContentManifestPointer {
+        reddit_flair: None,
+        video: None,
         publication: None,
         record_id: reader_core::SourceRecordId::from_uuid(id),
         source_revision: 0,

@@ -9,7 +9,7 @@ mod provider;
 mod record;
 pub use input::*;
 pub use record::*;
-pub const DEFINITIONS_VERSION: &str = "reading-data-news-definitions-v2";
+pub const DEFINITIONS_VERSION: &str = "reading-data-news-definitions-v3";
 const SYSTEM: &str = include_str!("../../../../prompts/reading-data-news/definitions/system.md");
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

@@ -505,6 +505,7 @@ fn record(
     content_html: Option<String>,
 ) -> Result<SourceRecord, FetchError> {
     let parsed = ParsedRecord {
+        categories: None,
         description_media_type: Some("text/plain".into()),
         upstream_id: url.to_string(),
         original_url: url.to_string(),

@@ -580,12 +580,19 @@ async fn provider_rejects_bad_key_and_absent_usage_without_retry() {
 
 pub(super) fn translation_config() -> AiConfig {
     AiConfig {
+        automatic_schedule: crate::AutomaticScheduleConfig {
+            pause_peak_hours: false,
+            holiday_calendar_valid_through: chrono::NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+            public_holidays: vec![],
+        },
         models: ModelRates {
             flash: CostRates::new("1".into(), "1".into(), "1".into()).unwrap(),
             pro: CostRates::new("1.32".into(), "0.044".into(), "3.96".into()).unwrap(),
         },
         daily_limit_usd: "3".into(),
         automatic_summaries: false,
+        initial_articles: 10,
+        automatic_terms: false,
         automatic_attempts: 3,
         automatic_retry_seconds: 60,
         recovery_batch: 2,
@@ -832,6 +839,11 @@ fn budget_contract_rejects_invalid_amounts_and_inconsistent_usage() {
     config = translation_config();
     config.automatic_attempts = 0;
     assert!(config.validate().is_err());
+    for limit in [0, u32::MAX] {
+        config = translation_config();
+        config.initial_articles = limit;
+        assert!(config.validate().is_err());
+    }
     let rates = CostRates::new("0.3".into(), "0.006".into(), "1.2".into()).unwrap();
     assert!(rates
         .cost(&Usage {
@@ -937,4 +949,91 @@ async fn review_stream_retains_paid_output_and_usage_before_validation_without_p
         );
         assert_eq!(requests.lock().unwrap().len(), 1);
     }
+}
+
+#[test]
+fn automatic_schedule_rejects_duplicate_and_out_of_calendar_holidays() {
+    let mut config = translation_config();
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+    config.automatic_schedule.public_holidays = vec![day, day];
+    assert!(matches!(config.validate(), Err(AiError::Configuration)));
+    config.automatic_schedule.public_holidays =
+        vec![chrono::NaiveDate::from_ymd_opt(2027, 1, 1).unwrap()];
+    assert!(matches!(config.validate(), Err(AiError::Configuration)));
+    config.automatic_schedule.public_holidays = vec![day];
+    assert!(config.validate().is_ok());
+    let mut raw = serde_json::to_value(serde_json::json!({
+        "pause_peak_hours": true,
+        "holiday_calendar_valid_through": "2026-12-31",
+        "public_holidays": ["invalid-date"]
+    }))
+    .unwrap();
+    assert!(serde_json::from_value::<crate::AutomaticScheduleConfig>(raw.clone()).is_err());
+    raw["public_holidays"] = serde_json::json!(["2026-10-01"]);
+    let restored: crate::AutomaticScheduleConfig = serde_json::from_value(raw).unwrap();
+    assert!(restored.validate().is_ok());
+}
+
+#[test]
+fn request_statistics_range_rejects_reversed_dates_and_unknown_buckets() {
+    let from = chrono::NaiveDate::from_ymd_opt(2026, 1, 2).unwrap();
+    let until = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+    assert!(matches!(
+        StatisticsRange::new(from, until, StatisticsBucket::Day),
+        Err(AiError::StatisticsRange)
+    ));
+    assert!(StatisticsRange::new(until, until, StatisticsBucket::Month).is_ok());
+    assert!(serde_json::from_str::<StatisticsBucket>("\"hour\"").is_err());
+}
+
+#[test]
+fn definitions_request_ignores_fetch_provenance_and_cancellation_preserves_input() {
+    let mut config = translation_config();
+    config.context_tokens = 100000;
+    config.max_input_bytes = 90000;
+    let snapshot = ArticleSnapshot {
+        title: "CDC".into(),
+        source_url: "https://example.test/a".into(),
+        safe_html: "<p>CDC</p>".into(),
+        text: "CDC captures changes.".into(),
+        source_revision: "first".into(),
+    };
+    let input = DefinitionsInput::new(&config, snapshot.clone()).unwrap();
+    let mut refreshed = snapshot.clone();
+    refreshed.source_revision = "second".into();
+    refreshed.safe_html = "<section>CDC</section>".into();
+    refreshed.source_url = "https://example.test/redirected".into();
+    assert!(input
+        .same_request(&DefinitionsInput::new(&config, refreshed.clone()).unwrap())
+        .unwrap());
+    refreshed.text.push_str(" Extra content.");
+    assert!(!input
+        .same_request(&DefinitionsInput::new(&config, refreshed).unwrap())
+        .unwrap());
+    for field in ["version", "model", "system", "max_output_tokens"] {
+        let mut wire = serde_json::to_value(&input).unwrap();
+        wire[field] = if field == "max_output_tokens" {
+            serde_json::json!(500)
+        } else {
+            serde_json::json!("different")
+        };
+        let other: DefinitionsInput = serde_json::from_value(wire).unwrap();
+        assert!(!input.same_request(&other).unwrap(), "{field}");
+    }
+    let mut record = DefinitionsRecord::new(
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        input,
+        config.models.flash.clone(),
+    )
+    .unwrap();
+    let original = serde_json::to_value(record.input()).unwrap();
+    record.cancel_duplicate().unwrap();
+    assert_eq!(serde_json::to_value(record.input()).unwrap(), original);
+    assert!(record.cancel_duplicate().is_err());
+    let mut wire = serde_json::to_value(&record).unwrap();
+    assert!(serde_json::from_value::<DefinitionsRecord>(wire.clone()).is_ok());
+    wire["job"]["reason"] = serde_json::json!("");
+    assert!(serde_json::from_value::<DefinitionsRecord>(wire).is_err());
 }

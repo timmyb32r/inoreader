@@ -8,6 +8,7 @@ pub enum DefinitionState {
     Generating,
     Completed { result: DefinitionResult },
     Failed { error: String },
+    Cancelled { reason: String },
 }
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,6 +54,11 @@ impl TryFrom<RecordWire> for DefinitionsRecord {
         }
         if let DefinitionState::Completed { result } = &v.job.state {
             result.check_source(v.input.snapshot())?;
+        }
+        if let DefinitionState::Cancelled { reason } = &v.job.state {
+            if reason.is_empty() || v.job.usage.is_some() {
+                return Err(AiError::Protocol);
+            }
         }
         Ok(Self {
             owner: v.owner,
@@ -106,6 +112,25 @@ impl DefinitionsRecord {
         self.job.state = DefinitionState::Generating;
         Ok(())
     }
+    /// Only an unadmitted queued duplicate can be cancelled. Keep its complete
+    /// original input and operation history, without inventing a paid result.
+    pub fn cancel_duplicate(&mut self) -> Result<(), AiError> {
+        if !matches!(self.job.state, DefinitionState::Queued) || self.job.usage.is_some() {
+            return Err(AiError::Conflict);
+        }
+        self.job.state = DefinitionState::Cancelled {
+            reason: AiError::AutomaticDuplicate.to_string(),
+        };
+        Ok(())
+    }
+    /// A request deferred before paid admission made no provider call.
+    pub fn defer(&mut self) -> Result<(), AiError> {
+        if !matches!(self.job.state, DefinitionState::Generating) {
+            return Err(AiError::Conflict);
+        }
+        self.job.state = DefinitionState::Queued;
+        Ok(())
+    }
     pub fn finish(&mut self, state: DefinitionState, usage: Option<Usage>) -> Result<(), AiError> {
         if !matches!(self.job.state, DefinitionState::Generating) {
             return Err(AiError::Conflict);
@@ -113,6 +138,7 @@ impl DefinitionsRecord {
         match &state {
             DefinitionState::Completed { result } => result.check_source(self.input.snapshot())?,
             DefinitionState::Failed { error } if !error.is_empty() => {}
+            DefinitionState::Cancelled { reason } if !reason.is_empty() && usage.is_none() => {}
             _ => return Err(AiError::Protocol),
         }
         self.job.state = state;

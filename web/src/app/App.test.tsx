@@ -268,7 +268,16 @@ describe("reader application", () => {
     expect(
       screen.getByRole("heading", { name: "Your reading activity" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open feed" }));
+    await user.click(screen.getByRole("button", { name: "Начать чтение" }));
+    const wizard = screen.getByRole("dialog", { name: "Сессия чтения" });
+    expect(within(wizard).getByLabelText("Умная лента · минуты")).toHaveValue(
+      "45",
+    );
+    expect(
+      within(wizard).getByLabelText("Случайная лента · минуты"),
+    ).toHaveValue("15");
+    await user.click(within(wizard).getByRole("button", { name: "Отмена" }));
+    await user.click(screen.getByRole("button", { name: /^Feed \(\d+\)$/ }));
     expect(window.location.pathname).toBe("/reader");
     expect(
       screen.getByRole("heading", { name: /^Feed \(\d+\)$/ }),

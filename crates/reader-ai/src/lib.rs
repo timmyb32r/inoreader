@@ -5,7 +5,9 @@ mod config;
 mod crypto;
 mod definitions;
 mod generation;
+mod interests;
 mod model;
+pub use interests::*;
 mod pricing;
 mod provider;
 mod service;
@@ -30,6 +32,8 @@ pub use provider_reply::ProviderReply;
 
 mod budget;
 pub use budget::*;
+mod statistics;
+pub use statistics::*;
 
 mod models;
 pub use models::*;

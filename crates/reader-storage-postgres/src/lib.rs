@@ -1,5 +1,7 @@
 //! PostgreSQL persistence boundary for the reader application.
 
+mod ai_bootstrap;
+
 mod ai;
 mod search;
 pub use search::PostgresSearchStore;

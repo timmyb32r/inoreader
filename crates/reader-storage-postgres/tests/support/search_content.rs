@@ -69,6 +69,8 @@ pub async fn verify(pool: &PgPool, owner: Uuid, workspace: WorkspaceId, limits: 
         SearchRequest::new(limits, text.into(), SearchKind::News, None, None, 0).unwrap()
     };
     let mut revision = ContentRevision {
+        reddit_flair: None,
+        video: None,
         publication: vec![],
         record_id: record,
         source_revision: 0,

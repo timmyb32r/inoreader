@@ -189,6 +189,7 @@ pub struct SourceRecord {
     source_id: SourceId,
     upstream_id: String,
     key: DedupKey,
+    categories: Option<Vec<String>>,
     description_media_type: Option<String>,
     feed_content_html: Option<String>,
     published_at: Option<reader_core::PublicationDate>,
@@ -213,6 +214,7 @@ impl SourceRecord {
                 title: value.title,
                 description: value.description,
             },
+            categories: value.categories,
             description_media_type: value.description_media_type,
             feed_content_html: value.content_html,
             published_at: value.published_at,
@@ -230,6 +232,9 @@ impl SourceRecord {
     }
     pub fn key(&self) -> &DedupKey {
         &self.key
+    }
+    pub fn categories(&self) -> Option<&[String]> {
+        self.categories.as_deref()
     }
     pub fn description_media_type(&self) -> Option<&str> {
         self.description_media_type.as_deref()
@@ -262,6 +267,7 @@ impl SourceRecord {
                 title: value.title,
                 description: value.description,
             },
+            categories: value.categories,
             description_media_type: value.description_media_type,
             feed_content_html: value.content_html,
             published_at: value.published_at,
@@ -272,6 +278,7 @@ impl SourceRecord {
                 RecordRevisionEffect::RegroupAndRefresh
             } else if next.feed_content_html != self.feed_content_html
                 || next.published_at != self.published_at
+                || next.categories != self.categories
             {
                 RecordRevisionEffect::RefreshContent
             } else {
@@ -320,6 +327,7 @@ impl SourceRecord {
             source_id: self.source_id,
             upstream_id: self.upstream_id.clone(),
             key: value.key,
+            categories: value.categories,
             description_media_type: value.description_media_type,
             feed_content_html: value.feed_content_html,
             published_at: value.published_at,
@@ -330,6 +338,7 @@ impl SourceRecord {
                 RecordRevisionEffect::RegroupAndRefresh
             } else if next.feed_content_html != self.feed_content_html
                 || next.published_at != self.published_at
+                || next.categories != self.categories
             {
                 RecordRevisionEffect::RefreshContent
             } else {
@@ -494,6 +503,8 @@ pub struct ContentChunk {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContentRevision {
+    pub reddit_flair: Option<String>,
+    pub video: Option<reader_core::VideoMetadata>,
     pub publication: Vec<reader_core::PublicationEvidence>,
     pub record_id: SourceRecordId,
     pub source_revision: u64,
@@ -505,6 +516,8 @@ pub struct ContentRevision {
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContentManifestPointer {
+    pub reddit_flair: Option<String>,
+    pub video: Option<reader_core::VideoMetadata>,
     /// None means metadata has not been extracted; Some(empty) means no declaration.
     pub publication: Option<Vec<reader_core::PublicationEvidence>>,
     pub record_id: SourceRecordId,
@@ -518,6 +531,8 @@ pub struct ContentManifestPointer {
 impl From<&ContentRevision> for ContentManifestPointer {
     fn from(v: &ContentRevision) -> Self {
         Self {
+            reddit_flair: v.reddit_flair.clone(),
+            video: v.video.clone(),
             publication: Some(v.publication.clone()),
             record_id: v.record_id,
             source_revision: v.source_revision,

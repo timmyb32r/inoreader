@@ -34,6 +34,7 @@ impl reader_application::ArticleRepository for PostgresRepository {
             .scope()
             .subscription()
             .map(|value| value.as_uuid().to_string());
+        let commit_prefixes = request.commit_project().map(|project| project.prefixes());
         let cursor_time = request.cursor().map(|value| {
             value
                 .arrived_at
@@ -45,30 +46,34 @@ impl reader_application::ArticleRepository for PostgresRepository {
         // Keep the partial-index predicate literal even after PostgreSQL switches
         // a prepared statement to a generic plan. User input never becomes SQL.
         let state_predicate = match request.scope() {
-            ArticleScope::Feed | ArticleScope::SubscriptionUnread(_) => "NOT a.is_read",
-            ArticleScope::Later => "a.is_later",
+            ArticleScope::Feed | ArticleScope::SubscriptionUnread(_) => {
+                "NOT a.is_read AND reader_article_visible(a)"
+            }
+            ArticleScope::Later => "a.is_later AND reader_article_visible(a)",
             ArticleScope::Subscription(_) => "true",
         };
-        let predicate = format!("a.workspace_key=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$2)) AND {state_predicate}");
+        let predicate = format!("a.workspace_key=$1 AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$2)) AND {state_predicate} AND ($3::text[] IS NULL OR EXISTS (SELECT 1 FROM unnest($3::text[]) prefix WHERE starts_with(a.document::jsonb#>>'{{key,location,Url,exact}}',prefix)))");
         let total_sql = format!("SELECT COUNT(*) FROM articles a WHERE {predicate}");
         let total: i64 = sqlx::query_scalar(&total_sql)
             .bind(&workspace_id)
             .bind(&subscription_id)
+            .bind(&commit_prefixes)
             .fetch_one(&self.pool)
             .await
             .map_err(storage)?;
-        let unread_total: i64 =
-            if request.scope() == ArticleScope::Feed && subscription_id.is_none() {
-                total
-            } else {
-                sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read",
+        let unread_total: i64 = if request.scope() == ArticleScope::Feed
+            && subscription_id.is_none()
+        {
+            total
+        } else {
+            sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read AND reader_article_visible(a)",
                 )
                 .bind(&workspace_id)
                 .fetch_one(&self.pool)
                 .await
                 .map_err(storage)?
-            };
+        };
         let comparison = match request.direction() {
             ArticlePageDirection::Older => "<",
             ArticlePageDirection::Newer => ">",
@@ -77,10 +82,11 @@ impl reader_application::ArticleRepository for PostgresRepository {
             ArticlePageDirection::Older => "DESC",
             ArticlePageDirection::Newer => "ASC",
         };
-        let page_sql = format!("SELECT a.document FROM articles a WHERE {predicate} AND ($3::text IS NULL OR (a.arrival_order, a.id) {comparison} (reader_arrival_order($3), $4)) ORDER BY (a.arrival_order) {order}, a.id {order} LIMIT $5");
+        let page_sql = format!("SELECT a.document FROM articles a WHERE {predicate} AND ($4::text IS NULL OR (a.arrival_order, a.id) {comparison} (reader_arrival_order($4), $5)) ORDER BY (a.arrival_order) {order}, a.id {order} LIMIT $6");
         let mut articles: Vec<Article> = sqlx::query_scalar::<_, String>(&page_sql)
             .bind(&workspace_id)
             .bind(&subscription_id)
+            .bind(&commit_prefixes)
             .bind(&cursor_time)
             .bind(&cursor_id)
             .bind(request.limit().lookahead())
@@ -208,7 +214,7 @@ impl reader_application::ArticleRepository for PostgresRepository {
             return Err(RepositoryError::Conflict);
         }
         if previous == Some(false) && v.state.read {
-            record_read(&mut tx, w, &v).await?;
+            record_read(&mut tx, w, &v, reader_application::ReadMethod::Single).await?;
         }
         tx.commit().await.map_err(storage)
     }
@@ -246,64 +252,62 @@ impl reader_application::ArticleRepository for PostgresRepository {
         }
         tx.commit().await.map_err(storage)
     }
-    async fn unread_selection(
+    async fn mark_scope_read_atomic(
         &self,
         workspace: WorkspaceId,
         scope: ArticleScope,
-        limit: SelectionLimit,
-    ) -> Result<Vec<Article>, RepositoryError> {
-        let sql = "SELECT a.document FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read AND (NOT $2 OR a.is_later) AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$3)) ORDER BY a.arrival_order DESC, a.id DESC LIMIT $4";
-        sqlx::query_scalar::<_, String>(sql)
-            .bind(workspace.as_uuid().to_string())
-            .bind(scope == ArticleScope::Later)
-            .bind(scope.subscription().map(|id| id.as_uuid().to_string()))
-            .bind(limit.lookahead())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(storage)?
-            .into_iter()
-            .map(|value| serde_json::from_str(&value).map_err(storage))
-            .collect()
-    }
-    async fn mark_articles_read_atomic(
-        &self,
-        workspace: WorkspaceId,
-        values: Vec<Article>,
+        batch: SelectionLimit,
     ) -> Result<(), RepositoryError> {
         let mut tx = self.pool.begin().await.map_err(storage)?;
-        for value in &values {
-            let expected = value
-                .revision
-                .checked_sub(1)
-                .ok_or_else(|| storage("updated article revision is invalid"))?;
-            let current: Option<(i64, bool)> =
-                sqlx::query_as("SELECT revision,is_read FROM articles WHERE id=$1 FOR UPDATE")
-                    .bind(article_key(workspace, value.id))
-                    .fetch_optional(&mut *tx)
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(storage)?;
+        let mut after = String::new();
+        loop {
+            let rows: Vec<(String,String,i64)> = sqlx::query_as("SELECT a.id,a.document,a.revision FROM articles a WHERE a.workspace_key=$1 AND NOT a.is_read AND ($6 OR reader_article_visible(a)) AND (NOT $2 OR a.is_later) AND ($3::text IS NULL OR EXISTS(SELECT 1 FROM library_origins o WHERE o.workspace_id=$1 AND o.article_id=a.article_key AND o.subscription_id=$3)) AND a.id>$4 ORDER BY a.id LIMIT $5 FOR UPDATE OF a")
+                .bind(workspace.as_uuid().to_string()).bind(scope==ArticleScope::Later)
+                .bind(scope.subscription().map(|id|id.as_uuid().to_string())).bind(&after)
+                .bind(i64::try_from(batch.get()).map_err(storage)?).bind(matches!(scope,ArticleScope::Subscription(_))).fetch_all(&mut *tx).await.map_err(storage)?;
+            if rows.is_empty() {
+                break;
+            }
+            after = rows.last().unwrap().0.clone();
+            let mut values = Vec::with_capacity(rows.len());
+            for (id, document, stored_revision) in rows {
+                let article: Article = serde_json::from_str(&document).map_err(storage)?;
+                if id != article_key(workspace, article.id)
+                    || i64::try_from(article.revision).map_err(storage)? != stored_revision
+                    || article.state.read
+                {
+                    return Err(storage(
+                        "article identity/state/revision disagrees with retained document",
+                    ));
+                }
+                let revision = article
+                    .revision
+                    .checked_add(1)
+                    .ok_or_else(|| storage("article revision exhausted"))?;
+                values.push((id, i64::try_from(revision).map_err(storage)?));
+            }
+            // Statement capacity controls chunking, never accepted selection size.
+            for chunk in values.chunks(65535 / 2) {
+                let mut query=sqlx::QueryBuilder::<Postgres>::new("WITH changed AS (UPDATE articles a SET revision=v.revision,document=jsonb_set(jsonb_set(a.document::jsonb,'{state,read}','true'::jsonb,false),'{revision}',to_jsonb(v.revision),false)::text FROM (");
+                query.push_values(chunk, |mut row, (id, revision)| {
+                    row.push_bind(id).push_bind(*revision);
+                });
+                query.push(") v(id,revision) WHERE a.id=v.id AND a.revision=v.revision-1 AND NOT a.is_read RETURNING a.workspace_key,a.article_key,a.revision) INSERT INTO article_read_events(workspace_id,article_id,revision,method) SELECT workspace_key,article_key,revision,'bulk' FROM changed");
+                if query
+                    .build()
+                    .execute(&mut *tx)
                     .await
-                    .map_err(storage)?;
-            if current != Some((i64::try_from(expected).map_err(storage)?, false))
-                || !value.state.read
-            {
-                return Err(RepositoryError::Conflict);
+                    .map_err(storage)?
+                    .rows_affected()
+                    != chunk.len() as u64
+                {
+                    return Err(RepositoryError::Conflict);
+                }
             }
-        }
-        for value in values {
-            let expected = value.revision - 1;
-            if cas_tx(
-                &mut tx,
-                "articles",
-                article_key(workspace, value.id),
-                Some(expected),
-                value.revision,
-                &value,
-            )
-            .await?
-                != 1
-            {
-                return Err(RepositoryError::Conflict);
-            }
-            record_read(&mut tx, workspace, &value).await?;
         }
         tx.commit().await.map_err(storage)
     }
@@ -313,13 +317,15 @@ pub(super) async fn record_read(
     tx: &mut Transaction<'_, Postgres>,
     workspace: WorkspaceId,
     value: &Article,
+    method: reader_application::ReadMethod,
 ) -> Result<(), RepositoryError> {
     sqlx::query(
-        "INSERT INTO article_read_events(workspace_id,article_id,revision) VALUES($1,$2,$3)",
+        "INSERT INTO article_read_events(workspace_id,article_id,revision,method) VALUES($1,$2,$3,$4)",
     )
     .bind(workspace.as_uuid().to_string())
     .bind(value.id.as_uuid().to_string())
     .bind(i64::try_from(value.revision).map_err(storage)?)
+    .bind(method.as_str())
     .execute(&mut **tx)
     .await
     .map_err(storage)?;

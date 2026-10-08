@@ -59,10 +59,8 @@ pub(super) fn compose(
         repository,
         std::num::NonZeroU32::new(ai.recovery_batch).ok_or("AI recovery batch must be positive")?,
     );
-    Ok(Some(Arc::new(AiService::new(
-        Arc::new(store),
-        Arc::new(provider),
-        cipher,
-        policy,
-    ))))
+    let store = Arc::new(store);
+    Ok(Some(Arc::new(
+        AiService::new(store.clone(), Arc::new(provider), cipher, policy).with_interests(store),
+    )))
 }

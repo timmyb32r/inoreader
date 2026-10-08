@@ -1,8 +1,8 @@
 # DeepSeek operations
 
 Current behavior is specified in [automatic summaries and daily budget](automatic-summaries.md).
-Production uses a shared $3 Moscow-day limit, automatic unread backfill and new
-full-text processing; the profile reports separate per-mode estimated spending.
+Production uses a shared $3 Moscow-day limit, automatic processing of the last 10 initial articles per subscription and
+new publications; the profile reports separate per-mode estimated spending.
 
 `reader-ai` owns the provider protocol, prompt gate, encrypted credentials and
 conversation orchestration. `PostgresAiStore` owns account-scoped storage and
@@ -177,3 +177,19 @@ is not performed by these production workers.
 
 Profile balance errors retain the last successful balance and its timestamp.
 An invalid DeepSeek key produces HTTP 422, never Reader's session-expiry 401.
+
+### Automatic term extraction admission
+
+Automatic term extraction makes at most one attempt for each owned article and
+term prompt version. Refresh IDs, source revisions, changes to HTML or extracted
+text do not reset this admission. Completed, failed, active and rejected attempts
+block another automatic attempt; a new prompt version permits a new attempt.
+Manual extraction/regeneration remains explicit and is subject to the daily
+budget. Manual requests reuse completed results only when their exact paid
+request and prompt version match; fetch provenance and admission limits are not
+part of that comparison. Original input snapshots are retained unchanged.
+
+Legacy queued automatic duplicates are cancelled in bounded recovery batches,
+with a second check before any spending reservation. Cancellation retains the
+job, original input, operation history and earlier paid results; it cannot invent
+usage or conceal a completed result from the reader.

@@ -14,7 +14,7 @@ export function WikiMarkdown({
   const inline = (s: string): ComponentChildren[] => {
     const result: ComponentChildren[] = [];
     const tokens =
-      /(`[^`\n]+`|\[\[[^\[\]\n]+\]\]|\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|!?\[[^\]\n]+\]\([^\s)]+\))/g;
+      /(`[^`\n]+`|\[\[[^\[\]\n]+\]\]|\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|!?\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>"`]+[\w/#=])/g;
     let at = 0;
     for (const m of s.matchAll(tokens)) {
       result.push(s.slice(at, m.index));
@@ -36,7 +36,30 @@ export function WikiMarkdown({
         result.push(<strong>{t.slice(2, -2)}</strong>);
       else if (t.startsWith("*") || t.startsWith("_"))
         result.push(<em>{t.slice(1, -1)}</em>);
-      else {
+      else if (/^https?:\/\//.test(t)) {
+        try {
+          const url = new URL(t);
+          result.push(
+            url.username ||
+              url.password ||
+              (url.origin === location.origin &&
+                decodeURIComponent(url.pathname).startsWith("/wiki")) ? (
+              t
+            ) : (
+              <a
+                href={t}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+              >
+                {t}
+              </a>
+            ),
+          );
+        } catch {
+          result.push(t);
+        }
+      } else {
         const m = /^(!?)\[([^\]]+)\]\(([^)]+)\)$/.exec(t)!;
         let safe = false;
         try {

@@ -43,13 +43,16 @@ test("ordinary Mark read retains feedback drafts, locks saves, and replays a los
   await page.goto("/reader");
   const mark = page.getByRole("button", { name: "Mark read", exact: true });
   const before = await mark.boundingBox();
+  const sourceRow = page.locator(".reader-source-row");
+  const sourceBounds = await sourceRow.boundingBox();
+  const wikiBounds = await page.locator(".reader-wiki-slot").boundingBox();
   await mark.click();
   const dialog = page.getByRole("dialog", {
     name: "Оценить статью",
     exact: true,
   });
   const reason = dialog.getByRole("textbox");
-  await expect(reason).toBeFocused();
+  await expect(reason).toBeHidden();
   await dialog
     .getByRole("button", { name: "Rate 8 out of 10", exact: true })
     .click();
@@ -83,6 +86,13 @@ test("ordinary Mark read retains feedback drafts, locks saves, and replays a los
   expect(commands).toHaveLength(2);
   expect(commands[0]).toEqual(commands[1]);
   expect(commands[1].reason).toBe(text);
+  await expect(page.getByLabel("Способ чтения")).toHaveText(
+    "Прочитано в ридере",
+  );
+  expect(await sourceRow.boundingBox()).toEqual(sourceBounds);
+  expect(await page.locator(".reader-wiki-slot").boundingBox()).toEqual(
+    wikiBounds,
+  );
   await expect(
     page.getByRole("button", { name: "Mark unread", exact: true }),
   ).toBeVisible();
@@ -103,10 +113,15 @@ test("optional feedback never discards typed text, and cancel/skip preserve narr
   const skip = dialog.getByRole("button", { name: "Без оценки", exact: true });
   await expect(skip).toBeEnabled();
   const bounds = await skip.boundingBox();
+  await expect(dialog.getByRole("textbox")).toBeHidden();
+  await dialog.getByRole("button", { name: "Не знаю", exact: true }).click();
   await dialog.getByRole("textbox").fill("Причина без оценки");
   await expect(skip).toBeDisabled();
   expect(await skip.boundingBox()).toEqual(bounds);
   await dialog.getByRole("textbox").fill("");
+  await dialog.getByRole("button", { name: "Не знаю", exact: true }).click();
+  await expect(skip).toBeEnabled();
+  expect(await skip.boundingBox()).toEqual(bounds);
   await skip.click();
   await expect(dialog).toBeHidden();
 });

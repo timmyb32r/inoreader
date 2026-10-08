@@ -1,6 +1,8 @@
+import { isCommitArticle } from "./commitArticle";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { ApiClient } from "../../api/client";
 import type { Article } from "../../api/viewModels";
+import type { DefinitionsView } from "../../api/glossary";
 import { ChatMarkdown } from "../../ai/ChatMarkdown";
 import { Icon } from "../../ui/Icon";
 import { ArticleDates } from "../../ui/ArticleDates";
@@ -29,6 +31,23 @@ export function DigestArticle({
   const [visible, setVisible] = useState(false);
   const [done, setDone] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [terms, setTerms] = useState<DefinitionsView | null>(null);
+  const [termsError, setTermsError] = useState("");
+  useEffect(() => {
+    if (!visible || article.fullText !== "ready") return;
+    let active = true;
+    client.glossary
+      .get(workspace, article.id)
+      .then((value) => {
+        if (active) setTerms(value);
+      })
+      .catch((cause) => {
+        if (active) setTermsError((cause as Error).message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [visible, client, workspace, article.id]);
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -42,6 +61,8 @@ export function DigestArticle({
     if (root.current) observer.observe(root.current);
     return () => observer.disconnect();
   }, []);
+  const entities =
+    terms?.job?.status === "completed" ? terms.job.result.entities : [];
   const read = () =>
     navigate(
       `/reading?${new URLSearchParams({ workspace, article: article.id, from: "digest", digestSubscription: new URLSearchParams(location.search).get("subscription") ?? article.subscriptionIds?.[0] ?? "" })}`,
@@ -52,6 +73,7 @@ export function DigestArticle({
       class="digest-article"
       aria-label={article.title || "Untitled post"}
       data-read={done}
+      aria-hidden={done ? "true" : undefined}
     >
       <div class="digest-article__content">
         <div class="digest-article__topline">
@@ -85,6 +107,32 @@ export function DigestArticle({
             <p class={summary.failed ? "digest-error" : ""}>{summary.status}</p>
           )}
         </div>
+        <section class="digest-article__terms" aria-label="Извлечённые термины">
+          <strong>Термины</strong>
+          <div
+            aria-busy={
+              visible && !terms && !termsError && article.fullText === "ready"
+            }
+          >
+            {entities.length ? (
+              entities.map((entity) => (
+                <p key={entity.name}>
+                  <strong>{entity.name}</strong> — {entity.explanation}
+                </p>
+              ))
+            ) : (
+              <p>
+                {termsError ||
+                  (terms?.job?.status === "failed" ? terms.job.error : "") ||
+                  (article.fullText !== "ready"
+                    ? "Нужен полный текст статьи"
+                    : terms?.job?.status === "completed"
+                      ? "Термины не найдены"
+                      : "Ожидают обработки; открыть статью для обсуждения")}
+              </p>
+            )}
+          </div>
+        </section>
         <div class="digest-article__summary-status" role="status">
           {summary.text ? summary.status : ""}
         </div>
@@ -98,6 +146,7 @@ export function DigestArticle({
         {visible && (
           <ArticleFeedback
             inline
+            ratingOptional={isCommitArticle(article.url)}
             client={client}
             owner={owner}
             workspace={workspace}

@@ -58,6 +58,68 @@ impl ArticleScope {
     }
 }
 
+/// Source-authored GitHub repository identity. No title/subscription-name inference.
+/// Only credential-free HTTP(S) commit URLs with literal repository components
+/// are accepted. Prefixes preserve the authored repository spelling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitProject {
+    owner: String,
+    repository: String,
+}
+impl CommitProject {
+    pub fn from_url(value: &str) -> Result<Self, &'static str> {
+        let url = url::Url::parse(value).map_err(|_| "invalid commit URL")?;
+        if !matches!(url.scheme(), "http" | "https")
+            || url.host_str() != Some("github.com")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.port().is_some()
+        {
+            return Err("expected a public GitHub commit URL");
+        }
+        let parts: Vec<_> = url.path().split('/').collect();
+        let component = |s: &str| {
+            !s.is_empty()
+                && !matches!(s, "." | "..")
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+        };
+        if parts.len() < 5
+            || !component(parts[1])
+            || !component(parts[2])
+            || !matches!(parts[3], "commit" | "commits")
+            || parts[4].is_empty()
+        {
+            return Err("expected an individual GitHub commit URL");
+        }
+        let project = Self {
+            owner: parts[1].into(),
+            repository: parts[2].into(),
+        };
+        if !project
+            .prefixes()
+            .iter()
+            .any(|prefix| value.starts_with(prefix))
+        {
+            return Err("commit URL must use literal repository components");
+        }
+        Ok(project)
+    }
+    pub fn prefixes(&self) -> Vec<String> {
+        ["https", "http"]
+            .into_iter()
+            .flat_map(|scheme| {
+                ["commit", "commits"].map(|kind| {
+                    format!(
+                        "{scheme}://github.com/{}/{}/{kind}/",
+                        self.owner, self.repository
+                    )
+                })
+            })
+            .collect()
+    }
+}
+
 /// Positive selection size with room for one lookahead row in PostgreSQL LIMIT.
 /// This is a representation boundary; the caller supplies the product limit.
 #[derive(Clone, Copy, Debug)]
@@ -91,6 +153,7 @@ pub struct ArticlePageRequest {
     direction: ArticlePageDirection,
     limit: SelectionLimit,
     read_period: Option<ReadPeriod>,
+    commit_project: Option<CommitProject>,
 }
 impl ArticlePageRequest {
     pub fn new(
@@ -108,14 +171,25 @@ impl ArticlePageRequest {
             direction,
             limit,
             read_period: None,
+            commit_project: None,
         })
     }
     pub fn with_read_period(mut self, period: Option<ReadPeriod>) -> Result<Self, &'static str> {
-        if period.is_some() && self.scope != ArticleScope::Feed {
+        if period.is_some() && (self.scope != ArticleScope::Feed || self.commit_project.is_some()) {
             return Err("read period requires Feed without a subscription");
         }
         self.read_period = period;
         Ok(self)
+    }
+    pub fn with_commit_project(mut self, project: CommitProject) -> Result<Self, &'static str> {
+        if self.scope != ArticleScope::Feed || self.read_period.is_some() {
+            return Err("commit project requires unread Feed without a read period");
+        }
+        self.commit_project = Some(project);
+        Ok(self)
+    }
+    pub fn commit_project(&self) -> Option<&CommitProject> {
+        self.commit_project.as_ref()
     }
     pub fn read_period(&self) -> Option<ReadPeriod> {
         self.read_period

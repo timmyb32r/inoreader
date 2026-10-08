@@ -103,6 +103,8 @@ pub async fn verify(pool: &PgPool) {
 
     let refresh = Uuid::new_v4();
     let pointer = reader_ingest::ContentManifestPointer {
+        reddit_flair: None,
+        video: None,
         publication: None,
         record_id: commit.record.id(),
         source_revision: 0,

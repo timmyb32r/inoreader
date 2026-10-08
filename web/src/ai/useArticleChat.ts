@@ -147,7 +147,7 @@ export function useArticleChat(
     }
   };
 
-  const open = async (nextTarget: ChatTarget, generateIfMissing = true) => {
+  const open = async (nextTarget: ChatTarget, requestGeneration = true) => {
     setVisible(true);
     setCollapsed(false);
     const incomingScope = targetScope(nextTarget);
@@ -174,10 +174,14 @@ export function useArticleChat(
       if (token !== epoch.current) return;
       if (saved.length) {
         accept(saved[0]);
-        return;
+        if (
+          !requestGeneration ||
+          !["queued", "waiting_content"].includes(saved[0].status)
+        )
+          return;
       }
       if (pendingRequest) return;
-      if (!generateIfMissing) {
+      if (!requestGeneration) {
         setError("No saved conversation yet. Click Summarize to start one.");
         return;
       }

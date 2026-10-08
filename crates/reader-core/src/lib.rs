@@ -20,3 +20,6 @@ pub use workspace::*;
 
 mod web_feed;
 pub use web_feed::*;
+
+mod video;
+pub use video::*;

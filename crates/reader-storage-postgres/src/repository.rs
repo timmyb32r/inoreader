@@ -424,10 +424,14 @@ async fn enqueue_backfill_tx(
     subscription: SubscriptionId,
     limit: usize,
 ) -> Result<(), RepositoryError> {
-    let documents = sqlx::query_scalar::<_, String>("SELECT document FROM source_record_identity WHERE source_id = $1 ORDER BY observed_at_ms DESC LIMIT $2")
+    let documents = sqlx::query_scalar::<_, String>("SELECT r.document FROM ai_record_discovery d JOIN source_records r ON r.id=d.record WHERE d.source=$1 ORDER BY d.publication_order DESC NULLS LAST,d.source_order,d.sequence LIMIT $2")
         .bind(source.as_uuid().to_string()).bind(i64::try_from(limit).map_err(storage)?).fetch_all(&mut **tx).await.map_err(storage)?;
     for document in documents {
         let record: SourceRecord = serde_json::from_str(&document).map_err(storage)?;
+        crate::ai_bootstrap::discover(tx, &record, 0)
+            .await
+            .map_err(storage)?;
+        sqlx::query("INSERT INTO subscription_ai_initial_records(subscription,source,record) SELECT $1,$3,$2 WHERE EXISTS(SELECT 1 FROM subscription_ai_bootstrap WHERE subscription=$1 AND source=$3 AND cutoff IS NULL) ON CONFLICT DO NOTHING").bind(subscription.as_uuid().to_string()).bind(record.id().as_uuid().to_string()).bind(source.as_uuid().to_string()).execute(&mut **tx).await.map_err(storage)?;
         let item = WorkItem::FanOut {
             source_id: source,
             record_id: record.id(),
@@ -545,6 +549,13 @@ async fn provision_subscription_tx(
         .execute(&mut **tx)
         .await
         .map_err(storage)?;
+    crate::ai_bootstrap::create_subscription(
+        tx,
+        &value.id().as_uuid().to_string(),
+        &source.as_uuid().to_string(),
+    )
+    .await
+    .map_err(storage)?;
     if let Some(recipe) = recipe {
         sqlx::query("INSERT INTO web_feed_recipes (id,revision,document) VALUES ($1,0,$2)")
             .bind(value.id().as_uuid().to_string())

@@ -2848,6 +2848,7 @@ dependencies = [
  "murmur3",
  "reader-ai",
  "reader-application",
+ "reader-collectors",
  "reader-core",
  "reader-glossary",
  "reader-ingest",

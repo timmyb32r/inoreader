@@ -48,3 +48,76 @@ it("reuses an uncertain paid operation after closing, reopening and retrying", a
   expect(generate.mock.calls[2][2]).not.toBe(first[2]);
   expect(generate.mock.calls[2][3]).toBe(true);
 });
+
+it("loads saved definitions without a paid request when reader opens an archive article", async () => {
+  const client = new GlossaryClient(async () => {
+    throw new Error("unexpected transport");
+  });
+  const get = vi.spyOn(client, "get").mockResolvedValue(empty);
+  const generate = vi.spyOn(client, "generate").mockResolvedValue(empty);
+  const { result } = renderHook(() =>
+    useGlossary(client, "account", "workspace"),
+  );
+  await act(async () => {
+    await result.current.open("archive", "Old article", false);
+  });
+  expect(get).toHaveBeenCalledOnce();
+  expect(generate).not.toHaveBeenCalled();
+  expect(result.current.view).toEqual(empty);
+  await act(async () => {
+    await result.current.retry();
+  });
+  expect(generate).toHaveBeenCalledOnce();
+});
+
+it("retains queued automatic definitions on open and promotes the same job only on demand", async () => {
+  const client = new GlossaryClient(async () => {
+    throw new Error("unexpected transport");
+  });
+  const queued: DefinitionsView = {
+    ...empty,
+    job: {
+      id: "queued-job",
+      workspaceId: "workspace",
+      articleId: "article",
+      model: "fixture",
+      promptVersion: "fixture",
+      status: "queued",
+      usage: null,
+    },
+  };
+  vi.spyOn(client, "get").mockResolvedValue(queued);
+  let finish!: (value: DefinitionsView) => void;
+  const generate = vi.spyOn(client, "generate").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const { result } = renderHook(() =>
+    useGlossary(client, "account", "workspace"),
+  );
+  await act(async () => {
+    await result.current.open("article", "Title", false);
+  });
+  expect(generate).not.toHaveBeenCalled();
+  expect(result.current.busy).toBe(true);
+  expect(result.current.actionBusy).toBe(false);
+  let request!: Promise<void>;
+  await act(async () => {
+    request = result.current.open("article", "Title");
+    await Promise.resolve();
+  });
+  expect(result.current.actionBusy).toBe(true);
+  expect(generate).toHaveBeenCalledOnce();
+  await act(async () => {
+    await result.current.open("article", "Title");
+  });
+  expect(generate).toHaveBeenCalledOnce();
+  expect(generate.mock.calls[0][3]).toBe(false);
+  await act(async () => {
+    finish(queued);
+    await request;
+  });
+  expect(result.current.view?.job?.id).toBe("queued-job");
+});

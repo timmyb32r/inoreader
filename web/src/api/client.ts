@@ -1,6 +1,7 @@
 import type { Article, Subscription, Workspace } from "../api/viewModels";
 import { reportApiRequest } from "../performanceDiagnostics";
 import { FocusedReadingClient } from "./focusedReading";
+import { InterestClient } from "./interests";
 import { SearchClient } from "./search";
 import { WikiClient } from "./wiki";
 import { ZhihuClient } from "./zhihu";
@@ -103,6 +104,7 @@ export class ApiError extends Error {
 
 export class ApiClient {
   readonly ai: AiClient;
+  readonly interests: InterestClient;
   readonly glossary: GlossaryClient;
   readonly zhihu: ZhihuClient;
   readonly wiki: WikiClient;
@@ -110,6 +112,7 @@ export class ApiClient {
   readonly reading: FocusedReadingClient;
   constructor(private readonly transport: Transport) {
     this.ai = new AiClient(transport);
+    this.interests = new InterestClient(transport);
     this.glossary = new GlossaryClient(transport);
     this.zhihu = new ZhihuClient(transport);
     this.wiki = new WikiClient(transport);

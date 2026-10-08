@@ -10,7 +10,7 @@ impl PostgresRepository {
         period: reader_application::ReadPeriod,
     ) -> Result<ArticlePage, RepositoryError> {
         let workspace_key = workspace.as_uuid().to_string();
-        let events = "WITH events AS (SELECT article_id, MAX(occurred_at) AS marked_at FROM article_read_events WHERE workspace_id=$1 AND occurred_at >= $2 AND occurred_at < $3 GROUP BY article_id)";
+        let events = "WITH events AS (SELECT DISTINCT ON(article_id) article_id, occurred_at AS marked_at, method FROM article_read_events WHERE workspace_id=$1 AND occurred_at >= $2 AND occurred_at < $3 ORDER BY article_id,occurred_at DESC,revision DESC)";
         let total: i64 = sqlx::query_scalar(&format!("{events} SELECT count(*) FROM events e JOIN articles a ON a.workspace_key=$1 AND a.article_key=e.article_id AND a.is_read"))
             .bind(&workspace_key).bind(period.start()).bind(period.end())
             .fetch_one(&self.pool).await.map_err(storage)?;
@@ -25,8 +25,8 @@ impl PostgresRepository {
             ArticlePageDirection::Older => ("<", "DESC"),
             ArticlePageDirection::Newer => (">", "ASC"),
         };
-        let query = format!("{events} SELECT a.document,e.marked_at FROM events e JOIN articles a ON a.workspace_key=$1 AND a.article_key=e.article_id AND a.is_read WHERE ($4::timestamptz IS NULL OR (e.marked_at,a.article_key) {comparison} ($4,$5)) ORDER BY e.marked_at {order},a.article_key {order} LIMIT $6");
-        let mut rows: Vec<(String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(&query)
+        let query = format!("{events} SELECT a.document,e.marked_at,e.method FROM events e JOIN articles a ON a.workspace_key=$1 AND a.article_key=e.article_id AND a.is_read WHERE ($4::timestamptz IS NULL OR (e.marked_at,a.article_key) {comparison} ($4,$5)) ORDER BY e.marked_at {order},a.article_key {order} LIMIT $6");
+        let mut rows: Vec<(String, chrono::DateTime<chrono::Utc>, String)> = sqlx::query_as(&query)
             .bind(&workspace_key)
             .bind(period.start())
             .bind(period.end())
@@ -45,13 +45,18 @@ impl PostgresRepository {
         if request.direction() == ArticlePageDirection::Newer {
             rows.reverse();
         }
-        let timestamps: Vec<_> = rows.iter().map(|(_, at)| *at).collect();
+        let timestamps: Vec<_> = rows
+            .iter()
+            .map(|(_, at, method)| (*at, method.clone()))
+            .collect();
         let articles = rows
             .into_iter()
-            .map(|(doc, _)| serde_json::from_str(&doc).map_err(storage))
+            .map(|(doc, _, _)| serde_json::from_str(&doc).map_err(storage))
             .collect::<Result<Vec<Article>, _>>()?;
         let mut articles = self.summary_presentations(workspace, articles).await?;
-        for (article, at) in articles.iter_mut().zip(timestamps) {
+        for (article, (at, method)) in articles.iter_mut().zip(timestamps) {
+            article.read_method =
+                Some(serde_json::from_value(serde_json::Value::String(method)).map_err(storage)?);
             article.marked_read_at = Some(at);
         }
         Ok(ArticlePage {

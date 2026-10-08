@@ -675,6 +675,7 @@ async fn extract_xpath(
             .clone()
             .unwrap_or_else(|| format!("xpath:{}:{index}", recipe.selector()));
         let parsed = reader_collectors::ParsedRecord {
+            categories: None,
             description_media_type: Some("text/plain".into()),
             upstream_id: upstream,
             original_url: node.href.unwrap_or_default(),

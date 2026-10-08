@@ -19,7 +19,7 @@ test("home reading counts replace time without shifting controls", async ({
   await page.goto("/");
   const grid = page.getByRole("grid", { name: "Daily articles marked read" });
   await expect(grid).toHaveAttribute("aria-busy", "true");
-  const feed = page.getByRole("button", { name: "Open feed", exact: true });
+  const feed = page.getByRole("button", { name: "Начать чтение", exact: true });
   const flow = page.getByRole("region", {
     name: "Articles received and read over the last 30 days",
   });

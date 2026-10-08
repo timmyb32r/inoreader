@@ -1,3 +1,6 @@
+import { ModalDialog } from "../ui/ModalDialog";
+import { AsyncButton } from "../ui/AsyncButton";
+import { StatusRegion } from "../ui/StatusRegion";
 import { AutofillResistantField } from "../ui/fields";
 import { localDay, readPeriodForDay } from "./readPeriod";
 import { useEffect, useRef, useState } from "preact/hooks";
@@ -52,6 +55,8 @@ export function ArticleListPanel({
     newerCursor,
     olderCursor,
   } = reader;
+  const [confirmAll, setConfirmAll] = useState(false);
+  const [bulkError, setBulkError] = useState("");
   const [refreshingSubscription, setRefreshingSubscription] = useState(false);
   const refreshLock = useRef(false);
   const [showReadFilter, setShowReadFilter] = useState(!!readPeriod);
@@ -123,6 +128,16 @@ export function ArticleListPanel({
               >
                 <Icon name="book" size={17} />
                 One by one
+              </button>
+              <button
+                class="secondary-button reading-entry smart-entry"
+                onClick={() =>
+                  navigate(
+                    `/reading?${new URLSearchParams({ workspace: reader.workspaceId, from: "smart" })}`,
+                  )
+                }
+              >
+                Умный режим чтения
               </button>
             </>
           )}
@@ -265,7 +280,10 @@ export function ArticleListPanel({
             !filtered.some((article) => !article.read)
           }
           aria-busy={markingAll}
-          onClick={markAllRead}
+          onClick={() => {
+            setBulkError("");
+            setConfirmAll(true);
+          }}
         >
           {markingAll ? (
             <span class="spinner" />
@@ -343,6 +361,54 @@ export function ArticleListPanel({
           Older →
         </button>
       </nav>
+      {confirmAll && (
+        <ModalDialog
+          title="Отметить все статьи прочитанными?"
+          width="480px"
+          closeDisabled={markingAll}
+          onClose={() => setConfirmAll(false)}
+        >
+          <div class="reading-reason">
+            <p>
+              Все непрочитанные статьи{" "}
+              {selectedSubscription
+                ? `источника «${selectedSubscription.name}»`
+                : view === "later"
+                  ? "в отложенных"
+                  : "этой ленты"}
+              , включая другие страницы, станут прочитанными. Оценки останутся
+              без изменений.
+            </p>
+            <StatusRegion class="reading-reason__status" busy={markingAll}>
+              {bulkError}
+            </StatusRegion>
+            <div class="reading-reason__actions">
+              <button
+                class="secondary-button"
+                disabled={markingAll}
+                onClick={() => setConfirmAll(false)}
+              >
+                Отмена
+              </button>
+              <AsyncButton
+                class="primary-button"
+                disabled={markingAll}
+                onError={(error) => setBulkError((error as Error).message)}
+                onPress={async () => {
+                  setBulkError("");
+                  if (await markAllRead()) setConfirmAll(false);
+                  else
+                    setBulkError(
+                      "Не удалось отметить статьи. Попробуйте снова.",
+                    );
+                }}
+              >
+                Да, все прочитаны
+              </AsyncButton>
+            </div>
+          </div>
+        </ModalDialog>
+      )}
     </section>
   );
 }

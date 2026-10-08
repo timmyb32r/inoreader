@@ -88,12 +88,20 @@ impl AiProvider for Provider {
 pub(super) fn policy(owner: Uuid) -> AiPolicy {
     AiPolicy::new(
         AiConfig {
+            automatic_schedule: reader_ai::AutomaticScheduleConfig {
+                pause_peak_hours: false,
+                holiday_calendar_valid_through: chrono::NaiveDate::from_ymd_opt(2026, 12, 31)
+                    .unwrap(),
+                public_holidays: vec![],
+            },
             models: reader_ai::ModelRates {
                 flash: CostRates::new("0.30".into(), "0.006".into(), "1.20".into()).unwrap(),
                 pro: CostRates::new("1.32".into(), "0.044".into(), "3.96".into()).unwrap(),
             },
             daily_limit_usd: "3".into(),
             automatic_summaries: false,
+            initial_articles: 10,
+            automatic_terms: false,
             automatic_attempts: 3,
             automatic_retry_seconds: 60,
             recovery_batch: 2,
@@ -269,8 +277,8 @@ pub async fn verify(pool: &PgPool) {
     let initial = record(owner, ws, a, op);
     let competing = record(owner, ws, a, Uuid::new_v4());
     let (left, right) = tokio::join!(
-        store.create_chat(initial.clone(), op, false),
-        store.create_chat(competing.clone(), competing.operations[0].id, false)
+        store.create_chat(initial.clone(), op, false, false),
+        store.create_chat(competing.clone(), competing.operations[0].id, false, false)
     );
     let chat = left.unwrap();
     assert_eq!(
@@ -465,7 +473,7 @@ pub async fn verify(pool: &PgPool) {
     newer.snapshot = None;
     newer.view.status = ChatStatus::WaitingContent;
     newer.operations[0].kind = OperationKind::Start { regenerate: true };
-    let waiting = store.create_chat(newer, new_op, true).await.unwrap();
+    let waiting = store.create_chat(newer, new_op, true, false).await.unwrap();
     service.work_once().await.unwrap();
     assert_eq!(
         service.chat(owner, waiting.view.id).await.unwrap().status,
@@ -508,6 +516,8 @@ pub async fn verify(pool: &PgPool) {
     sqlx::query("INSERT INTO library_origins(workspace_id,article_id,subscription_id,source_record_id) VALUES($1,$2,$3,$4)").bind(ws.to_string()).bind(a.to_string()).bind(subscription.id().as_uuid().to_string()).bind(source_record.as_uuid().to_string()).execute(pool).await.unwrap();
     let refresh = Uuid::new_v4();
     let pointer = reader_ingest::ContentManifestPointer {
+        reddit_flair: None,
+        video: None,
         publication: None,
         record_id: source_record,
         source_revision: 7,

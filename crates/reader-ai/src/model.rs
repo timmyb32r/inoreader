@@ -17,8 +17,16 @@ pub fn article_plain_text(html: &str) -> String {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
+    #[error("Автоматический дубль: термины этой статьи уже обработаны или ожидают обработки")]
+    AutomaticDuplicate,
+    #[error("Statistics start date must not follow the end date")]
+    StatisticsRange,
+    #[error("Automatic AI processing is paused during peak hours or until the holiday calendar is updated")]
+    AutomaticPaused,
     #[error("Daily DeepSeek budget reached. Automatic summaries wait until the next Moscow day; manual requests are unavailable.")]
     Budget,
+    #[error("Архивная статья вне начальной AI-подборки; запустите обработку явно.")]
+    AutomaticExcluded,
     #[error("resource not found")]
     NotFound,
     #[error("another operation is pending or the operation ID was reused")]
@@ -368,6 +376,11 @@ pub enum ReplyKind {
 
 #[async_trait]
 pub trait AiStore: Send + Sync {
+    async fn request_statistics(
+        &self,
+        owner: Uuid,
+        range: &crate::StatisticsRange,
+    ) -> Result<crate::AiRequestStatistics, AiError>;
     async fn spending(&self, owner: Uuid, limit: &str) -> Result<crate::AiSpending, AiError>;
     async fn reserve(
         &self,
@@ -376,6 +389,11 @@ pub trait AiStore: Send + Sync {
         reservation: &crate::SpendReservation,
     ) -> Result<(), AiError>;
     async fn settle(&self, owner: Uuid, id: Uuid, amount: &str) -> Result<(), AiError>;
+    async fn configure_automatic_schedule(
+        &self,
+        policy: &crate::AutomaticScheduleConfig,
+    ) -> Result<(), AiError>;
+    async fn configure_initial_articles(&self, limit: u32) -> Result<(), AiError>;
     async fn enroll_summaries(&self, owners: &[Uuid]) -> Result<(), AiError>;
     async fn next_summary(
         &self,
@@ -389,7 +407,11 @@ pub trait AiStore: Send + Sync {
         error: Option<&str>,
     ) -> Result<(), AiError>;
     async fn prioritize(&self, owner: Uuid, chat: Uuid) -> Result<(), AiError>;
-    async fn defer_budget(&self, claim: &ClaimedChat) -> Result<(), AiError>;
+    async fn defer_work(
+        &self,
+        claim: &ClaimedChat,
+        reason: crate::AiDeferral,
+    ) -> Result<(), AiError>;
 
     async fn retain_reply(
         &self,
@@ -409,6 +431,7 @@ pub trait AiStore: Send + Sync {
         record: crate::DefinitionsRecord,
         operation: Uuid,
         regenerate: bool,
+        automatic: bool,
     ) -> Result<crate::DefinitionsJob, AiError>;
     async fn claim_definitions(
         &self,
@@ -488,6 +511,7 @@ pub trait AiStore: Send + Sync {
         record: ChatRecord,
         operation: Uuid,
         regenerate: bool,
+        automatic: bool,
     ) -> Result<ChatRecord, AiError>;
     async fn chats(
         &self,
@@ -550,6 +574,14 @@ pub trait AiStore: Send + Sync {
 
 #[async_trait]
 pub trait AiProvider: Send + Sync {
+    /// Providers without a personal-ranking capability fail explicitly.
+    async fn classify(
+        &self,
+        _key: &str,
+        _input: crate::InterestInput,
+    ) -> Result<crate::ProviderReply, AiError> {
+        Err(AiError::Unavailable)
+    }
     async fn definitions(
         &self,
         key: &str,
@@ -763,4 +795,12 @@ impl DecimalRate {
             width = scale as usize
         ))
     }
+}
+
+/// Budget deferrals resume at Moscow midnight; peak deferrals resume at the
+/// window end or immediately if the peak ended while the job released its lease.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AiDeferral {
+    DailyBudget,
+    PeakHours,
 }

@@ -87,7 +87,7 @@ export function useReaderController(
   // A page snapshot is publishable only after writes settle and no write began
   // during its request. Never discard an in-flight write to accept a stale GET.
   const writeVersion = useRef(0);
-  const inFlightWrites = useRef(new Set<Promise<void>>());
+  const inFlightWrites = useRef(new Set<Promise<unknown>>());
   const waitForWrites = async () => {
     while (inFlightWrites.current.size)
       await Promise.all(inFlightWrites.current);
@@ -189,8 +189,8 @@ export function useReaderController(
 
   const mutate = (
     id: string,
-    patch: Partial<Pick<Article, "read" | "later">>,
-    save?: () => Promise<Pick<Article, "read">>,
+    patch: Partial<Pick<Article, "read" | "later" | "readMethod">>,
+    save?: () => Promise<Pick<Article, "read" | "readMethod">>,
   ): Promise<void> => {
     const before = articlesRef.current.find((item) => item.id === id);
     if (!before || !workspaceId || bulkLock.current)
@@ -221,7 +221,12 @@ export function useReaderController(
     const request = previous
       .catch(() => undefined)
       .then(() =>
-        save ? save() : client.updateArticle(requestWorkspace, id, patch),
+        save
+          ? save()
+          : client.updateArticle(requestWorkspace, id, {
+              ...(patch.read !== undefined ? { read: patch.read } : {}),
+              ...(patch.later !== undefined ? { later: patch.later } : {}),
+            }),
       )
       .then((saved) => {
         if (scope === epoch.current)
@@ -281,20 +286,24 @@ export function useReaderController(
   };
   const update = (
     id: string,
-    patch: Partial<Pick<Article, "read" | "later">>,
+    patch: Partial<Pick<Article, "read" | "later" | "readMethod">>,
   ) => {
     void mutate(id, patch).catch((error: Error) => announce(error.message));
   };
   const completeReading = (id: string, command: CompleteReading) =>
-    mutate(id, { read: true }, async () => {
+    mutate(id, { read: true, readMethod: "reader" }, async () => {
       const result = await client.reading.complete(workspaceId, id, command);
-      return { read: result.state.read };
+      return {
+        read: result.state.read,
+        readMethod: result.state.read ? "reader" : null,
+      };
     });
-  const markReadWithoutRating = (id: string) => mutate(id, { read: true });
+  const markReadWithoutRating = (id: string) =>
+    mutate(id, { read: true, readMethod: "single" });
   const open = (id: string) => {
     setSelectedId(id);
     writeSelectedArticle(id, workspaceId);
-    update(id, { read: true });
+    update(id, { read: true, readMethod: "single" });
     onOpenArticle();
   };
   const applyPage = (page: ArticlePage, batch: number) => {
@@ -496,12 +505,17 @@ export function useReaderController(
       new Set(articles.flatMap((a) => [`${a.id}:read`, `${a.id}:later`])),
     );
     setMarkingAll(true);
+    const provenanceBefore = new Map(
+      articles.map((article) => [article.id, article.readMethod]),
+    );
     const unreadBefore = unreadTotal;
     // Subscription counters can lag individual mutations; never subtract stale totals.
     if (view === "feed") setUnreadTotal(0);
     setArticles((items) =>
       items.map((article) =>
-        affected.has(article.id) ? { ...article, read: true } : article,
+        affected.has(article.id)
+          ? { ...article, read: true, readMethod: "bulk" }
+          : article,
       ),
     );
     const request = client
@@ -517,6 +531,7 @@ export function useReaderController(
               `Articles marked read; count refresh failed: ${(error as Error).message}`,
             );
         }
+        return true;
       })
       .catch((error: Error) => {
         if (scope !== epoch.current) return;
@@ -524,10 +539,17 @@ export function useReaderController(
         if (scope === epoch.current)
           setArticles((items) =>
             items.map((article) =>
-              affected.has(article.id) ? { ...article, read: false } : article,
+              affected.has(article.id)
+                ? {
+                    ...article,
+                    read: false,
+                    readMethod: provenanceBefore.get(article.id),
+                  }
+                : article,
             ),
           );
         announce(error.message);
+        return false;
       })
       .finally(() => {
         inFlightWrites.current.delete(request);
@@ -538,6 +560,7 @@ export function useReaderController(
         }
       });
     inFlightWrites.current.add(request);
+    return request;
   };
 
   const replaceWorkspace = (id: string, page: ArticlePage) => {

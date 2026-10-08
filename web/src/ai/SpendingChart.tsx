@@ -5,8 +5,16 @@ const modes = [
   "chat",
   "translation",
   "terms",
+  "ranking",
 ] as const;
-const labels = ["Summary", "Fact-check", "Chat", "Translation", "Terms"];
+const labels = [
+  "Summary",
+  "Fact-check",
+  "Chat",
+  "Translation",
+  "Terms",
+  "Ranking",
+];
 export function SpendingChart({
   spending,
 }: {

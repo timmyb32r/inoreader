@@ -107,3 +107,7 @@
   display: grid;
   place-items: center;
 }
+
+.mark-read-rating__unknown {
+  grid-column: 1 / -1;
+}

@@ -34,6 +34,7 @@ pub enum SpendMode {
     Chat,
     Translation,
     Terms,
+    Ranking,
 }
 impl SpendMode {
     pub fn name(self) -> &'static str {
@@ -43,6 +44,7 @@ impl SpendMode {
             Self::Chat => "chat",
             Self::Translation => "translation",
             Self::Terms => "terms",
+            Self::Ranking => "ranking",
         }
     }
 }

@@ -44,6 +44,11 @@ fn completion_requires_rating_and_rejects_extra_fields() {
     assert!(serde_json::from_value::<CompleteReading>(raw.clone()).is_ok());
     raw.as_object_mut().unwrap().remove("rating");
     assert!(serde_json::from_value::<CompleteReading>(raw.clone()).is_err());
+    raw["rating"] = serde_json::Value::Null;
+    assert!(serde_json::from_value::<CompleteReading>(raw.clone())
+        .unwrap()
+        .rating
+        .is_none());
     raw["rating"] = serde_json::json!(7);
     raw["read"] = serde_json::json!(true);
     assert!(serde_json::from_value::<CompleteReading>(raw).is_err());

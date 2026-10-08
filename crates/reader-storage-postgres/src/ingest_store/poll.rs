@@ -94,6 +94,9 @@ pub(super) async fn commit_poll(
 ) -> Result<(), StoreError> {
     let mut tx = store.pool.begin().await.map_err(storage)?;
     assert_lease(&mut tx, lease).await?;
+    crate::ai_bootstrap::begin_poll(&mut tx, &commit)
+        .await
+        .map_err(storage)?;
     backlog::persist(&mut tx, &commit).await?;
     let observed_at_ms = commit.fetched_at.timestamp_millis();
     let discovered_items = commit.records.len();
@@ -242,6 +245,13 @@ pub(super) async fn commit_poll(
         )
         .await?;
     }
+    crate::ai_bootstrap::finish_poll(
+        &mut tx,
+        &commit.source_id.as_uuid().to_string(),
+        commit.incomplete,
+    )
+    .await
+    .map_err(storage)?;
     tx.commit().await.map_err(storage)
 }
 
@@ -255,7 +265,13 @@ pub(super) async fn record_source_success(
 ) -> Result<(), StoreError> {
     let mut tx = store.pool.begin().await.map_err(storage)?;
     assert_lease(&mut tx, lease).await?;
+    crate::ai_bootstrap::lock_source(&mut tx, &source.as_uuid().to_string())
+        .await
+        .map_err(storage)?;
     record_source_success_state(&mut tx, source, at, incomplete).await?;
+    crate::ai_bootstrap::finish_poll(&mut tx, &source.as_uuid().to_string(), incomplete)
+        .await
+        .map_err(storage)?;
     record_subscription_activity(&mut tx, source, true, Some(duration_ms), None, None, at).await?;
     tx.commit().await.map_err(storage)
 }

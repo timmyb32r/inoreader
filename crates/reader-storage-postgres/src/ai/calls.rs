@@ -46,9 +46,23 @@ pub(super) async fn begin(
     {
         return Err(AiError::Conflict);
     }
+    let automatic: bool =
+        sqlx::query_scalar("SELECT automatic FROM ai_chats WHERE id=$1 AND owner=$2")
+            .bind(claim.record.view.id)
+            .bind(claim.record.owner)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(storage)?;
     let assistant_id = attempt.assistant_id;
     let id = Uuid::new_v4();
-    budget::reserve(&mut tx, claim.record.owner, id, reservation).await?;
+    // Admission checks the current clock after acquiring the shared budget lock.
+    budget::reserve(&mut tx, claim.record.owner, id, reservation, automatic).await?;
+    let allowed: bool = sqlx::query_scalar("SELECT NOT automatic OR reader_ai_automatic_allowed(owner,workspace::text,article::text) FROM ai_chats WHERE id=$1 AND owner=$2")
+        .bind(claim.record.view.id).bind(claim.record.owner).fetch_one(&mut *tx).await.map_err(storage)?;
+    if !allowed {
+        return Err(AiError::AutomaticExcluded);
+    }
+
     sqlx::query("INSERT INTO ai_call_models(id,owner,document) VALUES($1,$2,$3)")
         .bind(id)
         .bind(claim.record.owner)

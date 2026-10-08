@@ -50,6 +50,8 @@ pub struct SubscriptionView {
 #[derive(schemars::JsonSchema, Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArticleView {
+    pub read_method: Option<reader_application::ReadMethod>,
+    pub video: Option<reader_core::VideoMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub marked_read_at: Option<DateTime<Utc>>,
     pub id: Uuid,

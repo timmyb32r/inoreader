@@ -119,6 +119,7 @@ pub fn extract_selected_records(
                 .clone()
                 .unwrap_or_else(|| format!("selector:{}:{index}", recipe.selector()));
             let parsed = ParsedRecord {
+                categories: None,
                 description_media_type: Some("text/plain".into()),
                 upstream_id: upstream,
                 original_url: href.unwrap_or_default(),
@@ -154,17 +155,44 @@ fn parse_visible_date(value: &str) -> Option<reader_core::PublicationDate> {
     reader_core::PublicationDate::parse(value)
 }
 
-/// Conservative in-process readability: prefer the first semantic article or
-/// main region. When neither exists, retain the complete sanitized document so
+/// Conservative in-process readability: prefer an explicitly authored body,
+/// then the semantic article/main region with the most non-navigation text.
+/// When neither exists, retain the complete sanitized document so
 /// extraction failure cannot silently discard content.
 pub fn readable_fragment(html: &str) -> String {
     let document = Html::parse_document(html);
-    for selector in ["article", "main"] {
+    // Prefer an explicit authored body to author biographies, related cards and
+    // navigation tagged <main>. Raw page bytes are retained independently.
+    for selector in [
+        "[itemprop='articleBody']",
+        ".post-content .article-content",
+        ".post-content",
+        ".post__content",
+        ".wrap-main-left-article",
+        ".entry-content",
+        ".blog-content",
+        ".wrap-main-left-content",
+    ] {
         if let Ok(selector) = Selector::parse(selector) {
-            if let Some(node) = document.select(&selector).next() {
+            if let Some(node) = document
+                .select(&selector)
+                .max_by_key(|n| n.text().map(str::len).sum::<usize>())
+            {
                 return node.html();
             }
         }
+    }
+    let selector = Selector::parse("article, main").expect("static selector");
+    if let Some(node) = document.select(&selector).max_by_key(|n| {
+        let text = n.text().map(str::len).sum::<usize>();
+        let links = Selector::parse("a").expect("static selector");
+        let navigation = n
+            .select(&links)
+            .map(|a| a.text().map(str::len).sum::<usize>())
+            .sum::<usize>();
+        text.saturating_sub(navigation)
+    }) {
+        return node.html();
     }
     html.to_owned()
 }

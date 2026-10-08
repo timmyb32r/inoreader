@@ -67,8 +67,10 @@ impl DefinitionsInput {
     pub fn version(&self) -> &str {
         &self.version
     }
-    pub fn identity(&self) -> Result<String, AiError> {
-        serde_json::to_string(self).map_err(|_| AiError::Protocol)
+    /// Exact paid request and prompt version, independent of fetch provenance,
+    /// HTML layout, URL and admission limits. Original snapshots remain retained.
+    pub fn same_request(&self, other: &Self) -> Result<bool, AiError> {
+        Ok(self.version == other.version && self.checked_body()? == other.checked_body()?)
     }
     fn checked_body(&self) -> Result<Value, AiError> {
         let l = &self.limits;

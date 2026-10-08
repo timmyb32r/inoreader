@@ -5,6 +5,7 @@ pub(super) async fn reserve(
     owner: Uuid,
     id: Uuid,
     r: &SpendReservation,
+    automatic_chat: bool,
 ) -> Result<(), AiError> {
     // One owner lock covers every mode and every worker; exact NUMERIC arithmetic.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
@@ -23,6 +24,23 @@ pub(super) async fn reserve(
             return Err(AiError::Conflict);
         }
         return Ok(());
+    }
+    let duplicate: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ai_definitions d WHERE d.owner=$1 AND d.lease=$2 AND d.automatic AND reader_ai_terms_superseded(d.id))")
+        .bind(owner).bind(id).fetch_one(&mut **tx).await.map_err(storage)?;
+    if duplicate {
+        return Err(AiError::AutomaticDuplicate);
+    }
+    let paused: bool = sqlx::query_scalar("SELECT reader_ai_automatic_resume_at(clock_timestamp()) IS NOT NULL AND ($3 OR EXISTS(SELECT 1 FROM ai_definitions WHERE owner=$1 AND lease=$2 AND automatic) OR EXISTS(SELECT 1 FROM interest_scores WHERE owner=$1 AND lease=$2))")
+        .bind(owner).bind(id).bind(automatic_chat).fetch_one(&mut **tx).await.map_err(storage)?;
+    if paused {
+        return Err(AiError::AutomaticPaused);
+    }
+    // Definitions and ranking reserve with their active lease as request ID.
+    // Recheck admission immediately before money is reserved, not only at enqueue.
+    let excluded: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM ai_definitions d WHERE d.owner=$1 AND d.lease=$2 AND d.automatic AND NOT reader_ai_automatic_allowed(d.owner,d.workspace::text,d.article::text)) OR EXISTS(SELECT 1 FROM interest_scores s WHERE s.owner=$1 AND s.lease=$2 AND NOT reader_ai_automatic_allowed(s.owner,s.workspace::text,s.article::text))")
+        .bind(owner).bind(id).fetch_one(&mut **tx).await.map_err(storage)?;
+    if excluded {
+        return Err(AiError::AutomaticExcluded);
     }
     // Capture the admission date once under the owner lock, including across midnight.
     let day: chrono::NaiveDate =

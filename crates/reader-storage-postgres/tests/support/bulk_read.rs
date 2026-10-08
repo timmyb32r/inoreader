@@ -2,7 +2,7 @@
 mod source_activity;
 use super::*;
 use reader_application::{
-    article_commands::{mark_articles_read, MarkReadError, OwnedWorkspace},
+    article_commands::{mark_articles_read, OwnedWorkspace},
     ArticleScope, SelectionLimit,
 };
 
@@ -61,7 +61,7 @@ pub async fn verify(pool: &PgPool) {
             SelectionLimit::new(10).unwrap()
         )
         .await,
-        Err(MarkReadError::Repository(RepositoryError::NotFound))
+        Err(RepositoryError::NotFound)
     ));
     for number in 0..3 {
         repository
@@ -99,26 +99,11 @@ pub async fn verify(pool: &PgPool) {
     assert_eq!(before_reads.len(), 1);
     assert_eq!(before_reads[0].count, 0);
     assert_eq!(before_reads[0].arrived, 3);
+    // Bulk changes only read/revision; unknown metadata and exact timestamps survive.
+    sqlx::query("UPDATE articles SET document=jsonb_set(document::jsonb,'{retained_metadata}','{\"precision\":123456789012345678901234567890.123456789,\"note\":\"exact unknown field\"}'::jsonb)::text WHERE workspace_key=$1")
+        .bind(workspace.id().as_uuid().to_string()).execute(pool).await.unwrap();
+    let retained:Vec<(String,String,String)>=sqlx::query_as("SELECT id,(document::jsonb->'retained_metadata')::text,document::jsonb->>'first_arrived_at' FROM articles WHERE workspace_key=$1 ORDER BY id").bind(workspace.id().as_uuid().to_string()).fetch_all(pool).await.unwrap();
     let limit = SelectionLimit::new(1).unwrap();
-    assert_eq!(
-        repository
-            .unread_selection(workspace.id(), ArticleScope::Feed, limit)
-            .await
-            .unwrap()
-            .len(),
-        2,
-        "exactly one lookahead row, not all three"
-    );
-    assert!(matches!(
-        mark_articles_read(&repository, &scope, ArticleScope::Feed, limit).await,
-        Err(MarkReadError::Limit)
-    ));
-    assert!(repository
-        .articles_by_workspace(workspace.id())
-        .await
-        .unwrap()
-        .iter()
-        .all(|a| !a.state.read));
     mark_articles_read(&repository, &scope, ArticleScope::Later, limit)
         .await
         .unwrap();
@@ -128,57 +113,70 @@ pub async fn verify(pool: &PgPool) {
         .unwrap();
     assert_eq!(values.iter().filter(|a| a.state.read).count(), 1);
     assert!(values.iter().find(|a| a.state.read).unwrap().state.later);
-    // A concurrent modification must roll back the entire selected snapshot.
-    let mut selected = repository
-        .unread_selection(
-            workspace.id(),
-            ArticleScope::Feed,
-            SelectionLimit::new(3).unwrap(),
-        )
-        .await
-        .unwrap();
-    let mut concurrent = selected.last().unwrap().clone();
-    let expected_revision = concurrent.revision;
-    concurrent.revision += 1;
-    concurrent.state.later = true;
-    repository
-        .save_article(workspace.id(), Some(expected_revision), concurrent)
-        .await
-        .unwrap();
-    for value in &mut selected {
-        value.revision += 1;
-        value.state.read = true;
-    }
-    assert!(matches!(
-        repository
-            .mark_articles_read_atomic(workspace.id(), selected)
-            .await,
-        Err(RepositoryError::Conflict)
-    ));
+    // Failure in a later batch rolls back earlier writes AND their read events.
+    let failure_id: String=sqlx::query_scalar("SELECT article_key FROM articles WHERE workspace_key=$1 AND NOT is_read ORDER BY id DESC LIMIT 1")
+        .bind(workspace.id().as_uuid().to_string()).fetch_one(pool).await.unwrap();
+    sqlx::raw_sql(&format!("CREATE FUNCTION test_bulk_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.workspace_key='{}' AND NEW.article_key='{}' AND NEW.is_read THEN RAISE EXCEPTION 'fixture later batch failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER test_bulk_failure AFTER UPDATE ON articles FOR EACH ROW EXECUTE FUNCTION test_bulk_failure();",workspace.id().as_uuid(),failure_id)).execute(pool).await.unwrap();
+    assert!(
+        mark_articles_read(&repository, &scope, ArticleScope::Feed, limit)
+            .await
+            .is_err()
+    );
     assert_eq!(
         repository
             .articles_by_workspace(workspace.id())
             .await
             .unwrap()
             .iter()
-            .filter(|a| a.state.read)
+            .filter(|article| article.state.read)
             .count(),
         1
     );
-    mark_articles_read(
-        &repository,
-        &scope,
-        ArticleScope::Feed,
-        SelectionLimit::new(3).unwrap(),
-    )
-    .await
-    .unwrap();
+    let read_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM article_read_events WHERE workspace_id=$1")
+            .bind(workspace.id().as_uuid().to_string())
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(read_events, 1);
+    sqlx::raw_sql("DROP TRIGGER test_bulk_failure ON articles; DROP FUNCTION test_bulk_failure();")
+        .execute(pool)
+        .await
+        .unwrap();
+    // More matching articles than the batch capacity must complete atomically.
+    mark_articles_read(&repository, &scope, ArticleScope::Feed, limit)
+        .await
+        .unwrap();
     assert!(repository
         .articles_by_workspace(workspace.id())
         .await
         .unwrap()
         .iter()
         .all(|a| a.state.read));
+    let retained_after:Vec<(String,String,String)>=sqlx::query_as("SELECT id,(document::jsonb->'retained_metadata')::text,document::jsonb->>'first_arrived_at' FROM articles WHERE workspace_key=$1 ORDER BY id").bind(workspace.id().as_uuid().to_string()).fetch_all(pool).await.unwrap();
+    assert_eq!(retained, retained_after);
+    let methods: Vec<String> =
+        sqlx::query_scalar("SELECT method FROM article_read_events WHERE workspace_id=$1")
+            .bind(workspace.id().as_uuid().to_string())
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(methods, vec!["bulk"; 3]);
+    for article in repository
+        .article_summaries_by_workspace(workspace.id())
+        .await
+        .unwrap()
+    {
+        assert_eq!(
+            article.read_method,
+            Some(reader_application::ReadMethod::Bulk)
+        );
+    }
+    assert!(repository
+        .article_summaries_by_workspace(foreign_workspace.id())
+        .await
+        .unwrap()
+        .is_empty());
     let activity = repository
         .reading_activity(workspace.id(), "UTC")
         .await

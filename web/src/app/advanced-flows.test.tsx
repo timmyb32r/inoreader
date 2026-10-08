@@ -252,6 +252,10 @@ describe("workspace and subscription isolation", () => {
     await screen.findByRole("heading", { name: /^Feed \(\d+\)$/ });
     await user.click(screen.getByRole("button", { name: /Chosen feed/ }));
     await user.click(screen.getByRole("button", { name: "Mark all read" }));
+    expect(calls.some((call) => call.path.includes("mark-all-read"))).toBe(
+      false,
+    );
+    await user.click(screen.getByRole("button", { name: "Да, все прочитаны" }));
     await waitFor(() => {
       const call = calls.find((item) => item.path.includes("mark-all-read"));
       expect(JSON.parse(String(call?.init?.body))).toEqual({

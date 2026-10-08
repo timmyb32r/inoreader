@@ -334,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 13;
-pub const RELEASE: &str = "rating-reasons-2026-09-30";
+pub const VERSION: i64 = 19;
+pub const RELEASE: &str = "automatic-terms-once-2026-10-08";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -377,7 +377,19 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let organization: bool = sqlx::query_scalar("SELECT to_regclass('wiki_favorites') IS NOT NULL AND to_regclass('wiki_subscription_roots') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='wiki_pages' AND column_name='parent')").fetch_one(pool).await?;
     let reviews: bool = sqlx::query_scalar("SELECT count(*)=4 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='ai_call_responses' AND column_name IN ('id','owner','content','system_prompt')").fetch_one(pool).await?;
     let focused: bool = sqlx::query_scalar("SELECT count(*)=8 FROM information_schema.columns WHERE table_schema=current_schema() AND ((table_name='article_ratings' AND column_name IN ('article_key','rating','rated_at','reason')) OR (table_name='reading_completions' AND column_name IN ('owner','id','article_key','document')))").fetch_one(pool).await?;
-    if !focused
+    let interests: bool = sqlx::query_scalar("SELECT to_regclass('interest_profiles') IS NOT NULL AND to_regclass('interest_scores') IS NOT NULL AND to_regclass('interest_responses') IS NOT NULL AND to_regclass('interest_profile_history') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='interest_profiles'::regclass AND tgname='interest_profile_history' AND tgenabled IN ('O','A'))").fetch_one(pool).await?;
+    let reading_preferences: bool = sqlx::query_scalar("SELECT to_regclass('reading_preferences') IS NOT NULL AND to_regclass('ai_terms_failures') IS NOT NULL AND to_regprocedure('reader_article_visible(articles)') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='ai_definitions' AND column_name='scheduled_at') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='article_ratings' AND column_name='rating' AND is_nullable='YES')").fetch_one(pool).await?;
+    let bootstrap: bool = sqlx::query_scalar("SELECT to_regclass('subscription_ai_bootstrap') IS NOT NULL AND to_regclass('ai_record_discovery') IS NOT NULL AND to_regprocedure('reader_ai_automatic_allowed(uuid,text,text)') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='library_origins'::regclass AND tgname='ai_new_origin' AND tgenabled IN ('O','A')) AND (SELECT count(*)=2 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name IN ('ai_chats','ai_definitions') AND column_name='automatic')").fetch_one(pool).await?;
+    let read_method: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='article_read_events' AND column_name='method' AND is_nullable='NO' AND column_default IS NULL)").fetch_one(pool).await?;
+    let schedule: bool = sqlx::query_scalar("SELECT to_regclass('ai_automatic_schedule') IS NOT NULL AND to_regprocedure('reader_ai_automatic_resume_at(timestamp with time zone)') IS NOT NULL AND to_regprocedure('reader_ai_deferred_until(boolean,timestamp with time zone)') IS NOT NULL").fetch_one(pool).await?;
+    let terms_once: bool = sqlx::query_scalar("SELECT to_regprocedure('reader_ai_terms_superseded(uuid)') IS NOT NULL AND to_regclass('ai_definitions_article_prompt') IS NOT NULL AND to_regclass('ai_terms_failures_article_prompt') IS NOT NULL").fetch_one(pool).await?;
+    if !terms_once
+        || !schedule
+        || !read_method
+        || !bootstrap
+        || !reading_preferences
+        || !interests
+        || !focused
         || !organization
         || !models
         || !valid
@@ -419,6 +431,12 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
             && previous != (10, "wiki-organization-2026-09-29".into())
             && previous != (11, "targeted-ai-review-2026-09-29".into())
             && previous != (12, "focused-reading-2026-09-29".into())
+            && previous != (13, "rating-reasons-2026-09-30".into())
+            && previous != (14, "personal-smart-feed-2026-10-04".into())
+            && previous != (15, "reader-workflow-2026-10-04".into())
+            && previous != (16, "subscription-ai-bootstrap-2026-10-05".into())
+            && previous != (17, "reading-session-provenance-2026-10-06".into())
+            && previous != (18, "automatic-ai-off-peak-2026-10-08".into())
         {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
@@ -448,13 +466,41 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         }
         if previous.0 < 12 {
             install_focused_reading(&mut transaction).await?;
-        } else {
+        } else if previous.0 < 13 {
             // Existing ratings/receipts are untouched: no authored explanation
             // existed before this feature. NULL records that absence explicitly.
             sqlx::query("ALTER TABLE article_ratings ADD COLUMN reason TEXT")
                 .execute(&mut *transaction)
                 .await?;
         }
+        if previous.0 < 14 {
+            sqlx::raw_sql(include_str!("schema/interests.sql"))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        if previous.0 < 15 {
+            sqlx::query("ALTER TABLE article_ratings ALTER COLUMN rating DROP NOT NULL")
+                .execute(&mut *transaction)
+                .await?;
+            sqlx::query(
+            "ALTER TABLE ai_definitions ADD COLUMN scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+        )
+        .execute(&mut *transaction)
+        .await?;
+            sqlx::raw_sql(include_str!("schema/reading_preferences.sql"))
+                .execute(&mut *transaction)
+                .await?;
+        }
+        if previous.0 < 16 {
+            crate::ai_bootstrap::install(&mut transaction, batch).await?;
+        }
+        if previous.0 < 17 {
+            install_read_provenance(&mut transaction).await?;
+        }
+        if previous.0 < 18 {
+            install_automatic_schedule(&mut transaction).await?;
+        }
+        install_terms_once(&mut transaction).await?;
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
@@ -489,6 +535,21 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     install_ai_models(&mut transaction).await?;
     install_ai_reviews(&mut transaction).await?;
     install_focused_reading(&mut transaction).await?;
+    sqlx::raw_sql(include_str!("schema/interests.sql"))
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE ai_definitions ADD COLUMN scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::raw_sql(include_str!("schema/reading_preferences.sql"))
+        .execute(&mut *transaction)
+        .await?;
+    crate::ai_bootstrap::install(&mut transaction, batch).await?;
+    install_read_provenance(&mut transaction).await?;
+    install_automatic_schedule(&mut transaction).await?;
+    install_terms_once(&mut transaction).await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)
         .bind(RELEASE)
@@ -522,6 +583,25 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     install_ai_models(transaction).await?;
     install_ai_reviews(transaction).await?;
     install_focused_reading(transaction).await?;
+    sqlx::raw_sql(include_str!("schema/interests.sql"))
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query(
+        "ALTER TABLE ai_definitions ADD COLUMN scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::raw_sql(include_str!("schema/reading_preferences.sql"))
+        .execute(&mut **transaction)
+        .await?;
+    crate::ai_bootstrap::install(
+        transaction,
+        std::num::NonZeroU32::new(100).expect("positive schema projection batch"),
+    )
+    .await?;
+    install_read_provenance(transaction).await?;
+    install_automatic_schedule(transaction).await?;
+    install_terms_once(transaction).await?;
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)
         .execute(&mut **transaction)
         .await?;
@@ -578,6 +658,27 @@ async fn install_ai_reviews(tx: &mut Transaction<'_, Postgres>) -> Result<(), sq
 
 async fn install_focused_reading(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     sqlx::raw_sql(include_str!("schema/focused_reading.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_read_provenance(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/read_provenance.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_automatic_schedule(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/automatic_schedule.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_terms_once(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/terms_once.sql"))
         .execute(&mut **tx)
         .await?;
     Ok(())

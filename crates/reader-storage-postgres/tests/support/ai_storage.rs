@@ -18,7 +18,10 @@ pub async fn verify(
         .join(" ");
     value.snapshot.as_mut().unwrap().text = source.clone();
     value.snapshot.as_mut().unwrap().safe_html = source;
-    let chat = store.create_chat(value.clone(), op, true).await.unwrap();
+    let chat = store
+        .create_chat(value.clone(), op, true, false)
+        .await
+        .unwrap();
     let pinned: String = sqlx::query_scalar("SELECT inputs FROM ai_chats WHERE id=$1")
         .bind(chat.view.id)
         .fetch_one(pool)

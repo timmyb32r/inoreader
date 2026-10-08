@@ -208,7 +208,12 @@ export function ArticleChatContent({
           placeholder="Ask about this article…"
           onInput={(event) => controller.setDraft(event.currentTarget.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.isComposing &&
+              event.keyCode !== 229
+            ) {
               event.preventDefault();
               if (canSend) {
                 controller.send();
@@ -223,7 +228,7 @@ export function ArticleChatContent({
           title={
             active
               ? "Available after checking · your draft is kept"
-              : "Send · Ctrl / ⌘ + Enter"
+              : "Send · Enter (Shift + Enter: new line)"
           }
           disabled={!canSend}
           aria-busy={busy === "Sending message"}

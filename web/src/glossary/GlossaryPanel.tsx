@@ -82,7 +82,9 @@ export function GlossaryPanel({
           ? "Сначала импортируйте историю канала."
           : shown && !shown.channel.generationAllowed
             ? "DeepSeek недоступен для этого аккаунта."
-            : "");
+            : shown && !shown.job
+              ? "Термины ещё не извлечены. Запустите явно."
+              : "");
   const Shell = embedded ? EmbeddedGlossary : FloatingPanel;
   return (
     <Shell
@@ -163,8 +165,12 @@ export function GlossaryPanel({
         </span>
         <AsyncButton
           class="icon-button"
-          aria-label="Обновить определения"
-          title="Обновить определения · новый запрос DeepSeek"
+          aria-label={shown?.job ? "Обновить определения" : "Извлечь термины"}
+          title={
+            shown?.job
+              ? "Обновить определения · новый запрос DeepSeek"
+              : "Извлечь термины · запрос DeepSeek"
+          }
           disabled={
             controller.busy ||
             !shown?.channel.generationAllowed ||

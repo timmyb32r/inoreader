@@ -118,6 +118,9 @@ fn direct_client_ignores_ambient_proxy_with_credential_canary() {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             if let Ok((mut socket, _)) = destination.accept() {
+                // macOS can inherit the listener's nonblocking mode. The fixture
+                // uses a bounded blocking read once a connection is accepted.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();

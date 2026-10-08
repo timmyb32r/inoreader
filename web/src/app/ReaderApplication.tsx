@@ -1,6 +1,13 @@
+import {
+  SessionClockContext,
+  useSessionClock,
+} from "./reading/useSessionClock";
+import { ReadingSessionWizard } from "./reading/ReadingSessionWizard";
 import { ReadingDigest } from "./reading/ReadingDigest";
+import { SmartFeed } from "./reading/SmartFeed";
 import { FocusedReading } from "./reading/FocusedReading";
 import { SourceActivityPage } from "./SourceActivityPage";
+import { DeepSeekStatistics } from "../ai/DeepSeekStatistics";
 import { PanelDock } from "../ui/PanelDock";
 import { readPeriodForDay } from "./readPeriod";
 import { SearchApplication } from "../search/SearchApplication";
@@ -85,6 +92,7 @@ export function ReaderApplication({
     bootstrap.workspaces.find((w) => w.id === bootstrap.activeWorkspaceId)
       ?.archived ?? false,
   );
+  const [sessionWizard, setSessionWizard] = useState(false);
   const [notice, setNotice] = useState("");
   const [signingOut, setSigningOut] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -197,7 +205,10 @@ export function ReaderApplication({
   useEffect(() => {
     if (locationPath === "/reader") chat.hide();
   }, [locationPath, selected?.id, workspaceId]);
-  const readingLayout = readerPath === "/reading" || readerPath === "/digest";
+  const readingLayout =
+    readerPath === "/reading" ||
+    readerPath === "/digest" ||
+    readerPath === "/smart";
   const [ratingTarget, setRatingTarget] = useState<string | null>(null);
   useEffect(() => {
     if (locationPath !== "/reader" || !selected) return;
@@ -220,7 +231,13 @@ export function ReaderApplication({
         items.map((item) => (item.id === changed.id ? changed : item)),
       ),
   );
-  const glossary = useGlossary(client.glossary, account.id, workspaceId);
+  const focusedWorkspace =
+    new URLSearchParams(location.search).get("workspace") ?? workspaceId;
+  const glossary = useGlossary(
+    client.glossary,
+    account.id,
+    readerPath === "/reading" ? focusedWorkspace : workspaceId,
+  );
   const workspace =
     workspaces.find((item) => item.id === workspaceId)?.name ?? "Workspace";
   const selectedSubscription =
@@ -336,576 +353,676 @@ export function ReaderApplication({
     return () => window.removeEventListener("keydown", keyboard);
   }, []);
 
+  const sessionClock = useSessionClock(
+    account.id,
+    workspaces.map((w) => w.id),
+    locationPath,
+  );
+  const lastNews = useRef<{ owner: string; url: string } | null>(null);
+  useEffect(() => {
+    if (
+      (location.pathname === "/reading" || location.pathname === "/reader") &&
+      new URLSearchParams(location.search).has("article")
+    )
+      lastNews.current = {
+        owner: account.id,
+        url: `/reading?${new URLSearchParams({ workspace: location.pathname === "/reading" ? focusedWorkspace : workspaceId, article: new URLSearchParams(location.search).get("article")! })}`,
+      };
+  }, [locationPath, selectedId, location.search]);
+  const returnToNews = () => {
+    const target =
+      sessionClock.active?.url ??
+      (lastNews.current?.owner === account.id ? lastNews.current.url : null);
+    if (!target || target === location.pathname + location.search) return null;
+    return navigate(target) ? target : null;
+  };
   return (
-    <div class={`app theme-${theme}`} data-theme={theme}>
-      <header class="topbar">
-        {!readingLayout && (
-          <button
-            class="mobile-menu icon-button"
-            aria-label="Open navigation"
-            onClick={() => setMobilePanel("nav")}
-          >
-            <Icon name="menu" />
-          </button>
-        )}
-        <a
-          class="brand"
-          href="/"
-          aria-label="Reader home"
-          onClick={(event) => {
-            event.preventDefault();
-            goHome();
-          }}
-        >
-          <span class="brand__mark">
-            <Icon name="feed" />
-          </span>
-          <span>Reader</span>
-        </a>
-        <div class="topbar__spacer" />
-        <CountdownTimer accountId={bootstrap.account.id} />
-        <button
-          class="icon-button"
-          aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
-          onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-        >
-          <Icon name={theme === "light" ? "moon" : "sun"} />
-        </button>
-        <div class="account-menu" ref={accountMenuRef}>
-          <button
-            class="avatar"
-            aria-label="Account menu"
-            aria-haspopup="menu"
-            aria-expanded={accountMenuOpen}
-            onClick={() => setAccountMenuOpen((open) => !open)}
-          >
-            {account.initials}
-          </button>
-          {accountMenuOpen && (
-            <div class="account-popover" role="menu">
-              <div class="account-popover__identity">
-                <strong>{account.displayName}</strong>
-                <span>Administrator</span>
-              </div>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setAccountMenuOpen(false);
-                  setModal("profile");
-                }}
-              >
-                Profile
-              </button>
-              <button
-                role="menuitem"
-                aria-busy={signingOut}
-                disabled={signingOut}
-                onClick={() => {
-                  if (signingOut || !confirmDiscard()) return;
-                  setSigningOut(true);
-                  client
-                    .signOut()
-                    .then(onSignOut)
-                    .catch((error: Error) => announce(error.message))
-                    .finally(() => setSigningOut(false));
-                }}
-              >
-                {signingOut ? (
-                  <>
-                    <span class="spinner" /> Signing out…
-                  </>
-                ) : (
-                  "Sign out"
-                )}
-              </button>
-            </div>
-          )}
-        </div>
-      </header>
-      <main
-        class={`reader-grid${readingLayout ? " reader-grid--focused" : ""}${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" || readerPath === "/source-activity" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
-      >
-        <>
+    <SessionClockContext.Provider value={sessionClock}>
+      <div class={`app theme-${theme}`} data-theme={theme}>
+        <header class="topbar">
           {!readingLayout && (
-            <ReaderSidebar
-              key={`${account.id}/${workspaceId}`}
-              {...{
-                sidebarCollapsed,
-                mobilePanel,
-                toggleSidebar,
-                workspace,
-                workspaces,
-                archived,
-                switchingWorkspace,
-                switchWorkspace,
-                readerPath,
-                goHome,
-                paging,
-                view,
-                selectedSubscriptionId,
-                chooseView,
-                unreadTotal,
-                subscriptions,
-                navigate,
-                announce,
-              }}
-              onArchive={() => setModal("archive")}
-              onAdd={() => setModal("add")}
-              onSelectSubscription={(id) => {
-                if (navigate("/reader")) {
-                  loadPage("subscription", id, undefined, undefined, 1);
-                  setMobilePanel("list");
-                }
-              }}
-              onPause={(id) => {
-                setPauseTarget(id);
-                setModal("pause");
-              }}
-              onSettings={() => {
-                setSettingsTarget(selectedSubscriptionId);
-                setModal("shortcuts");
-              }}
-              onRefresh={subscriptionCommands.refresh}
-            />
+            <button
+              class="mobile-menu icon-button"
+              aria-label="Open navigation"
+              onClick={() => setMobilePanel("nav")}
+            >
+              <Icon name="menu" />
+            </button>
           )}
-          {readerPath === "/digest" ? (
-            <ReadingDigest
-              key={`${account.id}/${workspaceId}`}
-              client={client}
-              owner={account.id}
-              workspace={workspaceId}
-              subscriptions={subscriptions}
-              navigate={navigate}
-              onExit={() => {
-                navigate(
-                  `/reader?workspace=${encodeURIComponent(workspaceId)}`,
-                );
-                void loadPage("feed", null);
-              }}
-            />
-          ) : readerPath === "/reading" ? (
-            <FocusedReading
-              key={`${account.id}/${workspaceId}`}
-              client={client}
-              owner={account.id}
-              workspace={workspaceId}
-              chat={chat}
-              profile={aiProfile}
-              glossary={glossary}
-              navigate={navigate}
-              announce={announce}
-              onExit={(articleId) => {
-                if (
-                  new URLSearchParams(location.search).get("from") === "digest"
-                ) {
+          <a
+            class="brand"
+            href="/"
+            aria-label="Reader home"
+            onClick={(event) => {
+              event.preventDefault();
+              goHome();
+            }}
+          >
+            <span class="brand__mark">
+              <Icon name="feed" />
+            </span>
+            <span>Reader</span>
+          </a>
+          <div class="topbar__spacer" />
+          <CountdownTimer
+            accountId={bootstrap.account.id}
+            reading={sessionClock}
+            onReturn={returnToNews}
+            hasArticle={lastNews.current?.owner === account.id}
+          />
+          <button
+            class="icon-button"
+            aria-label={`Use ${theme === "light" ? "dark" : "light"} theme`}
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          >
+            <Icon name={theme === "light" ? "moon" : "sun"} />
+          </button>
+          <div class="account-menu" ref={accountMenuRef}>
+            <button
+              class="avatar"
+              aria-label="Account menu"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              onClick={() => setAccountMenuOpen((open) => !open)}
+            >
+              {account.initials}
+            </button>
+            {accountMenuOpen && (
+              <div class="account-popover" role="menu">
+                <div class="account-popover__identity">
+                  <strong>{account.displayName}</strong>
+                  <span>Administrator</span>
+                </div>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    setModal("profile");
+                  }}
+                >
+                  Profile
+                </button>
+                <button
+                  role="menuitem"
+                  aria-busy={signingOut}
+                  disabled={signingOut}
+                  onClick={() => {
+                    if (signingOut || !confirmDiscard()) return;
+                    setSigningOut(true);
+                    client
+                      .signOut()
+                      .then(onSignOut)
+                      .catch((error: Error) => announce(error.message))
+                      .finally(() => setSigningOut(false));
+                  }}
+                >
+                  {signingOut ? (
+                    <>
+                      <span class="spinner" /> Signing out…
+                    </>
+                  ) : (
+                    "Sign out"
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+        <main
+          class={`reader-grid${readingLayout ? " reader-grid--focused" : ""}${readerPath.startsWith("/wiki") ? " reader-grid--wiki" : ""}${readerPath.startsWith("/search") ? " reader-grid--search" : ""}${readerPath === "/" || readerPath === "/source-activity" || readerPath === "/ai-statistics" ? " reader-grid--home" : ""}${sidebarCollapsed ? " reader-grid--collapsed" : ""}`}
+        >
+          <>
+            {!readingLayout && (
+              <ReaderSidebar
+                deepseekStatisticsAllowed={account.displayName === "timmyb32r"}
+                key={`${account.id}/${workspaceId}`}
+                {...{
+                  sidebarCollapsed,
+                  mobilePanel,
+                  toggleSidebar,
+                  workspace,
+                  workspaces,
+                  archived,
+                  switchingWorkspace,
+                  switchWorkspace,
+                  readerPath,
+                  goHome,
+                  paging,
+                  view,
+                  selectedSubscriptionId,
+                  chooseView,
+                  unreadTotal,
+                  subscriptions,
+                  navigate,
+                  announce,
+                }}
+                onArchive={() => setModal("archive")}
+                onAdd={() => setModal("add")}
+                onSelectSubscription={(id) => {
+                  if (navigate("/reader")) {
+                    loadPage("subscription", id, undefined, undefined, 1);
+                    setMobilePanel("list");
+                  }
+                }}
+                onPause={(id) => {
+                  setPauseTarget(id);
+                  setModal("pause");
+                }}
+                onSettings={() => {
+                  setSettingsTarget(selectedSubscriptionId);
+                  setModal("shortcuts");
+                }}
+                onRefresh={subscriptionCommands.refresh}
+              />
+            )}
+            {readerPath === "/smart" ? (
+              <SmartFeed
+                key={`${account.id}/${workspaceId}`}
+                client={client}
+                workspace={workspaceId}
+                navigate={navigate}
+                onExit={() => {
                   navigate(
-                    `/digest?${new URLSearchParams({ workspace: workspaceId, subscription: new URLSearchParams(location.search).get("digestSubscription") ?? "" })}`,
+                    `/reader?workspace=${encodeURIComponent(workspaceId)}`,
                   );
-                  return;
-                }
-                navigate(
-                  `/reader?${new URLSearchParams({ workspace: workspaceId, ...(articleId ? { article: articleId } : {}) })}`,
-                );
-                void loadPage("feed", null, undefined, undefined, 1, articleId);
-              }}
-            />
-          ) : readerPath === "/source-activity" ? (
-            <SourceActivityPage
-              key={`${account.id}/${workspaceId}`}
-              client={client}
-              workspaceId={workspaceId}
-              navigate={navigate}
-            />
-          ) : readerPath === "/search" ? (
-            <SearchApplication
-              key={account.id}
-              client={client}
-              url={location.pathname + location.search}
-              navigate={navigate}
-            />
-          ) : readerPath.startsWith("/wiki") ? (
-            <WikiApplication
-              key={account.id}
-              client={client.wiki}
-              path={readerPath}
-              onBack={backFromWiki}
-              navigate={navigate}
-              onDirty={(v) => {
-                dirtyWiki.current = v;
-              }}
-            />
-          ) : readerPath === "/" ? (
-            <ActivityDashboard
-              key={`${account.id}/${workspaceId}`}
-              client={client}
-              workspaceId={workspaceId}
-              workspaceName={workspace}
-              onArrivedDay={(day) =>
-                navigate(
-                  `/source-activity?day=${day}&workspace=${encodeURIComponent(workspaceId)}`,
-                )
-              }
-              onOpenLibrary={() => chooseView("feed")}
-              opening={paging}
-              onReadDay={async (day) => {
-                const period = readPeriodForDay(day);
-                if (
-                  await loadPage(
+                  void loadPage("feed", null);
+                }}
+              />
+            ) : readerPath === "/digest" ? (
+              <ReadingDigest
+                key={`${account.id}/${workspaceId}`}
+                client={client}
+                owner={account.id}
+                workspace={workspaceId}
+                subscriptions={subscriptions}
+                navigate={navigate}
+                onExit={() => {
+                  navigate(
+                    `/reader?workspace=${encodeURIComponent(workspaceId)}`,
+                  );
+                  void loadPage("feed", null);
+                }}
+              />
+            ) : readerPath === "/reading" ? (
+              <FocusedReading
+                key={`${account.id}/${focusedWorkspace}/${new URLSearchParams(location.search).get("session") ?? ""}/${new URLSearchParams(location.search).get("from") ?? ""}/${new URLSearchParams(location.search).get("seed") ?? ""}`}
+                client={client}
+                owner={account.id}
+                workspace={focusedWorkspace}
+                chat={chat}
+                profile={aiProfile}
+                glossary={glossary}
+                navigate={navigate}
+                announce={announce}
+                onExit={(articleId) => {
+                  if (workspaceId !== focusedWorkspace) {
+                    navigate(
+                      `/reader?workspace=${encodeURIComponent(workspaceId)}`,
+                    );
+                    void loadPage("feed", null);
+                    return;
+                  }
+                  if (
+                    new URLSearchParams(location.search).get("from") === "smart"
+                  ) {
+                    navigate(
+                      `/reader?workspace=${encodeURIComponent(workspaceId)}`,
+                    );
+                    void loadPage("feed", null);
+                    return;
+                  }
+                  if (
+                    new URLSearchParams(location.search).get("from") ===
+                    "digest"
+                  ) {
+                    navigate(
+                      `/digest?${new URLSearchParams({ workspace: workspaceId, subscription: new URLSearchParams(location.search).get("digestSubscription") ?? "" })}`,
+                    );
+                    return;
+                  }
+                  navigate(
+                    `/reader?${new URLSearchParams({ workspace: workspaceId, ...(articleId ? { article: articleId } : {}) })}`,
+                  );
+                  void loadPage(
                     "feed",
                     null,
                     undefined,
                     undefined,
                     1,
-                    undefined,
-                    period,
-                  )
-                ) {
-                  navigate(
-                    `/reader?${new URLSearchParams({ read_from: period.from, read_until: period.until })}`,
+                    articleId,
                   );
-                  setMobilePanel("list");
-                }
-              }}
-            />
-          ) : (
-            <>
-              <ArticleListPanel
-                reader={reader}
+                }}
+              />
+            ) : readerPath === "/ai-statistics" ? (
+              <DeepSeekStatistics
+                key={account.id}
+                client={client.ai}
+                allowed={account.displayName === "timmyb32r"}
+              />
+            ) : readerPath === "/source-activity" ? (
+              <SourceActivityPage
+                key={`${account.id}/${workspaceId}`}
                 client={client}
-                workspace={workspace}
-                selectedSubscription={selectedSubscription}
-                archived={archived}
-                archiveReason={
-                  workspaces.find((item) => item.id === workspaceId)
-                    ?.archiveReason
-                }
-                mobilePanel={mobilePanel}
-                newCount={newCount}
+                workspaceId={workspaceId}
                 navigate={navigate}
-                announce={announce}
               />
-              {selected ? (
-                <ArticleReader
-                  key={`${account.id}:${workspaceId}:${selected.id}`}
-                  onDefinitions={() => {
-                    chat.setCollapsed(false);
-                    void glossary.open(selected.id, selected.title);
-                  }}
-                  definitionsPending={
-                    glossary.busy && glossary.target?.id === selected.id
-                  }
-                  wikiClient={client.wiki}
-                  onNavigate={navigate}
-                  aiClient={client.ai}
-                  workspaceId={workspaceId}
-                  translationEnabled={!!aiProfile?.enabled}
-                  article={selected}
-                  pending={pendingArticleMutations}
-                  className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`}
-                  onBack={() => setMobilePanel("list")}
-                  onOpenSubscription={(id) =>
-                    navigate(`/subscriptions/${encodeURIComponent(id)}`)
-                  }
-                  onUpdate={(patch) => {
-                    if (patch.read === true) setRatingTarget(selected.id);
-                    else update(selected.id, patch);
-                  }}
-                  onRefresh={() => reader.refreshFullText(selected.id)}
-                  onNotice={announce}
-                  summaryPending={!!chat.busy}
-                  onSummarize={() =>
-                    void chat.open({
-                      articleId: selected.id,
-                      workspaceId,
-                      title: selected.title,
-                    })
-                  }
-                />
-              ) : (
-                <section class="article-reader empty-reader">
-                  <Icon name="inbox" size={28} />
-                  <p>Select an article to read</p>
-                </section>
-              )}
-            </>
-          )}
-        </>
-      </main>
-      {ratingTarget && (
-        <MarkReadDialog
-          key={`${account.id}:${workspaceId}:${ratingTarget}`}
-          client={client}
-          owner={account.id}
-          workspace={workspaceId}
-          article={ratingTarget}
-          onClose={() => setRatingTarget(null)}
-          onSave={(command) => reader.completeReading(ratingTarget, command)}
-          onSkip={() => reader.markReadWithoutRating(ratingTarget)}
-        />
-      )}
-      {subscriptionRoute && (
-        <SubscriptionsPage
-          onOpenWiki={navigate}
-          client={client}
-          workspaceId={workspaceId}
-          workspaceName={workspace}
-          subscriptions={subscriptions}
-          subscriptionId={
-            subscriptionRoute[1]
-              ? decodeURIComponent(subscriptionRoute[1])
-              : undefined
-          }
-          initialTab={
-            subscriptionRoute[2] === "activity" ? "activity" : "overview"
-          }
-          onBack={closeSubscriptions}
-          onOpenDetail={(id) =>
-            navigate(`/subscriptions/${encodeURIComponent(id)}`)
-          }
-          onOpenArticles={(id, articleId) => {
-            if (navigate("/reader")) {
-              loadPage("subscription", id, undefined, undefined, 1, articleId);
-              if (!articleId) setMobilePanel("list");
-            }
-          }}
-          onRefresh={async (id) => {
-            await subscriptionCommands.refresh(id);
-          }}
-          onPause={(id) => {
-            setPauseTarget(id);
-            setModal("pause");
-          }}
-          onRemoved={(id) => {
-            setSubscriptions((items) => items.filter((item) => item.id !== id));
-            reader.forgetSubscription(id);
-          }}
-          onChanged={(changed) =>
-            setSubscriptions((items) =>
-              items.map((item) => (item.id === changed.id ? changed : item)),
-            )
-          }
-          onEditRecipe={(recipe) => {
-            setEditingRecipe(recipe);
-            setModal("webfeed");
-          }}
-        />
-      )}
-      <div class="live-region" aria-live="polite">
-        {notice}
-      </div>
-      {modalStack.includes("add") && (
-        <div hidden={modal !== "add"}>
-          <AddSubscription
-            client={client}
-            workspaceId={workspaceId}
-            onClose={() => setModal(null)}
-            onWebFeed={() => {
-              setEditingRecipe(null);
-              setModal("webfeed");
-            }}
-            onDone={(added) => {
-              setSubscriptions((items) => [...items, added]);
-              setModal(null);
-              announce("Subscription added");
-            }}
-          />
-        </div>
-      )}
-      {modal === "pause" && (pauseTarget || selectedSubscription) && (
-        <ReasonDialog
-          title="Pause subscription"
-          action="Pause subscription"
-          onClose={() => {
-            setPauseTarget(null);
-            setModal(null);
-          }}
-          onDone={async (reason) => {
-            const generation = modalRevision.current;
-            const id = pauseTarget ?? selectedSubscription!.id;
-            const applied = await subscriptionCommands.pause(id, reason);
-            if (applied && modalRevision.current === generation) {
-              setPauseTarget(null);
-              setModal(null);
-              announce("Subscription paused");
-            }
-          }}
-        />
-      )}
-      {modal === "archive" && !archived && (
-        <ReasonDialog
-          title="Archive workspace"
-          action="Archive workspace"
-          onClose={() => setModal(null)}
-          onDone={(reason) =>
-            client.archiveWorkspace(workspaceId, reason).then(() => {
-              setArchived(true);
-              setWorkspaces((items) =>
-                items.map((item) =>
-                  item.id === workspaceId
-                    ? {
-                        ...item,
-                        archived: true,
-                        archiveReason: reason,
-                        archiveReasonAt: new Date().toISOString(),
-                      }
-                    : item,
-                ),
-              );
-              setModal(null);
-              announce("Workspace archived");
-            })
-          }
-        />
-      )}
-      {modal === "archive" && archived && (
-        <RestoreDialog
-          onClose={() => setModal(null)}
-          onDone={() =>
-            client.restoreWorkspace(workspaceId).then(() => {
-              setArchived(false);
-              setWorkspaces((items) =>
-                items.map((item) =>
-                  item.id === workspaceId ? { ...item, archived: false } : item,
-                ),
-              );
-              setModal(null);
-              announce("Workspace restored");
-            })
-          }
-        />
-      )}
-      {modal === "rules" && selectedSubscription && (
-        <RulesDialog
-          client={client}
-          workspaceId={workspaceId}
-          subscriptionId={selectedSubscription.id}
-          onClose={() => setModal(null)}
-        />
-      )}
-      {modal === "webfeed" && (
-        <WebFeedBuilder
-          client={client}
-          workspaceId={workspaceId}
-          editing={editingRecipe}
-          onClose={() => {
-            setEditingRecipe(null);
-            setModal(null);
-          }}
-          onDone={(added) => {
-            setSubscriptions((items) => [...items, added]);
-            setEditingRecipe(null);
-            setModal(null);
-            announce("Web feed created");
-          }}
-          onUpdated={() => {
-            setEditingRecipe(null);
-            setModal(null);
-            announce("Web feed recipe updated; collection queued");
-          }}
-        />
-      )}
-      {!readingLayout && (
-        <PanelDock
-          active={
-            !!glossary.target &&
-            glossary.target.id === chat.target?.articleId &&
-            chat.visible &&
-            !chat.collapsed &&
-            locationPath === "/reader" &&
-            modal === null &&
-            selected?.fullText === "ready"
-          }
-          terms={
-            glossary.target && (
-              <GlossaryPanel
-                key={`${account.id}:${workspaceId}:${glossary.target.id}`}
-                controller={glossary}
+            ) : readerPath === "/search" ? (
+              <SearchApplication
+                key={account.id}
+                client={client}
+                url={location.pathname + location.search}
+                navigate={navigate}
               />
-            )
-          }
-          summary={
-            chat.visible && (
-              <div
-                hidden={
-                  locationPath !== "/reader" ||
-                  modal !== null ||
-                  selected?.fullText !== "ready"
+            ) : readerPath.startsWith("/wiki") ? (
+              <WikiApplication
+                key={account.id}
+                client={client.wiki}
+                path={readerPath}
+                onBack={backFromWiki}
+                navigate={navigate}
+                onDirty={(v) => {
+                  dirtyWiki.current = v;
+                }}
+              />
+            ) : readerPath === "/" ? (
+              <ActivityDashboard
+                key={`${account.id}/${workspaceId}`}
+                client={client}
+                workspaceId={workspaceId}
+                workspaceName={workspace}
+                onArrivedDay={(day) =>
+                  navigate(
+                    `/source-activity?day=${day}&workspace=${encodeURIComponent(workspaceId)}`,
+                  )
                 }
-              >
-                <ArticleChatWidget controller={chat} profile={aiProfile} />
-              </div>
-            )
-          }
-        />
-      )}
-      {modal === "profile" && (
-        <ModalDialog
-          title="Profile"
-          description="Your personal integrations and credentials."
-          onClose={() => setModal(null)}
-          width="540px"
-        >
-          <DeepSeekProfile
-            client={client.ai}
-            onProfile={(value) => aiProfileState.update(account.id, value)}
-            completedGeneration={chat.completedGeneration}
+                onOpenLibrary={() => setSessionWizard(true)}
+                opening={paging}
+                onReadDay={async (day) => {
+                  const period = readPeriodForDay(day);
+                  if (
+                    await loadPage(
+                      "feed",
+                      null,
+                      undefined,
+                      undefined,
+                      1,
+                      undefined,
+                      period,
+                    )
+                  ) {
+                    navigate(
+                      `/reader?${new URLSearchParams({ read_from: period.from, read_until: period.until })}`,
+                    );
+                    setMobilePanel("list");
+                  }
+                }}
+              />
+            ) : (
+              <>
+                <ArticleListPanel
+                  reader={reader}
+                  client={client}
+                  workspace={workspace}
+                  selectedSubscription={selectedSubscription}
+                  archived={archived}
+                  archiveReason={
+                    workspaces.find((item) => item.id === workspaceId)
+                      ?.archiveReason
+                  }
+                  mobilePanel={mobilePanel}
+                  newCount={newCount}
+                  navigate={navigate}
+                  announce={announce}
+                />
+                {selected ? (
+                  <ArticleReader
+                    key={`${account.id}:${workspaceId}:${selected.id}`}
+                    onDefinitions={() => {
+                      chat.setCollapsed(false);
+                      void glossary.open(selected.id, selected.title);
+                    }}
+                    definitionsPending={
+                      glossary.actionBusy && glossary.target?.id === selected.id
+                    }
+                    wikiClient={client.wiki}
+                    onNavigate={navigate}
+                    aiClient={client.ai}
+                    workspaceId={workspaceId}
+                    translationEnabled={!!aiProfile?.enabled}
+                    article={selected}
+                    pending={pendingArticleMutations}
+                    className={`panel-mobile-${mobilePanel === "article" ? "show" : "hide"}`}
+                    onBack={() => setMobilePanel("list")}
+                    onOpenSubscription={(id) =>
+                      navigate(`/subscriptions/${encodeURIComponent(id)}`)
+                    }
+                    onUpdate={(patch) => {
+                      if (patch.read === true) setRatingTarget(selected.id);
+                      else update(selected.id, patch);
+                    }}
+                    onRefresh={() => reader.refreshFullText(selected.id)}
+                    onNotice={announce}
+                    summaryPending={!!chat.busy}
+                    onSummarize={() =>
+                      void chat.open({
+                        articleId: selected.id,
+                        workspaceId,
+                        title: selected.title,
+                      })
+                    }
+                  />
+                ) : (
+                  <section class="article-reader empty-reader">
+                    <Icon name="inbox" size={28} />
+                    <p>Select an article to read</p>
+                  </section>
+                )}
+              </>
+            )}
+          </>
+        </main>
+        {ratingTarget && (
+          <MarkReadDialog
+            key={`${account.id}:${workspaceId}:${ratingTarget}`}
+            client={client}
+            owner={account.id}
+            workspace={workspaceId}
+            article={ratingTarget}
+            onClose={() => setRatingTarget(null)}
+            onSave={(command) => reader.completeReading(ratingTarget, command)}
+            onSkip={() => reader.markReadWithoutRating(ratingTarget)}
           />
-          <ZhihuProfile key={account.id} client={client.zhihu} />
-          <footer class="modal__actions">
-            <span />
-            <span />
-            <span />
-            <button class="primary-button" onClick={() => setModal(null)}>
-              Done
-            </button>
-          </footer>
-        </ModalDialog>
-      )}
-      {modalStack.includes("shortcuts") && (
-        <div hidden={modal !== "shortcuts"}>
-          <AdvancedSettings
-            onProfile={() => setModal("profile")}
+        )}
+        {subscriptionRoute && (
+          <SubscriptionsPage
+            onOpenWiki={navigate}
             client={client}
             workspaceId={workspaceId}
             workspaceName={workspace}
             subscriptions={subscriptions}
-            selectedSubscription={settingsSubscription}
-            onSelectSubscription={setSettingsTarget}
-            onSubscription={(changed) =>
+            subscriptionId={
+              subscriptionRoute[1]
+                ? decodeURIComponent(subscriptionRoute[1])
+                : undefined
+            }
+            initialTab={
+              subscriptionRoute[2] === "activity" ? "activity" : "overview"
+            }
+            onBack={closeSubscriptions}
+            onOpenDetail={(id) =>
+              navigate(`/subscriptions/${encodeURIComponent(id)}`)
+            }
+            onOpenArticles={(id, articleId) => {
+              if (navigate("/reader")) {
+                loadPage(
+                  "subscription",
+                  id,
+                  undefined,
+                  undefined,
+                  1,
+                  articleId,
+                );
+                if (!articleId) setMobilePanel("list");
+              }
+            }}
+            onRefresh={async (id) => {
+              await subscriptionCommands.refresh(id);
+            }}
+            onPause={(id) => {
+              setPauseTarget(id);
+              setModal("pause");
+            }}
+            onRemoved={(id) => {
+              setSubscriptions((items) =>
+                items.filter((item) => item.id !== id),
+              );
+              reader.forgetSubscription(id);
+            }}
+            onChanged={(changed) =>
               setSubscriptions((items) =>
                 items.map((item) => (item.id === changed.id ? changed : item)),
               )
             }
-            onWorkspace={(item) => {
-              setWorkspaces((items) => [...items, item]);
-              replaceWorkspace(item.id, {
-                articles: [],
-                total: 0,
-                unreadTotal: 0,
-              });
-              setSubscriptions([]);
-            }}
-            onRename={(item) =>
-              setWorkspaces((items) =>
-                items.map((old) => (old.id === item.id ? item : old)),
-              )
-            }
-            onEditWebFeed={(recipe) => {
+            onEditRecipe={(recipe) => {
               setEditingRecipe(recipe);
               setModal("webfeed");
             }}
-            onClose={() => setModal(null)}
-            onPause={() => {
-              setPauseTarget(settingsTarget);
-              setModal("pause");
+          />
+        )}
+        <div class="live-region" aria-live="polite">
+          {notice}
+        </div>
+        {modalStack.includes("add") && (
+          <div hidden={modal !== "add"}>
+            <AddSubscription
+              client={client}
+              workspaceId={workspaceId}
+              onClose={() => setModal(null)}
+              onWebFeed={() => {
+                setEditingRecipe(null);
+                setModal("webfeed");
+              }}
+              onDone={(added) => {
+                setSubscriptions((items) => [...items, added]);
+                setModal(null);
+                announce("Subscription added");
+              }}
+            />
+          </div>
+        )}
+        {modal === "pause" && (pauseTarget || selectedSubscription) && (
+          <ReasonDialog
+            title="Pause subscription"
+            action="Pause subscription"
+            onClose={() => {
+              setPauseTarget(null);
+              setModal(null);
             }}
-            onResume={async () => {
-              if (settingsSubscription)
-                await subscriptionCommands.resume(settingsSubscription.id);
+            onDone={async (reason) => {
+              const generation = modalRevision.current;
+              const id = pauseTarget ?? selectedSubscription!.id;
+              const applied = await subscriptionCommands.pause(id, reason);
+              if (applied && modalRevision.current === generation) {
+                setPauseTarget(null);
+                setModal(null);
+                announce("Subscription paused");
+              }
             }}
           />
-        </div>
-      )}
-    </div>
+        )}
+        {modal === "archive" && !archived && (
+          <ReasonDialog
+            title="Archive workspace"
+            action="Archive workspace"
+            onClose={() => setModal(null)}
+            onDone={(reason) =>
+              client.archiveWorkspace(workspaceId, reason).then(() => {
+                setArchived(true);
+                setWorkspaces((items) =>
+                  items.map((item) =>
+                    item.id === workspaceId
+                      ? {
+                          ...item,
+                          archived: true,
+                          archiveReason: reason,
+                          archiveReasonAt: new Date().toISOString(),
+                        }
+                      : item,
+                  ),
+                );
+                setModal(null);
+                announce("Workspace archived");
+              })
+            }
+          />
+        )}
+        {modal === "archive" && archived && (
+          <RestoreDialog
+            onClose={() => setModal(null)}
+            onDone={() =>
+              client.restoreWorkspace(workspaceId).then(() => {
+                setArchived(false);
+                setWorkspaces((items) =>
+                  items.map((item) =>
+                    item.id === workspaceId
+                      ? { ...item, archived: false }
+                      : item,
+                  ),
+                );
+                setModal(null);
+                announce("Workspace restored");
+              })
+            }
+          />
+        )}
+        {modal === "rules" && selectedSubscription && (
+          <RulesDialog
+            client={client}
+            workspaceId={workspaceId}
+            subscriptionId={selectedSubscription.id}
+            onClose={() => setModal(null)}
+          />
+        )}
+        {sessionWizard && (
+          <ReadingSessionWizard
+            workspace={workspaceId}
+            onClose={() => setSessionWizard(false)}
+            onStart={(url) => {
+              if (navigate(url)) {
+                setSessionWizard(false);
+                return true;
+              }
+              return false;
+            }}
+          />
+        )}
+        {modal === "webfeed" && (
+          <WebFeedBuilder
+            client={client}
+            workspaceId={workspaceId}
+            editing={editingRecipe}
+            onClose={() => {
+              setEditingRecipe(null);
+              setModal(null);
+            }}
+            onDone={(added) => {
+              setSubscriptions((items) => [...items, added]);
+              setEditingRecipe(null);
+              setModal(null);
+              announce("Web feed created");
+            }}
+            onUpdated={() => {
+              setEditingRecipe(null);
+              setModal(null);
+              announce("Web feed recipe updated; collection queued");
+            }}
+          />
+        )}
+        {!readingLayout && (
+          <PanelDock
+            active={
+              !!glossary.target &&
+              glossary.target.id === chat.target?.articleId &&
+              chat.visible &&
+              !chat.collapsed &&
+              locationPath === "/reader" &&
+              modal === null &&
+              selected?.fullText === "ready"
+            }
+            terms={
+              glossary.target && (
+                <GlossaryPanel
+                  key={`${account.id}:${workspaceId}:${glossary.target.id}`}
+                  controller={glossary}
+                />
+              )
+            }
+            summary={
+              chat.visible && (
+                <div
+                  hidden={
+                    locationPath !== "/reader" ||
+                    modal !== null ||
+                    selected?.fullText !== "ready"
+                  }
+                >
+                  <ArticleChatWidget controller={chat} profile={aiProfile} />
+                </div>
+              )
+            }
+          />
+        )}
+        {modal === "profile" && (
+          <ModalDialog
+            title="Profile"
+            description="Your personal integrations and credentials."
+            onClose={() => setModal(null)}
+            width="540px"
+          >
+            <DeepSeekProfile
+              client={client.ai}
+              onProfile={(value) => aiProfileState.update(account.id, value)}
+              completedGeneration={chat.completedGeneration}
+            />
+            <ZhihuProfile key={account.id} client={client.zhihu} />
+            <footer class="modal__actions">
+              <span />
+              <span />
+              <span />
+              <button class="primary-button" onClick={() => setModal(null)}>
+                Done
+              </button>
+            </footer>
+          </ModalDialog>
+        )}
+        {modalStack.includes("shortcuts") && (
+          <div hidden={modal !== "shortcuts"}>
+            <AdvancedSettings
+              onProfile={() => setModal("profile")}
+              client={client}
+              workspaceId={workspaceId}
+              workspaceName={workspace}
+              subscriptions={subscriptions}
+              selectedSubscription={settingsSubscription}
+              onSelectSubscription={setSettingsTarget}
+              onSubscription={(changed) =>
+                setSubscriptions((items) =>
+                  items.map((item) =>
+                    item.id === changed.id ? changed : item,
+                  ),
+                )
+              }
+              onWorkspace={(item) => {
+                setWorkspaces((items) => [...items, item]);
+                replaceWorkspace(item.id, {
+                  articles: [],
+                  total: 0,
+                  unreadTotal: 0,
+                });
+                setSubscriptions([]);
+              }}
+              onRename={(item) =>
+                setWorkspaces((items) =>
+                  items.map((old) => (old.id === item.id ? item : old)),
+                )
+              }
+              onEditWebFeed={(recipe) => {
+                setEditingRecipe(recipe);
+                setModal("webfeed");
+              }}
+              onClose={() => setModal(null)}
+              onPause={() => {
+                setPauseTarget(settingsTarget);
+                setModal("pause");
+              }}
+              onResume={async () => {
+                if (settingsSubscription)
+                  await subscriptionCommands.resume(settingsSubscription.id);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </SessionClockContext.Provider>
   );
 }

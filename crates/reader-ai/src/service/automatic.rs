@@ -16,6 +16,12 @@ impl AiService {
     }
     pub async fn initialize_automatic(&self) -> Result<(), AiError> {
         let config = self.policy.config();
+        self.store
+            .configure_automatic_schedule(&config.automatic_schedule)
+            .await?;
+        self.store
+            .configure_initial_articles(config.initial_articles)
+            .await?;
         if config.automatic_summaries && config.prompt_approved {
             self.store
                 .enroll_summaries(&config.enabled_accounts)
@@ -25,12 +31,42 @@ impl AiService {
     }
     pub async fn schedule_once(&self) -> Result<bool, AiError> {
         let config = self.policy.config();
-        if !config.automatic_summaries || !config.prompt_approved {
+        if (!config.automatic_summaries && !config.automatic_terms) || !config.prompt_approved {
             return Ok(false);
         }
         self.store
             .enroll_summaries(&config.enabled_accounts)
             .await?;
+        if let Some(interests) = self.interests.as_ref().filter(|_| config.automatic_terms) {
+            if let Some((owner, workspace, article)) = interests
+                .next_terms(&config.enabled_accounts, crate::DEFINITIONS_VERSION)
+                .await?
+            {
+                // Retained jobs are the durable queue; no paid request occurs in
+                // the scheduler. Context and current daily budget are checked.
+                match self
+                    .define_internal(owner, workspace, article, Uuid::new_v4(), false, true)
+                    .await
+                {
+                    Ok(_) | Err(AiError::Budget) => {}
+                    Err(AiError::FullText | AiError::Context) => {
+                        interests
+                            .reject_terms(
+                                owner,
+                                workspace,
+                                article,
+                                crate::DEFINITIONS_VERSION,
+                                "full_text_or_context_unavailable",
+                            )
+                            .await?;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        if !config.automatic_summaries {
+            return Ok(false);
+        }
         let Some(target) = self
             .store
             .next_summary(

@@ -449,3 +449,63 @@ it.each(["failed", "interrupted", "cancelled"] as const)(
     ).toBeEnabled();
   },
 );
+
+it("Enter sends once while Shift+Enter and IME composition retain the draft", async () => {
+  let resolve!: (value: ArticleChat) => void;
+  let sends = 0;
+  const transport: Transport = async <C extends ResponseContract>(
+    _path: string,
+    init?: RequestInit,
+  ) => {
+    if (init) {
+      sends++;
+      return (await new Promise<ArticleChat>((done) => {
+        resolve = done;
+      })) as unknown as ResponseValue<C>;
+    }
+    return [saved()] as unknown as ResponseValue<C>;
+  };
+  render(<Harness client={new AiClient(transport)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Summarize A" }));
+  await screen.findByText("Useful summary");
+  const input = screen.getByLabelText("Message DeepSeek");
+  fireEvent.input(input, { target: { value: "Discuss this" } });
+  fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+  fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+  expect(sends).toBe(0);
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(sends).toBe(1);
+  expect(
+    screen.getByRole("button", { name: "Send", exact: true }),
+  ).toHaveAttribute("aria-busy", "true");
+  resolve(saved());
+  await waitFor(() => expect(input).toHaveValue(""));
+});
+
+it("promotes a queued saved summary on demand with immediate feedback and no duplicate POST", async () => {
+  const queued = { ...saved(), status: "queued" as const };
+  let complete!: (chat: ArticleChat) => void;
+  let posts = 0;
+  const transport: Transport = async <C extends ResponseContract>(
+    path: string,
+    init?: RequestInit,
+  ) => {
+    if (!init) return [queued] as unknown as ResponseValue<C>;
+    posts++;
+    return (await new Promise<ArticleChat>((resolve) => {
+      complete = resolve;
+    })) as unknown as ResponseValue<C>;
+  };
+  render(<Harness client={new AiClient(transport)} />);
+  const button = screen.getByRole("button", { name: "Summarize A" });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+  await waitFor(() => expect(posts).toBe(1));
+  await act(async () => {
+    complete(saved());
+  });
+  await screen.findByText("Useful summary");
+  expect(posts).toBe(1);
+});

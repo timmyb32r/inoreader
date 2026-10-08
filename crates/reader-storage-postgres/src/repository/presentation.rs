@@ -73,6 +73,9 @@ impl PostgresRepository {
         } else {
             latest.is_some()
         };
+        let video = content
+            .as_ref()
+            .and_then(|value| value.pointer.video.clone());
         let safe_html = content.map(|value| value.html);
         let full_text_status = if ready {
             reader_application::ContentStatus::Ready
@@ -81,8 +84,18 @@ impl PostgresRepository {
         } else {
             reader_application::ContentStatus::Pending
         };
+        let read_method = self
+            .read_methods(workspace, &[article.id.as_uuid().to_string()])
+            .await?
+            .remove(&article.id.as_uuid().to_string());
         Ok(ArticlePresentation {
+            video,
             marked_read_at: None,
+            read_method: if article.state.read {
+                read_method
+            } else {
+                None
+            },
             publication,
             article,
             subscription_ids,
@@ -162,6 +175,7 @@ impl PostgresRepository {
                 published,
             ));
         }
+        let mut read_methods = self.read_methods(workspace, &ids).await?;
         articles
             .into_iter()
             .map(|article| {
@@ -209,7 +223,13 @@ impl PostgresRepository {
                     reader_application::ContentStatus::Pending
                 };
                 Ok(ArticlePresentation {
+                    video: None,
                     marked_read_at: None,
+                    read_method: if article.state.read {
+                        read_methods.remove(&article.id.as_uuid().to_string())
+                    } else {
+                        None
+                    },
                     publication,
                     article,
                     subscription_ids,
@@ -237,4 +257,22 @@ fn merge_media_type(
         *current = Some(next);
     }
     Ok(())
+}
+
+impl PostgresRepository {
+    async fn read_methods(
+        &self,
+        workspace: WorkspaceId,
+        ids: &[String],
+    ) -> Result<HashMap<String, reader_application::ReadMethod>, RepositoryError> {
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT DISTINCT ON(article_id) article_id,method FROM article_read_events WHERE workspace_id=$1 AND article_id=ANY($2) ORDER BY article_id,revision DESC")
+            .bind(workspace.as_uuid().to_string()).bind(ids).fetch_all(&self.pool).await.map_err(storage)?;
+        rows.into_iter()
+            .map(|(id, method)| {
+                let method =
+                    serde_json::from_value(serde_json::Value::String(method)).map_err(storage)?;
+                Ok((id, method))
+            })
+            .collect()
+    }
 }

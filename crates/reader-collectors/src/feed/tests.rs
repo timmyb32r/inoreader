@@ -77,3 +77,10 @@ fn declared_summary_format_and_original_text_survive_parsing() {
     assert_eq!(record.description_media_type.as_deref(), Some("text/plain"));
     assert_eq!(record.description.as_deref(), Some("A <b>literal</b>"));
 }
+
+#[test]
+fn atom_alternate_html_link_wins_over_comments_and_self() {
+    let xml = br#"<feed xmlns="http://www.w3.org/2005/Atom"><id>blog</id><title>Blog</title><updated>2026-10-04T00:00:00Z</updated><entry><id>post</id><title>Post</title><updated>2026-10-04T00:00:00Z</updated><link rel="replies" type="application/atom+xml" href="https://example.com/comments"/><link rel="self" href="https://example.com/feed/post"/><link rel="alternate" type="text/html" href="https://example.com/2026/post.html"/></entry></feed>"#;
+    let values = parse_xml(xml, &Url::parse("https://example.com/feed").unwrap()).unwrap();
+    assert_eq!(values[0].original_url, "https://example.com/2026/post.html");
+}

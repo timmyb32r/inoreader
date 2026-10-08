@@ -148,7 +148,7 @@ pub async fn verify(pool: &PgPool) {
         operation,
     );
     let chat_id = chat.view.id;
-    reader_ai::AiStore::create_chat(&ai_store, chat, operation, false)
+    reader_ai::AiStore::create_chat(&ai_store, chat, operation, false, false)
         .await
         .unwrap();
     let mut revision = serde_json::to_value(&commit.record).unwrap();

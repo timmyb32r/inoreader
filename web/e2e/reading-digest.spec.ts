@@ -164,6 +164,7 @@ async function fixture(page: Page) {
     return route.continue();
   });
   return {
+    articles,
     commands,
     reads,
     states,
@@ -225,7 +226,10 @@ test("digest shows full saved summaries and keeps rating targets fixed during sa
   expect(await save.boundingBox()).toEqual(bounds);
   expect(await next.boundingBox()).toEqual(before);
   f.release();
-  await expect(save).toHaveText("Прочитано ✓");
+  await expect(page.locator('.digest-article[data-read="true"]')).toHaveCSS(
+    "visibility",
+    "hidden",
+  );
   expect(await next.boundingBox()).toEqual(before);
   expect(f.commands[0].reason).toBe("  Полезный механизм.\nНужны замеры.  ");
   await page
@@ -246,11 +250,12 @@ test("digest preserves drafts and pagination, supports a full-text-free card and
     exact: true,
   });
   const reason = card.getByRole("textbox");
-  await reason.scrollIntoViewIfNeeded();
-  await reason.fill("Черновик для статьи");
+  await expect(reason).toBeHidden();
   await card
     .getByRole("button", { name: "Rate 7 out of 10", exact: true })
     .click();
+  await reason.scrollIntoViewIfNeeded();
+  await reason.fill("Черновик для статьи");
   await page.reload();
   await reason.scrollIntoViewIfNeeded();
   await expect(reason).toHaveValue("Черновик для статьи");
@@ -288,6 +293,9 @@ test("subscription selection scopes the request and restores drafts on Back", as
     name: "Digest article 1",
     exact: true,
   });
+  await card
+    .getByRole("button", { name: "Rate 7 out of 10", exact: true })
+    .click();
   await card.getByRole("textbox").fill("Не потерять");
   await page
     .getByRole("navigation", { name: "Подписки для чтения" })
@@ -430,4 +438,138 @@ test("both reading modes keep the same back button coordinates and return destin
     await back.click();
     await expect(page).toHaveURL(/\/reader\?/);
   }
+});
+
+test("commit cards do not require scoring and keep hidden explanation and stable adjacent cards", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  f.articles[0].url = "https://github.com/chrisant996/clink/commit/123abc";
+  await page.goto("/digest?workspace=ws");
+  const card = page.getByRole("article", {
+    name: "Digest article 1",
+    exact: true,
+  });
+  await expect(card.getByRole("textbox")).toBeHidden();
+  const next = page.getByRole("article", {
+    name: "Digest article 3",
+    exact: true,
+  });
+  const save = card.locator(".reading-reason__save");
+  await expect(save).toBeEnabled();
+  await save.scrollIntoViewIfNeeded();
+  const before = await next.boundingBox();
+  await save.click();
+  await expect(page.locator('.digest-article[data-read="true"]')).toHaveCSS(
+    "visibility",
+    "hidden",
+  );
+  expect(await next.boundingBox()).toEqual(before);
+  expect(f.commands[0].rating).toBeNull();
+});
+
+test("late extracted terms scroll in their reserved slot without moving rating targets", async ({
+  page,
+}) => {
+  await fixture(page);
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/articles/1/definitions*", async (route) => {
+    await pending;
+    await route.fulfill({
+      json: {
+        channel: {
+          channel: "reading_data_news",
+          configured: false,
+          conflicts: 0,
+          coverageNote: "",
+          definitions: 0,
+          generationAllowed: true,
+          historyIncomplete: false,
+          indexReady: true,
+          pending: 0,
+          posts: 0,
+          revision: 0,
+          syncPending: false,
+          unindexed: 0,
+        },
+        known: [],
+        job: {
+          id: "terms-1",
+          articleId: "1",
+          workspaceId: "ws",
+          model: "flash",
+          promptVersion: "fixture",
+          status: "completed",
+          result: {
+            entities: [
+              {
+                name: "Kafka",
+                kind: "product",
+                explanation: "Платформа потоковых событий. ".repeat(300),
+                insufficientContext: false,
+              },
+            ],
+          },
+        },
+      },
+    });
+  });
+  await page.goto("/digest?workspace=ws");
+  const card = page.getByRole("article", {
+    name: "Digest article 1",
+    exact: true,
+  });
+  const score = card.getByRole("button", {
+    name: "Rate 7 out of 10",
+    exact: true,
+  });
+  const save = card.locator(".reading-reason__save");
+  await expect(score).toBeEnabled();
+  const scoreBefore = await score.boundingBox(),
+    saveBefore = await save.boundingBox();
+  release();
+  await expect(
+    card.getByRole("region", { name: "Извлечённые термины" }),
+  ).toContainText("Платформа потоковых событий.");
+  expect(await score.boundingBox()).toEqual(scoreBefore);
+  expect(await save.boundingBox()).toEqual(saveBefore);
+  const content = card.locator(".digest-article__terms > div");
+  expect(
+    await content.evaluate((el) => el.scrollHeight > el.clientHeight),
+  ).toBe(true);
+});
+
+test("unknown rating reveals its explanation without moving controls and stores no numeric label", async ({
+  page,
+}) => {
+  const f = await fixture(page);
+  await page.goto("/digest?workspace=ws");
+  const card = page.getByRole("article", {
+    name: "Digest article 1",
+    exact: true,
+  });
+  await card.scrollIntoViewIfNeeded();
+  const save = card.locator(".reading-reason__save");
+  await save.scrollIntoViewIfNeeded();
+  const unknown = card.getByRole("button", { name: "Не знаю", exact: true });
+  // Put both targets in the scroll viewport before comparing coordinates;
+  // Playwright otherwise scrolls the partially clipped unknown button on click.
+  await unknown.scrollIntoViewIfNeeded();
+  const bounds = await save.boundingBox();
+  await expect(card.getByRole("textbox")).toBeHidden();
+  await unknown.click();
+  await expect(card.getByRole("textbox")).toBeVisible();
+  expect(await save.boundingBox()).toEqual(bounds);
+  await card
+    .getByRole("textbox")
+    .fill("Не могу оценить без дополнительных данных");
+  await save.click();
+  await expect.poll(() => f.commands.length).toBe(1);
+  expect(f.commands[0].rating).toBeNull();
+  expect(f.commands[0].reason).toBe(
+    "Не могу оценить без дополнительных данных",
+  );
 });

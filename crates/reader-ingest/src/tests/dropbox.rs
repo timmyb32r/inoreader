@@ -34,6 +34,7 @@ fn dropbox_archive_covers_all_existing_rss_identities_without_reducing_metadata(
             SourceRecordId::new(),
             source.id(),
             ParsedRecord {
+                categories: None,
                 upstream_id: identity.into(),
                 original_url: identity.into(),
                 absolute_url: Some(Url::parse(identity).unwrap()),

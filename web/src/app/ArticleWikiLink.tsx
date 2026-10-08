@@ -83,7 +83,9 @@ export function ArticleWikiLink({
             )
               return;
             event.preventDefault();
-            onNavigate(target.path);
+            onNavigate(
+              `${target.path}?return=${encodeURIComponent(location.pathname + location.search)}`,
+            );
           }}
         >
           <span aria-hidden="true">W</span>

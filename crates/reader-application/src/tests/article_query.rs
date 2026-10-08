@@ -80,3 +80,62 @@ fn unread_subscription_scope_preserves_identity() {
     assert_eq!(scope, ArticleScope::SubscriptionUnread(id));
     assert_eq!(scope.subscription(), Some(id));
 }
+
+#[test]
+fn commit_project_is_validated_and_cannot_be_combined_with_history_or_other_scopes() {
+    let project = CommitProject::from_url("https://github.com/acme/engine/commit/abc").unwrap();
+    assert_eq!(
+        project.clone().prefixes()[0],
+        "https://github.com/acme/engine/commit/"
+    );
+    for invalid in [
+        "https://github.com.evil/acme/engine/commit/abc",
+        "https://secret@github.com/acme/engine/commit/abc",
+        "https://github.com/acme/engine/issues/1",
+        "https://github.com/acme/engine/commit/",
+        "https://github.com/acme/old/../engine/commit/abc",
+        "https://github.com/acme/%65ngine/commit/abc",
+        "ftp://github.com/acme/engine/commit/abc",
+    ] {
+        assert!(CommitProject::from_url(invalid).is_err(), "{invalid}");
+    }
+    let request = || {
+        ArticlePageRequest::new(
+            ArticleScope::Feed,
+            None,
+            ArticlePageDirection::Older,
+            SelectionLimit::new(2).unwrap(),
+        )
+        .unwrap()
+    };
+    let now = Utc::now();
+    let now = DateTime::from_timestamp_micros(now.timestamp_micros()).unwrap();
+    let period = ReadPeriod::new(now, now + chrono::Duration::days(1)).unwrap();
+    assert!(request()
+        .with_read_period(Some(period))
+        .unwrap()
+        .with_commit_project(project.clone())
+        .is_err());
+    assert!(request()
+        .with_commit_project(project.clone())
+        .unwrap()
+        .with_read_period(Some(period))
+        .is_err());
+    assert!(ArticlePageRequest::new(
+        ArticleScope::Later,
+        None,
+        ArticlePageDirection::Older,
+        SelectionLimit::new(2).unwrap()
+    )
+    .unwrap()
+    .with_commit_project(project.clone())
+    .is_err());
+    assert_eq!(
+        request()
+            .with_commit_project(project.clone())
+            .unwrap()
+            .clone()
+            .commit_project(),
+        Some(&project)
+    );
+}

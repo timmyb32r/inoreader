@@ -141,11 +141,12 @@ test("private wiki persists exact Markdown, rejects stale writes, and has stable
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
   ).toBeLessThanOrEqual(390);
+  const topbar = (await page.locator(".topbar").boundingBox())!;
   await expect
     .poll(async () =>
       Math.round((await page.locator(".wiki-shell").boundingBox())!.y),
     )
-    .toBe(54);
+    .toBe(Math.round(topbar.y + topbar.height));
   await expect
     .poll(async () => {
       const box = (await page.locator(".sidebar").boundingBox())!;

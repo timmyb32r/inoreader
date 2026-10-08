@@ -340,3 +340,38 @@
     padding: 24px;
   }
 }
+
+/* Departure transforms content only. Header/footer hit targets stay fixed. */
+.focused-reading__article[data-departing="true"] .reader-body {
+  animation: reading-depart 240ms ease-in forwards;
+  pointer-events: none;
+}
+@keyframes reading-depart {
+  to {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .focused-reading__article[data-departing="true"] .reader-body {
+    animation: none;
+    opacity: 0;
+  }
+}
+.focused-reading__rating-ends button {
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+}
+.focused-reading__assistant--both {
+  display: grid;
+  grid-template-rows: 54px 38px minmax(0, 1fr) minmax(0, 0.65fr);
+}
+.focused-reading__assistant--both .glossary-panel--embedded {
+  grid-template-rows: 44px minmax(0, 1fr) 40px;
+}
+
+/* Embedded terms belong below the modal layer, unlike the floating panel. */
+.focused-reading .glossary-panel--embedded {
+  z-index: auto;
+}

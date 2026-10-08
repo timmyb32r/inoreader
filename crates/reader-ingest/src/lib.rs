@@ -29,3 +29,6 @@ pub use web_feed::*;
 
 #[cfg(test)]
 mod tests;
+
+mod video;
+pub use video::extract_video;

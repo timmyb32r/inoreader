@@ -34,3 +34,29 @@ describe("safe wiki Markdown", () => {
     );
   });
 });
+
+it("links bare public URLs without linking code or internal namespaces", () => {
+  render(
+    <WikiMarkdown
+      onLink={() => {}}
+      text={`https://github.com/activepieces/activepieces
+
+\`https://example.com/code\`
+
+${location.origin}/wiki/foreign/page/id`}
+    />,
+  );
+  expect(
+    screen.getByRole("link", {
+      name: "https://github.com/activepieces/activepieces",
+    }),
+  ).toHaveAttribute("href", "https://github.com/activepieces/activepieces");
+  expect(
+    screen.queryByRole("link", { name: "https://example.com/code" }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("link", {
+      name: `${location.origin}/wiki/foreign/page/id`,
+    }),
+  ).toBeNull();
+});

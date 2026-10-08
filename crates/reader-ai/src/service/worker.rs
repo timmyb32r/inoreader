@@ -20,7 +20,7 @@ impl AiService {
         // Separate work classes share one FIFO permit pool: slow definitions do
         // not force every chat to wait behind a definition and a translation.
         let slots = Arc::new(tokio::sync::Semaphore::new(self.policy.config().workers));
-        for class in ["definitions", "translation", "chat"] {
+        for class in ["definitions", "translation", "chat", "ranking"] {
             for _ in 0..self.policy.config().workers {
                 let service = self.clone();
                 let slots = slots.clone();
@@ -34,6 +34,7 @@ impl AiService {
                         let result=match class {
                             "definitions"=>service.define_once().await,
                             "translation"=>service.translate_once().await,
+                            "ranking"=>service.rank_once().await,
                             _=>service.work_once().await,
                         };
                         drop(permit);
@@ -58,13 +59,22 @@ impl AiService {
         )
         .scope(async {
             if let Err(error) = self.generate_claim(&mut claim).await {
-                if matches!(error, AiError::Budget)
+                if matches!(error, AiError::Budget | AiError::AutomaticPaused)
                     && matches!(
                         claim.record.operations.last().map(|op| &op.task),
                         Some(AttemptTask::Summary { .. })
                     )
                 {
-                    self.store.defer_budget(&claim).await?;
+                    self.store
+                        .defer_work(
+                            &claim,
+                            if matches!(error, AiError::AutomaticPaused) {
+                                crate::AiDeferral::PeakHours
+                            } else {
+                                crate::AiDeferral::DailyBudget
+                            },
+                        )
+                        .await?;
                     return Ok(true);
                 }
                 if !matches!(error, AiError::Cancelled) {
@@ -183,7 +193,7 @@ impl AiService {
             system: if review {
                 self.policy.review_snapshot()?.system_prompt
             } else {
-                format!("{}\nFor the initial summary, omit the heading/title segment: the application supplies the exact source title. All other style rules remain in force.", record.system_prompt)
+                format!("{}\nFor the initial summary, omit the heading/title segment: the application supplies the exact source title. All other style rules remain in force. For articles listing tools, alternatives, techniques or numbered recommendations, explicitly enumerate every named item in a bullet or numbered list. If the title promises N items, preserve all N when the source supplies them; never invent missing items. Each item needs its exact name and a short useful distinction. Translate whitepaper/白皮书 as технический доклад or аналитический доклад according to context, never the literal белая книга.", record.system_prompt)
             },
             article: record.snapshot.clone().ok_or(AiError::FullText)?,
             messages: if review {

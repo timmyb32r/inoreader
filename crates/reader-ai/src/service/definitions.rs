@@ -18,6 +18,19 @@ impl AiService {
         operation: Uuid,
         regenerate: bool,
     ) -> Result<DefinitionsJob, AiError> {
+        self.define_internal(owner, workspace, article, operation, regenerate, false)
+            .await
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn define_internal(
+        &self,
+        owner: Uuid,
+        workspace: Uuid,
+        article: Uuid,
+        operation: Uuid,
+        regenerate: bool,
+        automatic: bool,
+    ) -> Result<DefinitionsJob, AiError> {
         log::info!("ai_submission operation_id={operation}");
         self.policy.generation_allowed(owner)?;
         self.key(owner).await?;
@@ -36,7 +49,7 @@ impl AiService {
             self.policy.cost_rates().clone(),
         )?;
         self.store
-            .create_definitions(record, operation, regenerate)
+            .create_definitions(record, operation, regenerate, automatic)
             .await
             .inspect(|job| {
                 log::info!(
@@ -77,6 +90,21 @@ impl AiService {
                     .await
                 }
                 .await;
+                if matches!(response, Err(AiError::Budget | AiError::AutomaticPaused)) {
+                    if let Some(interests) = &self.interests {
+                        interests
+                            .defer_terms(
+                                &claim,
+                                if matches!(response, Err(AiError::AutomaticPaused)) {
+                                    crate::AiDeferral::PeakHours
+                                } else {
+                                    crate::AiDeferral::DailyBudget
+                                },
+                            )
+                            .await?;
+                        return Ok(true);
+                    }
+                }
                 let (state, usage) = match response {
                     Ok(reply) => {
                         self.store
@@ -112,6 +140,12 @@ impl AiService {
                         };
                         (state, usage)
                     }
+                    Err(AiError::AutomaticDuplicate) => (
+                        DefinitionState::Cancelled {
+                            reason: AiError::AutomaticDuplicate.to_string(),
+                        },
+                        None,
+                    ),
                     Err(error) => (
                         DefinitionState::Failed {
                             error: error.to_string(),

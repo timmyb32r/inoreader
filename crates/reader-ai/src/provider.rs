@@ -94,6 +94,38 @@ where
     T: OutboundTransport + 'static,
     O: ExternalRequestObserver + 'static,
 {
+    async fn classify(
+        &self,
+        key: &str,
+        input: crate::InterestInput,
+    ) -> Result<crate::ProviderReply, AiError> {
+        let mut response = self
+            .http
+            .execute_stream(
+                request("/chat/completions", key, Some(input.body()))?,
+                "deepseek",
+                "article_ranking",
+            )
+            .await
+            .map_err(|_| AiError::Provider)?;
+        let mut body = Vec::new();
+        let mut interrupted = false;
+        loop {
+            match response.next_chunk().await {
+                Ok(Some(chunk)) => body.extend(chunk),
+                Ok(None) => break,
+                Err(_) => {
+                    interrupted = true;
+                    break;
+                }
+            }
+        }
+        Ok(crate::ProviderReply {
+            status: response.status.as_u16(),
+            body,
+            interrupted,
+        })
+    }
     async fn definitions(
         &self,
         key: &str,

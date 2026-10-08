@@ -140,6 +140,8 @@ pub(super) fn article_view(value: &reader_application::ArticlePresentation) -> A
     };
     view.full_text_reason = value.failure_reason.clone();
     view.marked_read_at = value.marked_read_at;
+    view.read_method = value.read_method;
+    view.video = value.video.clone();
     view
 }
 
@@ -222,7 +224,9 @@ pub(super) fn article_domain_view(value: &reader_core::Article) -> ArticleView {
         .unwrap_or_default()
         .to_owned();
     ArticleView {
+        video: None,
         marked_read_at: None,
+        read_method: None,
         id: value.id.as_uuid(),
         url,
         source: "Unknown source".to_owned(),

@@ -69,12 +69,36 @@ export function ArticleReader({
   const [translating, setTranslating] = useState(false);
   // The displayed source and the first subscription ID share the same origin.
   const sourceSubscriptionId = article.subscriptionIds?.[0];
+  const readMethodLabel = !article.read
+    ? "Не прочитано"
+    : article.readMethod === "bulk"
+      ? "Отмечено через Mark all read"
+      : article.readMethod === "reader"
+        ? "Прочитано в ридере"
+        : article.readMethod === "single"
+          ? "Отмечено отдельно"
+          : "Прочитано · способ неизвестен";
   const sourceMeta = (
     <>
       <span class="source__mark">{article.source.slice(0, 1)}</span>
       <div>
         <strong>{article.source}</strong>
         <ArticleDates article={article} />
+        <span
+          class="reader-read-method"
+          aria-label="Способ чтения"
+          title={readMethodLabel}
+        >
+          {readMethodLabel}
+        </span>
+        {article.video && (
+          <span class="reader-video-meta">
+            {article.video.shorts === true ? "YouTube Shorts · " : "YouTube · "}
+            {article.video.durationSeconds != null
+              ? `${Math.floor(article.video.durationSeconds / 60)}:${String(article.video.durationSeconds % 60).padStart(2, "0")}`
+              : "Duration unknown"}
+          </span>
+        )}
       </div>
     </>
   );
@@ -180,6 +204,11 @@ export function ArticleReader({
             )}
             <span class="reader-toolbar-button__label">Terms</span>
           </button>
+          <CopyButton
+            text={article.title}
+            label="Copy title"
+            className="reader-toolbar-button reader-toolbar-button--icon ai-copy"
+          />
           <CopyButton
             text={copyText}
             label="Copy full article"

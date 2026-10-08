@@ -134,7 +134,7 @@ export function ActivityDashboard({
           <p>New arrivals and articles you marked as read, day by day.</p>
         </div>
         <button class="primary-button" onClick={onOpenLibrary}>
-          Open feed
+          Начать чтение
         </button>
       </header>
       <div class="activity-summary">

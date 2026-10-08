@@ -68,8 +68,30 @@ pub struct PasswordResetRecord {
     pub consumed_at: Option<DateTime<Utc>>,
     pub revision: u64,
 }
+/// Provenance of an observed read transition. Unknown is reserved for historical
+/// events whose method was never recorded; unread presentations have no method.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadMethod {
+    Reader,
+    Single,
+    Bulk,
+    Unknown,
+}
+impl ReadMethod {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reader => "reader",
+            Self::Single => "single",
+            Self::Bulk => "bulk",
+            Self::Unknown => "unknown",
+        }
+    }
+}
 #[derive(Clone, Debug)]
 pub struct ArticlePresentation {
+    pub read_method: Option<ReadMethod>,
+    pub video: Option<reader_core::VideoMetadata>,
     /// Latest read event within the explicitly selected history period.
     pub marked_read_at: Option<DateTime<Utc>>,
     pub publication: Vec<reader_core::PublicationEvidence>,
@@ -311,18 +333,12 @@ pub trait ArticleRepository: Send + Sync {
         workspace: WorkspaceId,
         value: &Article,
     ) -> Result<(), RepositoryError>;
-    /// Select only unread matching records, in stable lock order, with at most
-    /// limit + 1 rows. The lookahead detects an oversized atomic operation.
-    async fn unread_selection(
+    /// Atomic snapshot of all matching unread articles, using bounded batches.
+    async fn mark_scope_read_atomic(
         &self,
         workspace: WorkspaceId,
         scope: ArticleScope,
-        limit: SelectionLimit,
-    ) -> Result<Vec<Article>, RepositoryError>;
-    async fn mark_articles_read_atomic(
-        &self,
-        workspace: WorkspaceId,
-        values: Vec<Article>,
+        batch: SelectionLimit,
     ) -> Result<(), RepositoryError>;
 }
 

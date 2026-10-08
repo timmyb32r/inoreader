@@ -2,6 +2,7 @@ use super::*;
 
 fn parsed(id: &str, title: &str, description: Option<&str>, html: Option<&str>) -> ParsedRecord {
     ParsedRecord {
+        categories: None,
         description_media_type: Some("text/plain".into()),
         upstream_id: id.into(),
         original_url: "https://example.test/a".into(),

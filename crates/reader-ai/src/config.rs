@@ -9,9 +9,22 @@ use crate::{AiError, CostRates, GenerationMode};
 #[serde(deny_unknown_fields)]
 pub struct AiConfig {
     pub daily_limit_usd: String,
+
+    pub automatic_schedule: AutomaticScheduleConfig,
+
     pub automatic_summaries: bool,
+
+    /// Maximum unique articles admitted from a newly subscribed source archive.
+    pub initial_articles: u32,
+
+    /// User-enabled full-stream glossary extraction, under the same AI budget.
+    #[serde(default)]
+    pub automatic_terms: bool,
+
     pub automatic_attempts: u32,
+
     pub automatic_retry_seconds: u64,
+
     pub prompt_approved: bool,
 
     pub prompt_path: String,
@@ -95,12 +108,15 @@ impl AiConfig {
         {
             return Err(AiError::Configuration);
         }
+        self.automatic_schedule.validate()?;
         crate::SpendReservation::new(
             "1".into(),
             self.daily_limit_usd.clone(),
             crate::SpendMode::Summary,
         )?;
         if self.automatic_attempts == 0
+            || self.initial_articles == 0
+            || self.initial_articles > i32::MAX as u32
             || self.automatic_retry_seconds == 0
             || self.automatic_retry_seconds > i64::MAX as u64
         {
@@ -238,5 +254,30 @@ impl From<&AiConfig> for InputLimits {
             max_input_bytes: c.max_input_bytes,
             max_response_bytes: c.max_response_bytes,
         }
+    }
+}
+
+/// Explicit deployment policy for automatic calls only. Beijing calendar dates;
+/// peak windows are DeepSeek's Mon–Fri 09:00–12:00 and 14:00–18:00 (UTC+8),
+/// start inclusive/end exclusive. Holidays and weekends are off-peak. After the
+/// verified calendar expires, automatic calls pause until configuration is updated.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutomaticScheduleConfig {
+    pub pause_peak_hours: bool,
+    pub holiday_calendar_valid_through: chrono::NaiveDate,
+    pub public_holidays: Vec<chrono::NaiveDate>,
+}
+impl AutomaticScheduleConfig {
+    pub fn validate(&self) -> Result<(), AiError> {
+        let mut dates = std::collections::HashSet::new();
+        if self
+            .public_holidays
+            .iter()
+            .any(|day| *day > self.holiday_calendar_valid_through || !dates.insert(*day))
+        {
+            return Err(AiError::Configuration);
+        }
+        Ok(())
     }
 }
