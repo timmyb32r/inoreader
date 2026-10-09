@@ -122,11 +122,13 @@ pub trait InterestStore: Send + Sync {
         claim: &crate::ClaimedDefinitions,
         reason: crate::AiDeferral,
     ) -> Result<(), AiError>;
+    /// Retain the exact provider body, or reuse a successful prediction for the
+    /// same owner, article, profile revision and complete provider input.
     async fn retain_interest_input(
         &self,
         claim: &InterestClaim,
         input: &InterestInput,
-    ) -> Result<(), AiError>;
+    ) -> Result<Option<InterestPrediction>, AiError>;
     async fn feed(
         &self,
         owner: Uuid,
@@ -293,7 +295,9 @@ impl AiService {
                 &text,
             )?;
             let rates = self.policy.cost_rates();
-            store.retain_interest_input(&claim, &input).await?;
+            if let Some(prediction) = store.retain_interest_input(&claim, &input).await? {
+                return Ok(prediction);
+            }
             self.store
                 .reserve(
                     claim.owner,

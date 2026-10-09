@@ -137,8 +137,21 @@ pub async fn verify(pool: &PgPool) {
                 .unwrap();
         }
         let prediction:InterestPrediction=serde_json::from_value(serde_json::json!({"score":if expected==0 {9}else if expected==1 {1}else{2},"reason":"Test evidence","confidence":"high"})).unwrap();
+        let input = reader_ai::InterestInput::new(
+            super::ai_tests::policy(claim.owner).config(),
+            &claim.profile.prompt,
+            &claim.title,
+            "Unchanged classifier text",
+        )
+        .unwrap();
+        assert!(store
+            .retain_interest_input(&claim, &input)
+            .await
+            .unwrap()
+            .is_none());
+        let reply = reader_ai::ProviderReply { status: 200, interrupted: false, body: serde_json::to_vec(&serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":serde_json::to_string(&prediction).unwrap()}}]})).unwrap() };
         store
-            .finish_interest(&claim, Ok(prediction), None)
+            .finish_interest(&claim, Ok(prediction), Some(&reply))
             .await
             .unwrap();
         assert!(matches!(
@@ -148,6 +161,94 @@ pub async fn verify(pool: &PgPool) {
             Err(AiError::Storage) | Err(AiError::Conflict)
         ));
     }
+    // Source metadata invalidates a score, but an identical complete classifier
+    // input reuses the paid result before any new budget reservation.
+    sqlx::query("UPDATE interest_scores SET dirty=true WHERE owner=$1 AND article=$2")
+        .bind(owners[0].0)
+        .bind(ids[2].as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    let claim = store
+        .claim_interest(&[owners[0].0], 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let config = super::ai_tests::policy(claim.owner);
+    let input = reader_ai::InterestInput::new(
+        config.config(),
+        &claim.profile.prompt,
+        &claim.title,
+        "Unchanged classifier text",
+    )
+    .unwrap();
+    let cached = store
+        .retain_interest_input(&claim, &input)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cached.score(), 2);
+    let mut foreign = reader_ai::InterestClaim {
+        owner: claim.owner,
+        workspace: claim.workspace,
+        article: claim.article,
+        profile: claim.profile.clone(),
+        lease: claim.lease,
+        title: claim.title.clone(),
+        description: claim.description.clone(),
+    };
+    foreign.owner = owners[1].0;
+    assert!(matches!(
+        store.retain_interest_input(&foreign, &input).await,
+        Err(AiError::NotFound)
+    ));
+    let mut revised = reader_ai::InterestClaim {
+        owner: claim.owner,
+        workspace: claim.workspace,
+        article: claim.article,
+        profile: claim.profile.clone(),
+        lease: claim.lease,
+        title: claim.title.clone(),
+        description: claim.description.clone(),
+    };
+    revised.profile.revision = "2".into();
+    assert!(matches!(
+        store.retain_interest_input(&revised, &input).await,
+        Err(AiError::Conflict)
+    ));
+    store
+        .finish_interest(&claim, Ok(cached), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE interest_scores SET dirty=true WHERE owner=$1 AND article=$2")
+        .bind(owners[0].0)
+        .bind(ids[2].as_uuid())
+        .execute(pool)
+        .await
+        .unwrap();
+    let claim = store
+        .claim_interest(&[owners[0].0], 60)
+        .await
+        .unwrap()
+        .unwrap();
+    let changed = reader_ai::InterestInput::new(
+        config.config(),
+        &claim.profile.prompt,
+        &claim.title,
+        "Changed classifier text",
+    )
+    .unwrap();
+    assert!(store
+        .retain_interest_input(&claim, &changed)
+        .await
+        .unwrap()
+        .is_none());
+    store
+        .finish_interest(&claim, Err(AiError::Provider), None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE interest_scores SET status='scored',score=2,prediction=$3 WHERE owner=$1 AND article=$2")
+        .bind(owners[0].0).bind(ids[2].as_uuid()).bind(serde_json::json!({"score":2,"reason":"Test evidence","confidence":"high"}).to_string()).execute(pool).await.unwrap();
     let visible = store
         .feed(owners[0].0, owners[0].1.as_uuid(), None, 10, false)
         .await

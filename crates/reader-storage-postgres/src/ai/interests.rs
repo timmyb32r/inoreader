@@ -54,14 +54,28 @@ impl InterestStore for PostgresAiStore {
         &self,
         c: &InterestClaim,
         input: &InterestInput,
-    ) -> Result<(), AiError> {
+    ) -> Result<Option<InterestPrediction>, AiError> {
         owned_workspace(&self.pool, c.owner, c.workspace).await?;
+        let body = encode(&input.body())?;
         let changed=sqlx::query("INSERT INTO interest_responses(id,owner,workspace,article,profile_revision,input) SELECT $1,$2,$3,$4,$5::text::bigint,$6 FROM interest_scores WHERE owner=$2 AND workspace=$3 AND article=$4 AND profile_revision=$5::text::bigint AND lease=$1 AND status='working'")
-            .bind(c.lease).bind(c.owner).bind(c.workspace).bind(c.article).bind(&c.profile.revision).bind(encode(&input.body())?).execute(&self.pool).await.map_err(storage)?.rows_affected();
+            .bind(c.lease).bind(c.owner).bind(c.workspace).bind(c.article).bind(&c.profile.revision).bind(&body).execute(&self.pool).await.map_err(storage)?.rows_affected();
         if changed != 1 {
             return Err(AiError::Conflict);
         }
-        Ok(())
+        let cached: Option<(Vec<u8>, i32, bool)> = sqlx::query_as("SELECT response,response_status,interrupted FROM interest_responses WHERE owner=$1 AND workspace=$2 AND article=$3 AND profile_revision=$4::text::bigint AND input=$5 AND response IS NOT NULL AND response_status=200 AND interrupted=false ORDER BY created_at DESC,id DESC LIMIT 1")
+            .bind(c.owner).bind(c.workspace).bind(c.article).bind(&c.profile.revision).bind(&body).fetch_optional(&self.pool).await.map_err(storage)?;
+        if let Some((body, status, interrupted)) = cached {
+            let reply = ProviderReply {
+                body,
+                status: status.try_into().map_err(storage)?,
+                interrupted,
+            };
+            // Invalid paid replies are preserved for diagnosis, never reused.
+            if let Ok(prediction) = reply.interest_result() {
+                return Ok(Some(prediction));
+            }
+        }
+        Ok(None)
     }
     async fn feed(
         &self,
