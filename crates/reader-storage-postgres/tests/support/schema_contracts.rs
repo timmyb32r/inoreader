@@ -312,7 +312,7 @@ pub async fn subscription_upgrade(pool: &PgPool) {
         .unwrap();
     assert_eq!(method, "unknown");
     assert!(sqlx::query("INSERT INTO article_read_events(workspace_id,article_id,revision,method) VALUES('w','a',1,'guessed')").execute(&isolated).await.is_err());
-    sqlx::raw_sql("ALTER TABLE source_health DROP COLUMN failure_since_ms; DELETE FROM schema_releases WHERE version<>19; UPDATE schema_releases SET version=5,release='private-wiki-2026-09-28'; INSERT INTO subscriptions VALUES('exact',0,' { \"title\": \"原文\" } ');").execute(&isolated).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE source_health DROP COLUMN failure_since_ms; DELETE FROM schema_releases WHERE version<>20; UPDATE schema_releases SET version=5,release='private-wiki-2026-09-28'; INSERT INTO subscriptions VALUES('exact',0,' { \"title\": \"原文\" } ');").execute(&isolated).await.unwrap();
     sqlx::raw_sql("INSERT INTO source_health VALUES('failing','{\"consecutive_failures\":5,\"last_success_ms\":100,\"last_error_ms\":900}'),('healthy','{\"consecutive_failures\":0,\"last_success_ms\":1000,\"last_error_ms\":900}'); INSERT INTO subscription_sources(subscription_id,source_id) VALUES('exact','failing'); INSERT INTO subscription_activity(subscription_id,occurred_at_ms,id,document) VALUES('exact',50,'a','{\"successful\":false}'),('exact',200,'b','{\"successful\":false}'),('exact',900,'c','{\"successful\":false}');").execute(&isolated).await.unwrap();
     sqlx::raw_sql(include_str!("../../src/schema/attention.sql"))
         .execute(&isolated)

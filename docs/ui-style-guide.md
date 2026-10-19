@@ -269,3 +269,7 @@ the saved article and scroll position without marking it read or generating AI w
 A single `--topbar-height` owns the fixed 76px desktop / 124px narrow header footprint,
 including when paused or expired. Narrow screens reserve a second timer row, with
 an accessible icon-only return action; no timer state inserts or removes controls.
+
+Age-based automatic reading uses the existing reserved read-provenance slot:
+“Отмечено автоматически · старая статья”. It must never be presented as a reader
+rating or as Mark all read, and changing the label must not move toolbar targets.

@@ -1,5 +1,10 @@
 services:
   proxy:
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     image: caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
     network_mode: host
     environment:
@@ -19,6 +24,11 @@ services:
     tmpfs:
       - /tmp:size=32m,mode=1777
   app:
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     build: .
     stop_grace_period: ${CONTAINER_STOP_GRACE_SECONDS:-720}s
     command: ["--config", "/etc/inoreader/config.yaml", "serve"]
@@ -62,6 +72,11 @@ services:
       - browser-control
       - database
   postgres:
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     image: postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3
     environment:
       POSTGRES_DB: inoreader
@@ -82,6 +97,11 @@ services:
     networks:
       - database
   chromium:
+    logging:
+      driver: json-file
+      options:
+        max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
+        max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
     image: chromedp/headless-shell@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
     command: ["--remote-allow-origins=*"]
     expose: ["9222"]

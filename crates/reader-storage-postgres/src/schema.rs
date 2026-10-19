@@ -334,8 +334,8 @@ pub async fn prepare_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     transaction.commit().await
 }
 
-pub const VERSION: i64 = 19;
-pub const RELEASE: &str = "automatic-terms-once-2026-10-08";
+pub const VERSION: i64 = 20;
+pub const RELEASE: &str = "automatic-read-age-2026-10-17";
 const RELEASE_TABLE: &str = "CREATE TABLE schema_releases(version BIGINT PRIMARY KEY CHECK(version>0),release TEXT NOT NULL,applied_at TIMESTAMPTZ NOT NULL DEFAULT now())";
 
 /// Read-only startup preflight. No listener or worker may start on a different
@@ -383,7 +383,9 @@ pub async fn verify_schema(pool: &PgPool) -> Result<(), sqlx::Error> {
     let read_method: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='article_read_events' AND column_name='method' AND is_nullable='NO' AND column_default IS NULL)").fetch_one(pool).await?;
     let schedule: bool = sqlx::query_scalar("SELECT to_regclass('ai_automatic_schedule') IS NOT NULL AND to_regprocedure('reader_ai_automatic_resume_at(timestamp with time zone)') IS NOT NULL AND to_regprocedure('reader_ai_deferred_until(boolean,timestamp with time zone)') IS NOT NULL").fetch_one(pool).await?;
     let terms_once: bool = sqlx::query_scalar("SELECT to_regprocedure('reader_ai_terms_superseded(uuid)') IS NOT NULL AND to_regclass('ai_definitions_article_prompt') IS NOT NULL AND to_regclass('ai_terms_failures_article_prompt') IS NOT NULL").fetch_one(pool).await?;
-    if !terms_once
+    let automatic_read: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='reading_preferences' AND column_name='auto_read_after_days' AND data_type='integer' AND is_nullable='YES')").fetch_one(pool).await?;
+    if !automatic_read
+        || !terms_once
         || !schedule
         || !read_method
         || !bootstrap
@@ -437,6 +439,7 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
             && previous != (16, "subscription-ai-bootstrap-2026-10-05".into())
             && previous != (17, "reading-session-provenance-2026-10-06".into())
             && previous != (18, "automatic-ai-off-peak-2026-10-08".into())
+            && previous != (19, "automatic-terms-once-2026-10-08".into())
         {
             return Err(sqlx::Error::Protocol(
                 "upgrade requires the preceding schema release".into(),
@@ -500,7 +503,10 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
         if previous.0 < 18 {
             install_automatic_schedule(&mut transaction).await?;
         }
-        install_terms_once(&mut transaction).await?;
+        if previous.0 < 19 {
+            install_terms_once(&mut transaction).await?;
+        }
+        install_automatic_read(&mut transaction).await?;
         sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
             .bind(VERSION)
             .bind(RELEASE)
@@ -550,6 +556,7 @@ pub async fn upgrade_schema(pool: &PgPool, batch: std::num::NonZeroU32) -> Resul
     install_read_provenance(&mut transaction).await?;
     install_automatic_schedule(&mut transaction).await?;
     install_terms_once(&mut transaction).await?;
+    install_automatic_read(&mut transaction).await?;
     sqlx::query("INSERT INTO schema_releases(version,release) VALUES($1,$2)")
         .bind(VERSION)
         .bind(RELEASE)
@@ -602,6 +609,7 @@ async fn execute_schema(transaction: &mut Transaction<'_, Postgres>) -> Result<(
     install_read_provenance(transaction).await?;
     install_automatic_schedule(transaction).await?;
     install_terms_once(transaction).await?;
+    install_automatic_read(transaction).await?;
     sqlx::raw_sql(crate::glossary::schema::SCHEMA)
         .execute(&mut **transaction)
         .await?;
@@ -679,6 +687,13 @@ async fn install_automatic_schedule(tx: &mut Transaction<'_, Postgres>) -> Resul
 
 async fn install_terms_once(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
     sqlx::raw_sql(include_str!("schema/terms_once.sql"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+async fn install_automatic_read(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(include_str!("schema/automatic_read.sql"))
         .execute(&mut **tx)
         .await?;
     Ok(())

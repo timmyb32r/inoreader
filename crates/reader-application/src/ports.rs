@@ -76,6 +76,7 @@ pub enum ReadMethod {
     Reader,
     Single,
     Bulk,
+    AutomaticAge,
     Unknown,
 }
 impl ReadMethod {
@@ -84,6 +85,7 @@ impl ReadMethod {
             Self::Reader => "reader",
             Self::Single => "single",
             Self::Bulk => "bulk",
+            Self::AutomaticAge => "automatic_age",
             Self::Unknown => "unknown",
         }
     }

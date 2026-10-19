@@ -84,3 +84,50 @@ test("keyboard shortcut opens the unified search page", async ({ page }) => {
   await expect(page).toHaveURL(/\/search$/);
   await expect(page.getByRole("searchbox")).toBeVisible();
 });
+
+test("automatic age read provenance keeps reader targets fixed", async ({
+  page,
+}) => {
+  await page.route("**/api/**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    if (response.status() === 204) return route.fulfill({ response });
+    const body = await response.json();
+    if (route.request().method() === "GET") {
+      const stamp = (article: {
+        id?: string;
+        read?: boolean;
+        readMethod?: string;
+      }) => {
+        if (article.id === "2") {
+          article.read = true;
+          article.readMethod = "automatic_age";
+        }
+      };
+      if (body.id) stamp(body);
+      body.articles?.forEach(stamp);
+      body.articlePage?.articles?.forEach(stamp);
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto("/reader");
+  await page
+    .getByRole("heading", {
+      name: "The durable queue is the product",
+      level: 2,
+    })
+    .click();
+  const label = page.getByLabel("Способ чтения");
+  await expect(label).toHaveText("Отмечено автоматически · старая статья");
+  const reader = page.getByRole("article", { name: "Article reader" });
+  const button = reader.getByRole("button", {
+    name: "Read later",
+    exact: true,
+  });
+  const before = await button.boundingBox();
+  await reader
+    .getByRole("button", { name: "Mark unread", exact: true })
+    .click();
+  await expect(label).toHaveText("Не прочитано");
+  expect(await button.boundingBox()).toEqual(before);
+});

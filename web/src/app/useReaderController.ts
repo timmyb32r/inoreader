@@ -303,7 +303,9 @@ export function useReaderController(
   const open = (id: string) => {
     setSelectedId(id);
     writeSelectedArticle(id, workspaceId);
-    update(id, { read: true, readMethod: "single" });
+    const article = articlesRef.current.find((item) => item.id === id);
+    if (article && !article.read)
+      update(id, { read: true, readMethod: "single" });
     onOpenArticle();
   };
   const applyPage = (page: ArticlePage, batch: number) => {

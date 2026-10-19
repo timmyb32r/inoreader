@@ -259,8 +259,38 @@ pub(super) async fn deliver(
             DeliveryResult::Delivered(commit.proposed_article_id),
         ),
     };
+    // Only a first insertion can apply this explicitly selected workspace rule.
+    // Re-delivery, identity changes and user-unread decisions retain their state.
+    let mut automatically_read = false;
+    if matches!(result, DeliveryResult::Delivered(_)) {
+        let days: Option<i32> = sqlx::query_scalar(
+            "SELECT auto_read_after_days FROM reading_preferences WHERE workspace=$1",
+        )
+        .bind(&workspace)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(storage)?
+        .flatten();
+        if let Some(days) = days {
+            if days <= 0 {
+                return Err(StoreError::Unavailable(
+                    "invalid automatic reading age".into(),
+                ));
+            }
+            if record.published_at().is_some_and(|published| {
+                (commit.delivered_at.date_naive() - published.day()).num_days() > i64::from(days)
+            }) {
+                article.state.read = true;
+                automatically_read = true;
+            }
+        }
+    }
     article.attach_origin(record.id());
     upsert_article(&mut tx, &workspace, &article, &dedup_key).await?;
+    if automatically_read {
+        sqlx::query("INSERT INTO article_read_events(workspace_id,article_id,revision,method) VALUES($1,$2,$3,'automatic_age')")
+            .bind(&workspace).bind(article.id.as_uuid().to_string()).bind(i64::try_from(article.revision).map_err(storage)?).execute(&mut *tx).await.map_err(storage)?;
+    }
 
     if !moved_subscriptions.contains(&subscription) {
         moved_subscriptions.push(subscription);

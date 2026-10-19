@@ -317,4 +317,160 @@ pub async fn verify(pool: &PgPool) {
         serde_json::from_str::<serde_json::Value>(&state).unwrap()["incomplete"],
         false
     );
+    // Opt-in affects first delivery only, including a shared public source whose
+    // other owner did not enable the rule.
+    let other_owner = AccountRecord {
+        id: AccountId::new(),
+        username: Uuid::new_v4().to_string(),
+        password_hash: "fixture".into(),
+        admin: false,
+        auth_revision: 0,
+        revision: 0,
+    };
+    let other_workspace =
+        Workspace::new(WorkspaceId::new(), other_owner.id, "Unchanged owner".into());
+    repository
+        .create_account_and_workspace(other_owner, other_workspace.clone())
+        .await
+        .unwrap();
+    let other_subscription = Subscription::new(
+        SubscriptionId::new(),
+        other_workspace.id(),
+        url::Url::parse("https://delivery.example/feed").unwrap(),
+        "Same source".into(),
+    );
+    repository
+        .save_subscription(None, other_subscription.clone())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO reading_preferences(workspace,auto_read_after_days) VALUES($1,30)")
+        .bind(workspace.id().as_uuid().to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    assert!(sqlx::query(
+        "UPDATE reading_preferences SET auto_read_after_days=0 WHERE workspace=$1"
+    )
+    .bind(workspace.id().as_uuid().to_string())
+    .execute(pool)
+    .await
+    .is_err());
+    let delivered_at = chrono::DateTime::parse_from_rfc3339("2026-10-17T12:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    for (n, published, expected) in [
+        (0, Some("2026-09-16T23:59:59Z"), true),
+        (1, Some("2026-09-17T00:00:00Z"), false),
+        (2, Some("2026-10-16"), false),
+        (3, None, false),
+        (4, Some("2027-01-01"), false),
+        (5, Some("2024-06-24"), true),
+    ] {
+        let record: SourceRecord = serde_json::from_value(serde_json::json!({"id":Uuid::new_v4(),"source_id":source,"upstream_id":format!("age-{n}"),"key":{"location":ArticleLocation::from(url::Url::parse(&format!("https://delivery.example/age-{n}")).unwrap()),"title":format!("Age {n}"),"description":null},"feed_content_html":null,"published_at":published,"revision":0})).unwrap();
+        let id = ArticleId::new();
+        let commit = DeliveryCommit {
+            target: DeliveryTarget {
+                workspace_id: workspace.id(),
+                subscription_id: subscription.id(),
+            },
+            record: record.clone(),
+            proposed_article_id: id,
+            delivered_at,
+        };
+        let before_count: u32 = repository
+            .reading_activity(workspace.id(), "UTC")
+            .await
+            .unwrap()
+            .unwrap()
+            .iter()
+            .map(|d| d.count)
+            .sum();
+        store.deliver(&lease, commit.clone()).await.unwrap();
+        let after_count: u32 = repository
+            .reading_activity(workspace.id(), "UTC")
+            .await
+            .unwrap()
+            .unwrap()
+            .iter()
+            .map(|d| d.count)
+            .sum();
+        assert_eq!(
+            after_count, before_count,
+            "automatic marking is not personal reading activity"
+        );
+        let mut article = repository.article(workspace.id(), id).await.unwrap();
+        assert_eq!(article.state.read, expected, "publication {published:?}");
+        let methods: Vec<String> = sqlx::query_scalar(
+            "SELECT method FROM article_read_events WHERE workspace_id=$1 AND article_id=$2",
+        )
+        .bind(workspace.id().as_uuid().to_string())
+        .bind(id.as_uuid().to_string())
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            methods,
+            if expected {
+                vec!["automatic_age".to_string()]
+            } else {
+                vec![]
+            }
+        );
+        if expected {
+            super::ai_bootstrap::admit_fixture(pool, &repository, workspace.id(), id).await;
+            let allowed: bool = sqlx::query_scalar("SELECT reader_ai_automatic_allowed($1,$2,$3)")
+                .bind(owner.id.as_uuid())
+                .bind(workspace.id().as_uuid().to_string())
+                .bind(id.as_uuid().to_string())
+                .fetch_one(pool)
+                .await
+                .unwrap();
+            assert!(
+                !allowed,
+                "automatic age marking prevents automatic AI spending"
+            );
+            let rev = article.revision;
+            article.state.read = false;
+            article.revision += 1;
+            repository
+                .save_article(workspace.id(), Some(rev), article)
+                .await
+                .unwrap();
+            store.deliver(&lease, commit).await.unwrap();
+            assert!(
+                !repository
+                    .article(workspace.id(), id)
+                    .await
+                    .unwrap()
+                    .state
+                    .read,
+                "manual unread survives redelivery"
+            );
+        }
+        let foreign_id = ArticleId::new();
+        store
+            .deliver(
+                &lease,
+                DeliveryCommit {
+                    target: DeliveryTarget {
+                        workspace_id: other_workspace.id(),
+                        subscription_id: other_subscription.id(),
+                    },
+                    record,
+                    proposed_article_id: foreign_id,
+                    delivered_at,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            !repository
+                .article(other_workspace.id(), foreign_id)
+                .await
+                .unwrap()
+                .state
+                .read,
+            "shared-source owner stays independent"
+        );
+    }
 }

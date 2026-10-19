@@ -71,13 +71,15 @@ export function ArticleReader({
   const sourceSubscriptionId = article.subscriptionIds?.[0];
   const readMethodLabel = !article.read
     ? "Не прочитано"
-    : article.readMethod === "bulk"
-      ? "Отмечено через Mark all read"
-      : article.readMethod === "reader"
-        ? "Прочитано в ридере"
-        : article.readMethod === "single"
-          ? "Отмечено отдельно"
-          : "Прочитано · способ неизвестен";
+    : article.readMethod === "automatic_age"
+      ? "Отмечено автоматически · старая статья"
+      : article.readMethod === "bulk"
+        ? "Отмечено через Mark all read"
+        : article.readMethod === "reader"
+          ? "Прочитано в ридере"
+          : article.readMethod === "single"
+            ? "Отмечено отдельно"
+            : "Прочитано · способ неизвестен";
   const sourceMeta = (
     <>
       <span class="source__mark">{article.source.slice(0, 1)}</span>

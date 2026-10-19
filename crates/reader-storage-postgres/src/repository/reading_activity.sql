@@ -21,7 +21,7 @@ WITH bounds AS (
     FROM article_read_events e
     JOIN articles a ON a.workspace_key=e.workspace_id AND a.article_key=e.article_id AND a.is_read
     CROSS JOIN bounds
-    WHERE e.workspace_id=$1 AND occurred_at >= start_at AND occurred_at < end_at
+    WHERE e.workspace_id=$1 AND e.method<>'automatic_age' AND occurred_at >= start_at AND occurred_at < end_at
     GROUP BY 1
 )
 SELECT COALESCE(r.day,a.day), COALESCE(r.count,0), COALESCE(a.arrived,0)

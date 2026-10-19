@@ -662,6 +662,15 @@ pub struct GenerationInput {
 }
 
 impl GenerationInput {
+    /// Discussion continuations start inside the required JSON envelope. Initial
+    /// summaries and factual reviews retain their independent wire protocols.
+    pub(crate) fn discussion_prefix(&self) -> Option<&'static str> {
+        (self.review_draft.is_none()
+            && self.messages.iter().any(|m| {
+                matches!(m.role, MessageRole::User) && m.status == MessageStatus::Complete
+            }))
+        .then_some("{\"segments\":[")
+    }
     pub fn messages_json(&self) -> Result<Vec<serde_json::Value>, AiError> {
         use serde_json::json;
         if let Some(draft) = &self.review_draft {
@@ -680,7 +689,20 @@ impl GenerationInput {
             if message.status != MessageStatus::Complete {
                 continue;
             }
-            messages.push(json!({"role":match message.role { MessageRole::User=>"user",MessageRole::Assistant=>"assistant" },"content":message.content}));
+            let content = match message.role {
+                MessageRole::User => message.content.clone(),
+                // The stored presentation is Markdown; the provider protocol is
+                // JSON. Encode it losslessly instead of teaching plain-text output
+                // through assistant examples in a JSON-only conversation.
+                MessageRole::Assistant => serde_json::to_string(
+                    &json!({"segments":[{"kind":"text","content":message.content}]}),
+                )
+                .map_err(|_| AiError::Protocol)?,
+            };
+            messages.push(json!({"role":match message.role { MessageRole::User=>"user",MessageRole::Assistant=>"assistant" },"content":content}));
+        }
+        if let Some(prefix) = self.discussion_prefix() {
+            messages.push(json!({"role":"assistant","content":prefix,"prefix":true}));
         }
         Ok(messages)
     }

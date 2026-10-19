@@ -41,6 +41,7 @@ describe("article read provenance", () => {
     for (const [readMethod, label] of [
       ["reader", "Прочитано в ридере"],
       ["bulk", "Отмечено через Mark all read"],
+      ["automatic_age", "Отмечено автоматически · старая статья"],
       ["single", "Отмечено отдельно"],
       ["unknown", "способ неизвестен"],
     ] as const) {

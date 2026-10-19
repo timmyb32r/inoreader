@@ -1037,3 +1037,6 @@ fn definitions_request_ignores_fetch_provenance_and_cancellation_preserves_input
     wire["job"]["reason"] = serde_json::json!("");
     assert!(serde_json::from_value::<DefinitionsRecord>(wire).is_err());
 }
+
+#[path = "tests/chat_protocol.rs"]
+mod chat_protocol;

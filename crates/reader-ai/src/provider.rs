@@ -189,7 +189,14 @@ where
     ) -> Result<CompletedGeneration, AiError> {
         input.validate_context()?;
         let messages = input.messages_json()?;
-        let mut body = json!({"model":input.model,"messages":messages,"max_tokens":input.max_output_tokens,"stream":true,"stream_options":{"include_usage":true},"response_format":{"type":"json_object"}});
+        let prefix = input.discussion_prefix();
+        let mut body = json!({"model":input.model,"messages":messages,"max_tokens":input.max_output_tokens,"stream":true,"stream_options":{"include_usage":true}});
+        // Prefix completion supplies the JSON opening for discussions without
+        // invoking JSON mode's documented empty-content failure. Validation of
+        // the completed envelope and source quotations remains mandatory.
+        if prefix.is_none() {
+            body["response_format"] = json!({"type":"json_object"});
+        }
         match input.generation_mode {
             GenerationMode::Standard { temperature } => {
                 body["temperature"] = json!(temperature.value());
@@ -203,8 +210,13 @@ where
         progress.check_active().await?;
         let started = Instant::now();
         let mut cancel = tokio::time::interval(self.cancellation_poll);
+        let path = if prefix.is_some() {
+            "/beta/chat/completions"
+        } else {
+            "/chat/completions"
+        };
         let opening = self.http.execute_stream(
-            request("/chat/completions", key, Some(body))?,
+            request(path, key, Some(body))?,
             "deepseek",
             "chat_completion",
         );
@@ -217,6 +229,9 @@ where
         };
         check_status(response.status)?;
         let mut parser = VerifiedSegments::new(&input.article.text, input.max_response_bytes);
+        if let Some(prefix) = prefix {
+            parser.push(prefix)?;
+        }
         let mut review_raw = String::new();
         let mut pending = Vec::new();
         let mut data = String::new();
