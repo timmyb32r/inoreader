@@ -82,6 +82,12 @@ new password hash.
 records for external requests. `external_request_metrics` is mandatory in v1
 and must remain `true`; completion logging remains enabled independently.
 
+Caddy adds `Strict-Transport-Security: max-age=31536000` to HTTPS responses.
+This host-only policy lasts one year after receipt. It does not opt into preload
+or extend the policy to child subdomains. HTTP still redirects to HTTPS; HSTS
+makes a browser use HTTPS directly after it has received the policy. Validate
+and reload Caddy after editing `Caddyfile`, then check the public HTTPS headers.
+
 TLS terminates at the Caddy reverse proxy in `compose.yaml`. Set
 `EXTERNAL_HOST` in `.env` to the same DNS name as `server.external_origin`.
 Caddy obtains and renews its certificate; ports 80 and 443 must be reachable

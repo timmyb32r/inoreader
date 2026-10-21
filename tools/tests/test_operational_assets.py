@@ -21,7 +21,7 @@ class OperationalAssetsTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         files = (
-            "Dockerfile", "compose.yaml", ".dockerignore",
+            "Dockerfile", "compose.yaml", "Caddyfile", ".dockerignore",
             "config.example.yaml", "docs/operations.md", "docs/seed-manifest.schema.json",
             "docs/deepseek-operations.md", "source-inventory/coverage-matrix.json",
             "web/dist/index.html", "web/package-lock.json",
@@ -41,6 +41,15 @@ class OperationalAssetsTest(unittest.TestCase):
         content = path.read_text()
         self.assertIn(before, content)
         path.write_text(content.replace(before, after))
+
+    def test_https_policy_rejects_missing_or_disabled_hsts(self):
+        original = (self.root / "Caddyfile").read_text()
+        self.assertEqual(self.check(), 0)
+        for replacement in ("", 'header Strict-Transport-Security "max-age=0"'):
+            with self.subTest(replacement=replacement):
+                (self.root / "Caddyfile").write_text(original.replace('header Strict-Transport-Security "max-age=31536000"', replacement))
+                self.assertEqual(self.check(), 1)
+        (self.root / "Caddyfile").write_text(original)
 
     def test_app_networks_are_selected_with_postgres_between_app_and_chromium(self):
         self.assertEqual(self.check(), 0)

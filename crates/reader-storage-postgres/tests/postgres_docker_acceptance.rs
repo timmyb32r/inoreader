@@ -88,7 +88,7 @@ mod read_projection;
 mod subscription_deletion;
 
 const POSTGRES_IMAGE: &str =
-    "postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3";
+    "postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(90);
 
 struct PostgresContainer {

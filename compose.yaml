@@ -5,7 +5,7 @@ services:
       options:
         max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
         max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
-    image: caddy@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    image: caddy@sha256:685ae3d7c34d9b5f8caeddc5d14051db7bbd88ff1f5a2fa0c16bd8ca328fb7af
     network_mode: host
     environment:
       EXTERNAL_HOST: ${EXTERNAL_HOST:?set EXTERNAL_HOST to the public DNS name}
@@ -77,7 +77,7 @@ services:
       options:
         max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
         max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
-    image: postgres:17-bookworm@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3
+    image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
     environment:
       POSTGRES_DB: inoreader
       POSTGRES_USER: inoreader
@@ -102,7 +102,7 @@ services:
       options:
         max-size: ${CONTAINER_LOG_MAX_SIZE:-50m}
         max-file: "${CONTAINER_LOG_MAX_FILES:-3}"
-    image: chromedp/headless-shell@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
+    image: chromedp/headless-shell@sha256:3da74b0945e4f80f00f0310bcda9f76cee283539ebd200a053a7bebf3de89423
     command: ["--remote-allow-origins=*"]
     expose: ["9222"]
     healthcheck:

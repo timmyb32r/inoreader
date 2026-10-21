@@ -16,6 +16,7 @@ def main() -> int:
     required = (
         "Dockerfile",
         "compose.yaml",
+        "Caddyfile",
         "config.example.yaml",
         "docs/operations.md",
         "docs/seed-manifest.schema.json",
@@ -33,6 +34,10 @@ def main() -> int:
     for expected in ("npm ci", "npm run build", "cargo build --locked --release -p inoreader"):
         if expected not in dockerfile:
             failures.append(f"Dockerfile does not contain {expected!r}")
+    caddy_path = ROOT / "Caddyfile"
+    caddy = caddy_path.read_text(encoding="utf-8") if caddy_path.is_file() else ""
+    if not re.search(r'(?mi)^\s*header\s+Strict-Transport-Security\s+"max-age=([1-9][0-9]*)(?:;[^"\n]*)?"\s*$', caddy):
+        failures.append("Caddy HTTPS responses must enable HSTS with a positive max-age")
     compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
     if 'command: ["/usr/local/bin/inoreader"' in compose:
         failures.append("Compose command must not repeat the Dockerfile ENTRYPOINT")
